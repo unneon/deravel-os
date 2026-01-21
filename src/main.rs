@@ -37,6 +37,19 @@ fn main() -> ! {
 
     sbi::console_writeln!("\n\nHello World!");
 
+    let version = sbi::sbi_get_spec_version();
+    let version_major = version.major();
+    let version_minor = version.minor();
+    let impl_id = sbi::sbi_get_impl_id();
+    let impl_id_number = impl_id.number();
+    let impl_name = impl_id.name().unwrap_or("<unknown>");
+    let impl_version = sbi::sbi_get_impl_version();
+    sbi::console_writeln!(
+        "SBI version: {version_major}.{version_minor}
+SBI implementation: {impl_name} [{impl_id_number}]
+SBI implementation version: {impl_version}",
+    );
+
     loop {
         unsafe { asm!("wfi") }
     }
