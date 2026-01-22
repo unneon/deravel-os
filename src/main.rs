@@ -36,7 +36,7 @@ fn main() -> ! {
     clear_bss();
     register_trap_handler();
     log_sbi_metadata();
-    sbi::system_reset(ResetType::Shutdown, ResetReason::NoReason).unwrap();
+    sbi::system_reset(ResetType::Shutdown, ResetReason::NoReason).unwrap()
 }
 
 // TODO: Is zeroing bss necessary? How does Rust handle bss and rodata initialization for this target?

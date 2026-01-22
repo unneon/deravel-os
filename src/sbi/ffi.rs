@@ -46,6 +46,12 @@ impl FromSbiret for Result<usize, Error> {
     }
 }
 
+impl FromSbiret for Result<(), Error> {
+    fn from_sbiret(error: isize, _: usize) -> Self {
+        unsafe { transmute::<isize, Result<(), Error>>(error) }
+    }
+}
+
 impl FromSbiret for Result<!, Error> {
     fn from_sbiret(error: isize, _: usize) -> Self {
         Err(unsafe { transmute::<isize, Error>(error) })
@@ -70,6 +76,9 @@ functions! {
 
     #[eid = 0x4442434E, fid = 1]
     pub fn sbi_debug_console_read(num_bytes: usize, base_addr_lo: usize, base_addr_hi: usize) -> Result<usize, Error>;
+
+    #[eid = 0x4442434E, fid = 2]
+    pub fn sbi_debug_console_write_byte(byte: u8) -> Result<(), Error>;
 
     #[eid = 0x53525354, fid = 0]
     pub fn sbi_system_reset(reset_type: u32, reset_reason: u32) -> Result<!, Error>;

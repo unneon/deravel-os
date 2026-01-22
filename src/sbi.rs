@@ -186,6 +186,19 @@ pub fn debug_console_read(bytes: &mut [u8]) -> Result<usize, Error> {
     ffi::sbi_debug_console_read(bytes.len(), bytes.as_ptr() as usize, 0)
 }
 
+/// Write a single byte to the debug console.
+///
+/// This is a blocking SBI call and it will only return after writing the specified byte to the debug console.
+///
+/// | Error code | Description |
+/// | ---------- | ----------- |
+/// | [`Denied`] | Write to the debug console is not allowed. |
+/// | [`Failed`] | Failed to write the byte due to I/O errors. |
+#[allow(dead_code)]
+pub fn debug_console_write_byte(byte: u8) -> Result<(), Error> {
+    ffi::sbi_debug_console_write_byte(byte)
+}
+
 /// Reset the system based on provided [`ResetType`] and [`ResetReason`].
 ///
 /// This is a synchronous call.
