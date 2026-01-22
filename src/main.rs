@@ -1,5 +1,4 @@
 #![feature(decl_macro)]
-#![feature(rustc_attrs)]
 #![feature(slice_from_ptr_range)]
 #![feature(abi_riscv_interrupt)]
 #![allow(internal_features)]

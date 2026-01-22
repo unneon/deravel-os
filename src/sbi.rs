@@ -4,6 +4,7 @@ pub macro console_writeln($($arg:tt)*) {
     core::fmt::write(&mut crate::sbi::Console, format_args!("{}\n", format_args!($($arg)*))).unwrap()
 }
 
+#[doc(hidden)]
 pub struct Console;
 
 pub struct ImplId(usize);
@@ -46,8 +47,11 @@ impl SpecVersion {
 
 impl core::fmt::Write for Console {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        for byte in s.bytes() {
-            ffi::sbi_console_putchar(byte as u64).map_err(|_| core::fmt::Error)?;
+        let mut to_write = s.as_bytes();
+        while !to_write.is_empty() {
+            let written = ffi::sbi_debug_console_write(to_write.len(), s.as_ptr() as usize, 0)
+                .map_err(|_| core::fmt::Error)?;
+            to_write = &to_write[written..];
         }
         Ok(())
     }
@@ -73,14 +77,16 @@ pub fn get_spec_version() -> SpecVersion {
     SpecVersion(ffi::sbi_get_spec_version() as u32)
 }
 
-/// Returns the current SBI implementation ID, which is different for every SBI implementation. It is intended
-/// that this implementation ID allows software to probe for SBI implementation quirks.
+/// Returns the current SBI implementation ID.
+///
+/// It is intended that this implementation ID allows software to probe for SBI implementation quirks.
 pub fn get_impl_id() -> ImplId {
     ImplId(ffi::sbi_get_impl_id())
 }
 
-/// Returns the current SBI implementation version. The encoding of this version number is specific to the
-/// SBI implementation.
+/// Returns the current SBI implementation version.
+///
+/// The encoding of this version number is specific to the SBI implementation.
 pub fn get_impl_version() -> usize {
     ffi::sbi_get_impl_version()
 }
