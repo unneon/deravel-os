@@ -23,10 +23,9 @@ unsafe extern "C" {
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
 unsafe extern "C" fn boot() -> ! {
-    naked_asm!("
-        la sp, {stack_top}
-        j {main}
-    ",
+    naked_asm!(
+        "la sp, {stack_top}",
+        "j {main}",
         stack_top = sym stack_top,
         main = sym main,
     )
