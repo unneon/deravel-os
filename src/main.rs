@@ -1,6 +1,7 @@
 #![feature(decl_macro)]
 #![feature(rustc_attrs)]
 #![feature(slice_from_ptr_range)]
+#![feature(abi_riscv_interrupt)]
 #![allow(internal_features)]
 #![no_std]
 #![no_main]
@@ -9,6 +10,8 @@ mod sbi;
 
 use core::arch::{asm, naked_asm};
 use core::panic::PanicInfo;
+use riscv::interrupt::supervisor::{Exception, Interrupt};
+use riscv::register::stvec::{Stvec, TrapMode};
 
 unsafe extern "C" {
     static mut bss_start: u8;
@@ -51,9 +54,28 @@ fn main() -> ! {
 SBI implementation: {impl_name} [{impl_id_number}] v{impl_version}",
     );
 
+    unsafe {
+        riscv::register::stvec::write(Stvec::new(
+            trap_handler as *const () as usize,
+            TrapMode::Direct,
+        ))
+    };
+
     loop {
         unsafe { asm!("wfi") }
     }
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "riscv-interrupt-s" fn trap_handler() {
+    unsafe { asm!(".align 4") }
+    let scause = riscv::register::scause::read()
+        .cause()
+        .try_into::<Interrupt, Exception>()
+        .unwrap();
+    let stval = riscv::register::stval::read();
+    let user_pc = riscv::register::sepc::read();
+    panic!("unexpected trap scause={scause:?} stval={stval:#x} user_pc={user_pc:#x}");
 }
 
 #[panic_handler]

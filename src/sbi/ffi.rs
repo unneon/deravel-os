@@ -49,6 +49,7 @@ trait FromSbiret {
     rustc_layout_scalar_valid_range_end(0xffff_ffff_ffff_ffff)
 )]
 #[repr(transparent)]
+#[derive(Debug)]
 pub struct NegativeError {
     error: isize,
 }

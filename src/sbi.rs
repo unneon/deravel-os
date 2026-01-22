@@ -1,4 +1,4 @@
-mod ffi;
+pub mod ffi;
 
 pub macro console_writeln($($arg:tt)*) {
     core::fmt::write(&mut crate::sbi::Console, format_args!("{}\n", format_args!($($arg)*))).unwrap()
