@@ -1,4 +1,7 @@
-pub mod ffi;
+mod ffi;
+
+#[cfg(doc)]
+use Error::*;
 
 pub macro console_writeln($($arg:tt)*) {
     core::fmt::write(&mut crate::sbi::Console, format_args!("{}\n", format_args!($($arg)*))).unwrap()
@@ -7,7 +10,61 @@ pub macro console_writeln($($arg:tt)*) {
 #[doc(hidden)]
 pub struct Console;
 
+#[allow(dead_code)]
+#[derive(Debug)]
+#[repr(isize)]
+pub enum Error {
+    /// Failed.
+    Failed = -1,
+    /// Not supported.
+    NotSupported = -2,
+    /// Invalid parameter(s).
+    InvalidParam = -3,
+    /// Denied or not allowed.
+    Denied = -4,
+    /// Invalid address(s).
+    InvalidAddress = -5,
+    /// Already available.
+    AlreadyAvailable = -6,
+    /// Already started.
+    AlreadyStarted = -7,
+    /// Already stopped.
+    AlreadyStopped = -8,
+    /// Shared memory not available.
+    NoShmem = -9,
+    /// Invalid state.
+    InvalidState = -10,
+    /// Bad (or invalid) range.
+    BadRange = -11,
+    /// Failed due to timeout.
+    Timeout = -12,
+    /// Input/Output error.
+    Io = -13,
+    /// Denied or not allowed due to lock status.
+    DeniedLocked = -14,
+}
+
 pub struct ImplId(usize);
+
+#[allow(dead_code)]
+#[repr(u32)]
+pub enum ResetType {
+    /// Power down of the entire system.
+    Shutdown = 0,
+    /// Power cycle of the entire system.
+    ColdReboot = 1,
+    /// Power cycle of the main processor and parts of the system, but not the entire system.
+    ///
+    /// For example, on a server class system with a BMC (board management controller), a warm reboot will not power cycle the BMC.
+    WarmReboot = 2,
+}
+
+#[allow(dead_code)]
+#[repr(u32)]
+pub enum ResetReason {
+    NoReason = 0,
+    SystemFailure = 1,
+}
 
 pub struct SpecVersion(u32);
 
@@ -49,8 +106,7 @@ impl core::fmt::Write for Console {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         let mut to_write = s.as_bytes();
         while !to_write.is_empty() {
-            let written = ffi::sbi_debug_console_write(to_write.len(), s.as_ptr() as usize, 0)
-                .map_err(|_| core::fmt::Error)?;
+            let written = debug_console_write(to_write).map_err(|_| core::fmt::Error)?;
             to_write = &to_write[written..];
         }
         Ok(())
@@ -89,4 +145,37 @@ pub fn get_impl_id() -> ImplId {
 /// The encoding of this version number is specific to the SBI implementation.
 pub fn get_impl_version() -> usize {
     ffi::sbi_get_impl_version()
+}
+
+/// Write bytes to the debug console from input memory.
+///
+/// This is a non-blocking SBI call and it may do partial/no writes if the debug console is not able to accept
+/// more bytes.
+///
+/// The number of bytes written is returned.
+/// | Error code | Description |
+/// | ---------- | ----------- |
+/// | [`InvalidParam`] | The memory pointed to does not satisfy the requirements. |
+/// | [`Denied`] | Writes to the debug console is not allowed. |
+/// | [`Failed`] | Failed to write due to I/O errors. |
+pub fn debug_console_write(bytes: &[u8]) -> Result<usize, Error> {
+    ffi::sbi_debug_console_write(bytes.len(), bytes.as_ptr() as usize, 0)
+}
+
+/// Reset the system based on provided [`ResetType`] and [`ResetReason`].
+///
+/// This is a synchronous call.
+///
+/// When supervisor software is running natively, the SBI implementation is provided by machine mode
+/// firmware. When supervisor software is running inside a virtual machine, the SBI implementation is provided by a
+/// hypervisor. [Shutdown](ResetType::Shutdown), [cold reboot](ResetType::ColdReboot) and [warm reboot](ResetType::WarmReboot) will behave functionally the same as the native case,
+/// but might not result in any physical power changes.
+///
+/// | Error code | Description |
+/// | ---------- | ----------- |
+/// | [`InvalidParam`] | At least one of `reset_type` or `reset_reason` is reserved or is platform-specific and unimplemented. |
+/// | [`NotSupported`] | `reset_type` is not reserved and is implemented, but the platform does not support it due to one or more missing dependencies. |
+/// | [`Failed`] | The reset request failed for unspecified or unknown other reasons. |
+pub fn system_reset(type_: ResetType, reason: ResetReason) -> Result<!, Error> {
+    ffi::sbi_system_reset(type_ as u32, reason as u32)
 }

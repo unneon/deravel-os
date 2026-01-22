@@ -1,12 +1,14 @@
-#![feature(decl_macro)]
-#![feature(slice_from_ptr_range)]
 #![feature(abi_riscv_interrupt)]
+#![feature(decl_macro)]
+#![feature(never_type)]
+#![feature(slice_from_ptr_range)]
 #![allow(internal_features)]
 #![no_std]
 #![no_main]
 
 mod sbi;
 
+use crate::sbi::{ResetReason, ResetType};
 use core::arch::{asm, naked_asm};
 use core::panic::PanicInfo;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
@@ -34,10 +36,7 @@ fn main() -> ! {
     clear_bss();
     register_trap_handler();
     log_sbi_metadata();
-
-    loop {
-        riscv::asm::wfi()
-    }
+    sbi::system_reset(ResetType::Shutdown, ResetReason::NoReason).unwrap();
 }
 
 // TODO: Is zeroing bss necessary? How does Rust handle bss and rodata initialization for this target?
