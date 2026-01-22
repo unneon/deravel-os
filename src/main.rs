@@ -19,10 +19,6 @@ unsafe extern "C" {
     static mut stack_top: u8;
 }
 
-unsafe fn bss() -> &'static mut [u8] {
-    unsafe { core::slice::from_mut_ptr_range(&raw mut bss_start..&raw mut bss_end) }
-}
-
 #[unsafe(link_section = ".text.boot")]
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
@@ -37,33 +33,33 @@ unsafe extern "C" fn boot() -> ! {
 }
 
 fn main() -> ! {
-    // TODO: Is zeroing bss here necessary? How does Rust handle bss and rodata initialization for this target?
-    unsafe { bss() }.fill(0);
-
-    sbi::console_writeln!("\n\nHello World!");
+    clear_bss();
+    register_trap_handler();
 
     let version = sbi::get_spec_version();
     let version_major = version.major();
     let version_minor = version.minor();
+    sbi::console_writeln!("SBI version: {version_major}.{version_minor}");
     let impl_id = sbi::get_impl_id();
     let impl_id_number = impl_id.number();
     let impl_name = impl_id.name().unwrap_or("<unknown>");
     let impl_version = sbi::get_impl_version();
-    sbi::console_writeln!(
-        "SBI version: {version_major}.{version_minor}
-SBI implementation: {impl_name} [{impl_id_number}] v{impl_version}",
-    );
-
-    unsafe {
-        riscv::register::stvec::write(Stvec::new(
-            trap_handler as *const () as usize,
-            TrapMode::Direct,
-        ))
-    };
+    sbi::console_writeln!("SBI implementation: {impl_name} (id {impl_id_number}, v{impl_version})");
 
     loop {
-        unsafe { asm!("wfi") }
+        riscv::asm::wfi()
     }
+}
+
+// TODO: Is zeroing bss necessary? How does Rust handle bss and rodata initialization for this target?
+fn clear_bss() {
+    let bss = unsafe { core::slice::from_mut_ptr_range(&raw mut bss_start..&raw mut bss_end) };
+    bss.fill(0);
+}
+
+fn register_trap_handler() {
+    let address = trap_handler as *const () as usize;
+    unsafe { riscv::register::stvec::write(Stvec::new(address, TrapMode::Direct)) }
 }
 
 #[unsafe(no_mangle)]

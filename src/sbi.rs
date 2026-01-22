@@ -11,7 +11,6 @@ pub struct ImplId(usize);
 pub struct SpecVersion(u32);
 
 impl ImplId {
-    #[allow(dead_code)]
     pub fn number(&self) -> usize {
         self.0
     }

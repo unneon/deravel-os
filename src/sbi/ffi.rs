@@ -3,7 +3,6 @@ use core::mem::transmute;
 
 macro function {
     (#[eid = $eid:expr, fid = $fid:expr] $(#[$($docs:tt)*])* $name:ident () $ret:ty) => {
-        #[allow(dead_code)]
         $(#[$($docs)*])*
         pub fn $name() -> $ret {
             let error: isize;
@@ -13,7 +12,6 @@ macro function {
         }
     },
     (#[legacy, eid = $eid:expr] $(#[$($docs:tt)*])* $name:ident ($arg0:ident : $arg0type:ty) $ret:ty) => {
-        #[allow(dead_code)]
         $(#[$($docs)*])*
         pub fn $name($arg0: $arg0type) -> $ret {
             let error: isize;
