@@ -1,4 +1,5 @@
 #![feature(abi_riscv_interrupt)]
+#![feature(adt_const_params)]
 #![feature(decl_macro)]
 #![feature(never_type)]
 #![feature(slice_from_ptr_range)]
@@ -7,8 +8,10 @@
 #![no_main]
 
 mod sbi;
+mod virtio;
 
 use crate::sbi::{ResetReason, ResetType};
+use crate::virtio::virtio_blk_initialize;
 use core::arch::{asm, naked_asm};
 use core::panic::PanicInfo;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
@@ -36,6 +39,7 @@ fn main() -> ! {
     clear_bss();
     register_trap_handler();
     log_sbi_metadata();
+    virtio_blk_initialize();
     sbi::system_reset(ResetType::Shutdown, ResetReason::NoReason).unwrap()
 }
 
@@ -56,6 +60,7 @@ fn log_sbi_metadata() {
     let impl_id = sbi::get_impl_id();
     let impl_version = sbi::get_impl_version();
     sbi::console_writeln!("SBI implementation: {impl_id}, version {impl_version}");
+    sbi::console_writeln!("");
 }
 
 #[unsafe(no_mangle)]
