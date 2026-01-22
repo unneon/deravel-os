@@ -35,16 +35,7 @@ unsafe extern "C" fn boot() -> ! {
 fn main() -> ! {
     clear_bss();
     register_trap_handler();
-
-    let version = sbi::get_spec_version();
-    let version_major = version.major();
-    let version_minor = version.minor();
-    sbi::console_writeln!("SBI version: {version_major}.{version_minor}");
-    let impl_id = sbi::get_impl_id();
-    let impl_id_number = impl_id.number();
-    let impl_name = impl_id.name().unwrap_or("<unknown>");
-    let impl_version = sbi::get_impl_version();
-    sbi::console_writeln!("SBI implementation: {impl_name} (id {impl_id_number}, v{impl_version})");
+    log_sbi_metadata();
 
     loop {
         riscv::asm::wfi()
@@ -60,6 +51,14 @@ fn clear_bss() {
 fn register_trap_handler() {
     let address = trap_handler as *const () as usize;
     unsafe { riscv::register::stvec::write(Stvec::new(address, TrapMode::Direct)) }
+}
+
+fn log_sbi_metadata() {
+    let spec_version = sbi::get_spec_version();
+    sbi::console_writeln!("SBI specification version: {spec_version}");
+    let impl_id = sbi::get_impl_id();
+    let impl_version = sbi::get_impl_version();
+    sbi::console_writeln!("SBI implementation: {impl_id}, version {impl_version}");
 }
 
 #[unsafe(no_mangle)]

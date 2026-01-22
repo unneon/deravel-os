@@ -53,6 +53,21 @@ impl core::fmt::Write for Console {
     }
 }
 
+impl core::fmt::Display for ImplId {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        match self.name() {
+            Some(name) => write!(f, "{name}"),
+            None => write!(f, "<unknown id={}>", self.number()),
+        }
+    }
+}
+
+impl core::fmt::Display for SpecVersion {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        write!(f, "{}.{}", self.major(), self.minor())
+    }
+}
+
 /// Returns the current SBI specification version.
 pub fn get_spec_version() -> SpecVersion {
     SpecVersion(ffi::sbi_get_spec_version() as u32)
