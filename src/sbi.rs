@@ -147,6 +147,12 @@ pub fn get_impl_version() -> usize {
     ffi::sbi_get_impl_version()
 }
 
+/// Returns if the given SBI extension ID (EID) is available.
+#[allow(dead_code)]
+pub fn probe_extension(extension_id: usize) -> bool {
+    ffi::sbi_probe_extension(extension_id) != 0
+}
+
 /// Write bytes to the debug console from input memory.
 ///
 /// This is a non-blocking SBI call and it may do partial/no writes if the debug console is not able to accept

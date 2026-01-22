@@ -62,6 +62,9 @@ functions! {
     #[eid = 0x10, fid = 2]
     pub fn sbi_get_impl_version() -> usize;
 
+    #[eid = 0x10, fid = 3]
+    pub fn sbi_probe_extension(extension_id: usize) -> usize;
+
     #[eid = 0x4442434E, fid = 0]
     pub fn sbi_debug_console_write(num_bytes: usize, base_addr_lo: usize, base_addr_hi: usize) -> Result<usize, Error>;
 
