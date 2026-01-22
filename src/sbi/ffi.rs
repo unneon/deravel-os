@@ -65,6 +65,9 @@ functions! {
     #[eid = 0x4442434E, fid = 0]
     pub fn sbi_debug_console_write(num_bytes: usize, base_addr_lo: usize, base_addr_hi: usize) -> Result<usize, Error>;
 
+    #[eid = 0x4442434E, fid = 1]
+    pub fn sbi_debug_console_read(num_bytes: usize, base_addr_lo: usize, base_addr_hi: usize) -> Result<usize, Error>;
+
     #[eid = 0x53525354, fid = 0]
     pub fn sbi_system_reset(reset_type: u32, reset_reason: u32) -> Result<!, Error>;
 }

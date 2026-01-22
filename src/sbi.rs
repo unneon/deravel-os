@@ -153,13 +153,31 @@ pub fn get_impl_version() -> usize {
 /// more bytes.
 ///
 /// The number of bytes written is returned.
+///
 /// | Error code | Description |
 /// | ---------- | ----------- |
-/// | [`InvalidParam`] | The memory pointed to does not satisfy the requirements. |
+/// | [`InvalidParam`] | The memory pointed to by the `bytes` parameter does not satisfy the requirements. |
 /// | [`Denied`] | Writes to the debug console is not allowed. |
 /// | [`Failed`] | Failed to write due to I/O errors. |
 pub fn debug_console_write(bytes: &[u8]) -> Result<usize, Error> {
     ffi::sbi_debug_console_write(bytes.len(), bytes.as_ptr() as usize, 0)
+}
+
+/// Read bytes from the debug console into an output memory.
+///
+/// This is a non-blocking SBI call and it will not write anything into the output memory if there are no bytes
+/// to be read in the debug console.
+///
+/// The number of bytes read is returned.
+///
+/// | Error code | Description |
+/// | ---------- | ----------- |
+/// | [`InvalidParam`] | The memory pointed to by the `bytes` parameter does not satisfy the requirements. |
+/// | [`Denied`] | Reads from the debug console is not allowed. |
+/// | [`Failed`] | Failed to read due to I/O errors. |
+#[allow(dead_code)]
+pub fn debug_console_read(bytes: &mut [u8]) -> Result<usize, Error> {
+    ffi::sbi_debug_console_read(bytes.len(), bytes.as_ptr() as usize, 0)
 }
 
 /// Reset the system based on provided [`ResetType`] and [`ResetReason`].
