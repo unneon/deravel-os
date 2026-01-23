@@ -95,12 +95,31 @@ struct UdpHeader {
 }
 
 #[repr(C, packed)]
+struct DnsHeader {
+    id: u16,
+    qr_opcode_aa_tc_rd: u8,
+    ra_z_rcode: u8,
+    qdcount: u16,
+    ancount: u16,
+    nscount: u16,
+    ar_count: u16,
+}
+
+#[repr(C, packed)]
+struct DnsQuery {
+    url: [u8; 12],
+    qtype: u16,
+    qclass: u16,
+}
+
+#[repr(C, packed)]
 struct Packet {
     virtio_net: VirtioNetHeader,
     ethernet: EthernetHeader,
     ip: IpHeader,
     udp: UdpHeader,
-    data: [u8; 6],
+    dns: DnsHeader,
+    dns_query: DnsQuery,
 }
 
 impl IpHeader {
@@ -185,8 +204,12 @@ fn initialize_device(regs: &LegacyMmioDeviceRegisters) {
         size_of::<UdpHeader>()
     );
     sbi::console_writeln!(
-        "net: DEBUG              data size: {}",
-        size_of::<[u8; 6]>()
+        "net: DEBUG               dns size: {}",
+        size_of::<DnsHeader>()
+    );
+    sbi::console_writeln!(
+        "net: DEBUG         dns query size: {}",
+        size_of::<DnsQuery>()
     );
     sbi::console_writeln!("net: DEBUG            packet size: {}", size_of::<Packet>());
     let mut packet: Packet = unsafe { core::mem::zeroed() };
@@ -197,7 +220,7 @@ fn initialize_device(regs: &LegacyMmioDeviceRegisters) {
     packet.ethernet.mac_source = mac_address;
     packet.ethernet.ethertype = u16::to_be(0x0800);
     packet.ip.version_and_ihl = (4 << 4) | 5;
-    packet.ip.total_length = u16::to_be(20 + 8 + 6);
+    packet.ip.total_length = u16::to_be(20 + 8 + 12 + 16);
     packet.ip.time_to_live = 64;
     packet.ip.protocol = 17;
     packet.ip.source_address = [10, 0, 2, 15];
@@ -205,8 +228,14 @@ fn initialize_device(regs: &LegacyMmioDeviceRegisters) {
     packet.ip.compute_checksum();
     packet.udp.source_port = u16::to_be(1024);
     packet.udp.destination_port = u16::to_be(53);
-    packet.udp.length = u16::to_be(8 + 6);
+    packet.udp.length = u16::to_be(8 + 12 + 16);
     packet.udp.compute_partial_checksum();
+    packet.dns.qdcount = u16::to_be(1);
+    packet.dns_query.url = [
+        6, b'g', b'o', b'o', b'g', b'l', b'e', 3, b'c', b'o', b'm', b'\0',
+    ];
+    packet.dns_query.qtype = u16::to_be(1);
+    packet.dns_query.qclass = u16::to_be(1);
 
     #[allow(static_mut_refs)]
     let transmit_queue = unsafe { &mut TRANSMIT_QUEUE.0 };
@@ -219,6 +248,17 @@ fn initialize_device(regs: &LegacyMmioDeviceRegisters) {
     regs.set_queue_notify(1);
 
     while is_transmit_busy(1) {}
+
+    loop {
+        sbi::console_writeln!(
+            "tx used.index={}, rx used.index={}",
+            unsafe { (&raw const TRANSMIT_QUEUE.0.used.index).read_volatile() },
+            unsafe { (&raw const RECEIVE_QUEUE.0.used.index).read_volatile() }
+        );
+        for _ in 0..1_000_000_000 {
+            riscv::asm::nop();
+        }
+    }
 }
 
 fn initialize_queue(
