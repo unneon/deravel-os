@@ -11,11 +11,16 @@ mod sbi;
 mod virtio;
 
 use crate::sbi::{ResetReason, ResetType};
-use crate::virtio::virtio_blk_initialize;
+use crate::virtio::VirtioBlk;
 use core::arch::{asm, naked_asm};
 use core::panic::PanicInfo;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
 use riscv::register::stvec::{Stvec, TrapMode};
+
+#[repr(align(4096))]
+struct PageAligned<T>(T);
+
+const PAGE_SIZE: usize = 4096;
 
 unsafe extern "C" {
     static mut bss_start: u8;
@@ -39,11 +44,15 @@ fn main() -> ! {
     clear_bss();
     register_trap_handler();
     log_sbi_metadata();
-    virtio_blk_initialize();
+    let mut virtio_blk = VirtioBlk::new(0x1000_1000);
+
+    let mut buf = [0; 512];
+    virtio_blk.read(0, &mut buf).unwrap();
+    sbi::console_writeln!("read from disk: {:?}", str::from_utf8(&buf).unwrap());
+
     sbi::system_reset(ResetType::Shutdown, ResetReason::NoReason).unwrap()
 }
 
-// TODO: Is zeroing bss necessary? How does Rust handle bss and rodata initialization for this target?
 fn clear_bss() {
     let bss = unsafe { core::slice::from_mut_ptr_range(&raw mut bss_start..&raw mut bss_end) };
     bss.fill(0);
@@ -60,7 +69,6 @@ fn log_sbi_metadata() {
     let impl_id = sbi::get_impl_id();
     let impl_version = sbi::get_impl_version();
     sbi::console_writeln!("SBI implementation: {impl_id}, version {impl_version}");
-    sbi::console_writeln!("");
 }
 
 #[unsafe(no_mangle)]
@@ -78,5 +86,6 @@ unsafe extern "riscv-interrupt-s" fn trap_handler() {
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     sbi::console_writeln!("{}", info);
+    let _ = sbi::system_reset(ResetType::Shutdown, ResetReason::SystemFailure);
     loop {}
 }
