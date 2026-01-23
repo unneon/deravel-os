@@ -7,7 +7,7 @@ use crate::virtio::registers::{
 use crate::virtio::structures::{
     Queue, VIRTIO_BLK_T_IN, VIRTIO_BLK_T_OUT, VIRTQ_DESC_F_NEXT, VIRTQ_DESC_F_WRITE,
 };
-use crate::{PAGE_SIZE, PageAligned};
+use crate::{PAGE_SIZE, PageAligned, sbi};
 
 #[repr(C, packed)]
 struct RequestHeader {

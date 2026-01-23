@@ -9,9 +9,11 @@
 
 mod sbi;
 mod virtio;
+mod virtio_net;
 
 use crate::sbi::{ResetReason, ResetType};
 use crate::virtio::VirtioBlk;
+use crate::virtio_net::VirtioNet;
 use core::arch::{asm, naked_asm};
 use core::panic::PanicInfo;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
@@ -45,6 +47,7 @@ fn main() -> ! {
     register_trap_handler();
     log_sbi_metadata();
     let mut virtio_blk = VirtioBlk::new(0x1000_1000);
+    let mut virtio_net = VirtioNet::new(0x1000_2000);
 
     let mut buf = [0; 512];
     virtio_blk.read(0, &mut buf).unwrap();
@@ -55,6 +58,7 @@ fn main() -> ! {
 
 fn clear_bss() {
     let bss = unsafe { core::slice::from_mut_ptr_range(&raw mut bss_start..&raw mut bss_end) };
+    sbi::console_writeln!("bss section is {:#x} bytes long", bss.len());
     bss.fill(0);
 }
 
