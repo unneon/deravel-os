@@ -56,7 +56,7 @@ struct VirtqUsed {
 struct VirtioVirtq {
     descs: [VirtqDesc; VIRTQ_ENTRY_NUM],
     avail: VirtqAvail,
-    _pad0: [u8; 4096 - size_of::<[VirtqAvail; VIRTQ_ENTRY_NUM]>() - size_of::<VirtqAvail>()],
+    _pad0: [u8; 4096 - size_of::<[VirtqDesc; VIRTQ_ENTRY_NUM]>() - size_of::<VirtqAvail>()],
     used: VirtqUsed,
     queue_index: i32,
     used_index: *const u16,
@@ -161,7 +161,7 @@ fn virtq_kick(vq: &mut VirtioVirtq, desc_index: i32, regs: &mut MmioDeviceRegist
 
 #[allow(dead_code)]
 fn virtq_is_busy(vq: &mut VirtioVirtq) -> bool {
-    vq.last_used_index != unsafe { *vq.used_index }
+    vq.last_used_index != unsafe { vq.used_index.read_volatile() }
 }
 
 fn read_write_disk(
@@ -208,7 +208,7 @@ fn read_write_disk(
 
     sbi::console_writeln!("virtio: kick executed");
 
-    // while virtq_is_busy(vq) {}
+    while virtq_is_busy(vq) {}
 
     sbi::console_writeln!("virtio: finished waiting");
 
