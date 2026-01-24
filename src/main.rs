@@ -46,12 +46,14 @@ fn main() -> ! {
     clear_bss();
     register_trap_handler();
     log_sbi_metadata();
-    let mut virtio_blk = VirtioBlk::new(0x1000_1000);
-    let mut virtio_net = VirtioNet::new(0x1000_2000);
 
+    let mut virtio_blk = VirtioBlk::new(0x1000_1000);
     let mut buf = [0; 512];
     virtio_blk.read(0, &mut buf).unwrap();
     sbi::console_writeln!("read from disk: {:?}", str::from_utf8(&buf).unwrap());
+
+    let mut virtio_net = VirtioNet::new(0x1000_2000);
+    virtio_net.arp_handshake();
 
     sbi::system_reset(ResetType::Shutdown, ResetReason::NoReason).unwrap()
 }

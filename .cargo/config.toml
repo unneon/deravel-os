@@ -11,7 +11,7 @@ runner = """qemu-system-riscv64 \
     --no-reboot \
     -drive id=drive0,file=lorem.txt,format=raw,if=none \
     -device virtio-blk-device,drive=drive0,bus=virtio-mmio-bus.0 \
-    -netdev user,id=net0 \
+    -netdev tap,id=net0,ifname=tap0,script=no,downscript=no \
     -device virtio-net-device,netdev=net0,bus=virtio-mmio-bus.1 \
     -object filter-dump,id=f1,netdev=net0,file=dump.dat \
     -kernel"""

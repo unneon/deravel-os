@@ -37,7 +37,4 @@ pub struct Queue {
     pub used: Used,
 }
 
-pub const VIRTIO_BLK_T_IN: u32 = 0;
-pub const VIRTIO_BLK_T_OUT: u32 = 1;
-pub const VIRTQ_DESC_F_NEXT: u16 = 1;
 pub const VIRTQ_DESC_F_WRITE: u16 = 2;
