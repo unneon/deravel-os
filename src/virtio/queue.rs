@@ -39,10 +39,8 @@ pub struct Queue {
     pub used: Used,
 }
 
-pub const VIRTIO_BLK_T_IN: u32 = 0;
-pub const VIRTIO_BLK_T_OUT: u32 = 1;
-pub const VIRTQ_DESC_F_NEXT: u16 = 1;
-pub const VIRTQ_DESC_F_WRITE: u16 = 2;
+const VIRTQ_DESC_F_NEXT: u16 = 1;
+const VIRTQ_DESC_F_WRITE: u16 = 2;
 
 impl Queue {
     pub fn initialize(
@@ -56,6 +54,22 @@ impl Queue {
         regs.set_queue_size(QUEUE_SIZE as u32);
         regs.set_queue_align(PAGE_SIZE as u32);
         regs.set_queue_pfn(((self as *const _ as usize) / PAGE_SIZE) as u32);
+    }
+
+    pub fn descriptor_readonly<T>(&mut self, index: u16, data: &T, next: Option<u16>) {
+        let descriptor = &mut self.descriptors[index as usize];
+        descriptor.address = data as *const T as u64;
+        descriptor.length = size_of::<T>() as u32;
+        descriptor.flags = if next.is_some() { VIRTQ_DESC_F_NEXT } else { 0 };
+        descriptor.next = next.unwrap_or(0);
+    }
+
+    pub fn descriptor_writeonly<T>(&mut self, index: u16, data: &mut T, next: Option<u16>) {
+        let descriptor = &mut self.descriptors[index as usize];
+        descriptor.address = data as *mut T as u64;
+        descriptor.length = size_of::<T>() as u32;
+        descriptor.flags = VIRTQ_DESC_F_WRITE | if next.is_some() { VIRTQ_DESC_F_NEXT } else { 0 };
+        descriptor.next = next.unwrap_or(0);
     }
 
     pub fn send_and_recv(
