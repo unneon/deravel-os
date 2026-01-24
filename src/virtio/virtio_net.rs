@@ -1,23 +1,23 @@
-use crate::net::arp::{ArpHardwareType, ArpOperation, ArpPacket};
-use crate::net::{EtherType, EthernetHeader, MacAddress};
 use crate::page::{PAGE_SIZE, PageAligned};
 use crate::sbi;
 use crate::virtio::queue::Queue;
 use crate::virtio::registers::{
     LegacyMmioDeviceRegisters, STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK,
 };
-use core::net::Ipv4Addr;
+use smoltcp::wire::{
+    ArpHardware, ArpOperation, ArpPacket, EthernetAddress, EthernetFrame, EthernetProtocol,
+    Ipv4Address,
+};
 
 #[repr(C, packed)]
-#[derive(Debug)]
-struct FullArpPacket {
-    virtio_net: Header,
-    ethernet: EthernetHeader,
-    arp: ArpPacket,
+#[derive(Clone, Copy, Debug)]
+struct Packet<T> {
+    header: Header,
+    payload: T,
 }
 
 #[repr(C, packed)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy, Debug, Default)]
 struct Header {
     flags: u8,
     gso_type: u8,
@@ -73,23 +73,28 @@ fn initialize_device(regs: &LegacyMmioDeviceRegisters) {
 }
 
 fn send_arp_request(regs: &LegacyMmioDeviceRegisters) {
-    let mac_address = unsafe { ((regs.base_address + 0x100) as *const MacAddress).read_volatile() };
+    let mac_address: EthernetAddress =
+        unsafe { ((regs.base_address + 0x100) as *const EthernetAddress).read_volatile() };
     sbi::console_writeln!("net: mac address {mac_address}");
 
-    sbi::console_writeln!("net: ARP request has size {}", size_of::<FullArpPacket>());
-    let mut packet: FullArpPacket = unsafe { core::mem::zeroed() };
-    packet.ethernet.mac_destination = MacAddress::BROADCAST;
-    packet.ethernet.mac_source = mac_address;
-    packet.ethernet.ethertype = EtherType::Arp.into();
-    packet.arp.htype = ArpHardwareType::Ethernet.into();
-    packet.arp.ptype = EtherType::IpV4.into();
-    packet.arp.hlen = 6;
-    packet.arp.plen = 4;
-    packet.arp.oper = ArpOperation::Request.into();
-    packet.arp.sender_mac = mac_address;
-    packet.arp.sender_ip = Ipv4Addr::new(192, 168, 100, 2);
-    packet.arp.target_mac = MacAddress([0; 6]);
-    packet.arp.target_ip = Ipv4Addr::new(192, 168, 100, 1);
+    let mut packet = Packet {
+        header: Header::default(),
+        payload: [0; 42],
+    };
+    let mut eth = EthernetFrame::new_unchecked(&mut packet.payload);
+    eth.set_dst_addr(EthernetAddress::BROADCAST);
+    eth.set_src_addr(mac_address);
+    eth.set_ethertype(EthernetProtocol::Arp);
+    let mut arp = ArpPacket::new_unchecked(eth.payload_mut());
+    arp.set_hardware_type(ArpHardware::Ethernet);
+    arp.set_protocol_type(EthernetProtocol::Ipv4);
+    arp.set_hardware_len(6);
+    arp.set_protocol_len(4);
+    arp.set_operation(ArpOperation::Request);
+    arp.set_source_hardware_addr(mac_address.as_bytes());
+    arp.set_source_protocol_addr(&[192, 168, 100, 2]);
+    arp.set_target_hardware_addr(&[0; 6]);
+    arp.set_target_protocol_addr(&[192, 168, 100, 1]);
 
     let transmit_queue = unsafe { &mut *TRANSMIT_QUEUE };
     transmit_queue.descriptor_readonly(0, &packet, None);
@@ -97,11 +102,29 @@ fn send_arp_request(regs: &LegacyMmioDeviceRegisters) {
 }
 
 fn receive_arp_reply(regs: &LegacyMmioDeviceRegisters) {
-    let mut packet: FullArpPacket = unsafe { core::mem::zeroed() };
+    let mut packet: Packet<[u8; 42]> = unsafe { core::mem::zeroed() };
 
     let receive_queue = unsafe { &mut *RECEIVE_QUEUE };
     receive_queue.descriptor_writeonly(0, &mut packet, None);
     receive_queue.send_and_recv(0, 0, regs);
 
-    sbi::console_writeln!("net: received ARP response {packet:#?}");
+    sbi::console_writeln!("net: received virtio... {:?}", packet.header);
+    let eth = EthernetFrame::new_checked(&packet.payload).unwrap();
+    sbi::console_writeln!(
+        "net: received ethernet... dst={} src={} ethtype={}",
+        eth.dst_addr(),
+        eth.src_addr(),
+        eth.ethertype()
+    );
+    let arp = ArpPacket::new_checked(eth.payload()).unwrap();
+    sbi::console_writeln!(
+        "net: received arp htype={:?} ptype={} oper={:?} sh={} sp={} dh={} dp={}",
+        arp.hardware_type(),
+        arp.protocol_type(),
+        arp.operation(),
+        EthernetAddress::from_bytes(arp.source_hardware_addr()),
+        Ipv4Address::from_octets(arp.source_protocol_addr().try_into().unwrap()),
+        EthernetAddress::from_bytes(arp.target_hardware_addr()),
+        Ipv4Address::from_octets(arp.target_protocol_addr().try_into().unwrap()),
+    );
 }

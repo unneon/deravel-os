@@ -8,7 +8,6 @@
 #![no_std]
 #![no_main]
 
-mod net;
 mod page;
 mod sbi;
 mod virtio;
