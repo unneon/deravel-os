@@ -26,7 +26,7 @@ macro register {
 }
 
 pub struct LegacyMmioDeviceRegisters {
-    base_address: usize,
+    pub base_address: usize,
 }
 
 pub const STATUS_ACKNOWLEDGE: u32 = 1;
@@ -41,6 +41,10 @@ impl LegacyMmioDeviceRegisters {
     register!(0x000, u32, read magic_value);
     register!(0x004, u32, read version);
     register!(0x008, u32, read device_id);
+    register!(0x010, u32, read device_features);
+    register!(0x014, u32, write set_device_features_sel);
+    register!(0x020, u32, write set_driver_features);
+    register!(0x024, u32, write set_driver_features_sel);
     register!(0x028, u32, write set_guest_page_size);
     register!(0x030, u32, write set_queue_sel);
     register!(0x034, u32, read queue_size_max);

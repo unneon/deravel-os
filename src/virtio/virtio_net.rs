@@ -1,24 +1,28 @@
-mod registers;
-mod structures;
-
-use crate::virtio_net::registers::{
+use crate::net::{ArpHardwareType, ArpPacket, EtherType, EthernetHeader, MacAddress};
+use crate::virtio::queue::{QUEUE_SIZE, Queue, VIRTQ_DESC_F_WRITE};
+use crate::virtio::registers::{
     LegacyMmioDeviceRegisters, STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK,
-    VIRTIO_NET_F_CSUM, VIRTIO_NET_F_MAC,
 };
-use crate::virtio_net::structures::{Queue, VIRTQ_DESC_F_WRITE};
 use crate::{PAGE_SIZE, PageAligned, sbi};
 use core::net::Ipv4Addr;
-
-#[repr(C, packed)]
-#[derive(Clone, Copy)]
-pub struct MacAddress([u8; 6]);
 
 pub struct VirtioNet {
     regs: LegacyMmioDeviceRegisters,
 }
 
-const QUEUE_SIZE: usize = 16;
-const BROADCAST: MacAddress = MacAddress([0xFF; 6]);
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
+struct Header {
+    flags: u8,
+    gso_type: u8,
+    hdr_len: u16,
+    gso_size: u16,
+    csum_start: u16,
+    csum_offset: u16,
+}
+
+const VIRTIO_NET_F_CSUM: u32 = 1 << 0;
+const VIRTIO_NET_F_MAC: u32 = 1 << 5;
 
 static mut RECEIVE_QUEUE: PageAligned<Queue> = unsafe { core::mem::zeroed() };
 static mut TRANSMIT_QUEUE: PageAligned<Queue> = unsafe { core::mem::zeroed() };
@@ -37,58 +41,10 @@ impl VirtioNet {
     }
 }
 
-impl core::fmt::Display for MacAddress {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(
-            f,
-            "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
-            self.0[0], self.0[1], self.0[2], self.0[3], self.0[4], self.0[5]
-        )
-    }
-}
-impl core::fmt::Debug for MacAddress {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{self}")
-    }
-}
-
-#[repr(C, packed)]
-#[derive(Debug, Clone, Copy)]
-struct VirtioNetHeader {
-    flags: u8,
-    gso_type: u8,
-    hdr_len: u16,
-    gso_size: u16,
-    csum_start: u16,
-    csum_offset: u16,
-}
-
-#[repr(C, packed)]
-#[derive(Debug, Clone, Copy)]
-struct EthernetHeader {
-    mac_destination: MacAddress,
-    mac_source: MacAddress,
-    ethertype: u16,
-}
-
-#[repr(C, packed)]
-#[derive(Debug, Clone, Copy)]
-struct ArpPacket {
-    htype: u16,
-    ptype: u16,
-    hlen: u8,
-    plen: u8,
-    oper: u16,
-    sender_mac: MacAddress,
-    sender_ip: Ipv4Addr,
-    target_mac: MacAddress,
-    target_ip: Ipv4Addr,
-}
-
 #[repr(C, packed)]
 #[derive(Debug)]
 struct Packet {
-    virtio_net: VirtioNetHeader,
+    virtio_net: Header,
     ethernet: EthernetHeader,
     arp: ArpPacket,
 }
@@ -105,7 +61,7 @@ fn initialize_device(regs: &LegacyMmioDeviceRegisters) {
     regs.set_device_features_sel(0);
     assert_ne!(regs.device_features() & VIRTIO_NET_F_MAC, 0);
     sbi::console_writeln!(
-        "net: virtio-net features 0 to 31 are {:#b}",
+        "net: virtio_blk-net features 0 to 31 are {:#b}",
         regs.device_features()
     );
 
@@ -138,14 +94,14 @@ fn send_arp_request(regs: &LegacyMmioDeviceRegisters) {
 
     sbi::console_writeln!("net: ARP request has size {}", size_of::<Packet>());
     let mut packet: Packet = unsafe { core::mem::zeroed() };
-    packet.ethernet.mac_destination = BROADCAST;
+    packet.ethernet.mac_destination = MacAddress::BROADCAST;
     packet.ethernet.mac_source = mac_address;
-    packet.ethernet.ethertype = u16::to_be(0x0806);
-    packet.arp.htype = u16::to_be(1);
-    packet.arp.ptype = u16::to_be(0x0800);
+    packet.ethernet.ethertype = EtherType::Arp.into();
+    packet.arp.htype = ArpHardwareType::Ethernet.into();
+    packet.arp.ptype = EtherType::IpV4.into();
     packet.arp.hlen = 6;
     packet.arp.plen = 4;
-    packet.arp.oper = u16::to_be(1);
+    packet.arp.oper = 1.into();
     packet.arp.sender_mac = mac_address;
     packet.arp.sender_ip = Ipv4Addr::new(192, 168, 100, 2);
     packet.arp.target_mac = MacAddress([0; 6]);

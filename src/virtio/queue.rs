@@ -1,5 +1,6 @@
 use crate::PAGE_SIZE;
-use crate::virtio::QUEUE_SIZE;
+
+pub const QUEUE_SIZE: usize = 16;
 
 #[repr(C, packed)]
 pub struct Descriptor {

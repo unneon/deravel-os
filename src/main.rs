@@ -7,17 +7,17 @@
 #![no_std]
 #![no_main]
 
+mod net;
 mod sbi;
 mod virtio;
-mod virtio_net;
 
 use crate::sbi::{ResetReason, ResetType};
-use crate::virtio::VirtioBlk;
-use crate::virtio_net::VirtioNet;
 use core::arch::{asm, naked_asm};
 use core::panic::PanicInfo;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
 use riscv::register::stvec::{Stvec, TrapMode};
+use virtio::virtio_blk::VirtioBlk;
+use virtio::virtio_net::VirtioNet;
 
 #[repr(align(4096))]
 struct PageAligned<T>(T);
