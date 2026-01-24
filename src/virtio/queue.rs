@@ -64,12 +64,10 @@ impl Queue {
         queue_index: u32,
         regs: &LegacyMmioDeviceRegisters,
     ) {
-        let last_index = self.available.index;
-        let used_index_pointer = &raw const self.available.index;
-        self.available.ring[last_index as usize % QUEUE_SIZE] = descriptor;
+        self.available.ring[self.available.index as usize % QUEUE_SIZE] = descriptor;
         self.available.index += 1;
         riscv::asm::fence();
-        regs.set_queue_sel(queue_index);
-        while unsafe { used_index_pointer.read_volatile() } < last_index + 1 {}
+        regs.set_queue_notify(queue_index);
+        while unsafe { (&raw const self.used.index).read_volatile() } < self.available.index {}
     }
 }
