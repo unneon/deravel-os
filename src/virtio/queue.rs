@@ -1,4 +1,5 @@
-use crate::PAGE_SIZE;
+use crate::page::{PAGE_SIZE, PageAligned};
+use crate::virtio::registers::LegacyMmioDeviceRegisters;
 
 pub const QUEUE_SIZE: usize = 16;
 
@@ -42,3 +43,33 @@ pub const VIRTIO_BLK_T_IN: u32 = 0;
 pub const VIRTIO_BLK_T_OUT: u32 = 1;
 pub const VIRTQ_DESC_F_NEXT: u16 = 1;
 pub const VIRTQ_DESC_F_WRITE: u16 = 2;
+
+impl Queue {
+    pub fn initialize(
+        self: &PageAligned<Self>,
+        queue_index: u32,
+        regs: &LegacyMmioDeviceRegisters,
+    ) {
+        regs.set_queue_sel(queue_index);
+        assert_eq!(regs.queue_pfn(), 0);
+        assert!(QUEUE_SIZE <= regs.queue_size_max() as usize);
+        regs.set_queue_size(QUEUE_SIZE as u32);
+        regs.set_queue_align(PAGE_SIZE as u32);
+        regs.set_queue_pfn(((self as *const _ as usize) / PAGE_SIZE) as u32);
+    }
+
+    pub fn send_and_recv(
+        &mut self,
+        descriptor: u16,
+        queue_index: u32,
+        regs: &LegacyMmioDeviceRegisters,
+    ) {
+        let last_index = self.available.index;
+        let used_index_pointer = &raw const self.available.index;
+        self.available.ring[last_index as usize % QUEUE_SIZE] = descriptor;
+        self.available.index += 1;
+        riscv::asm::fence();
+        regs.set_queue_sel(queue_index);
+        while unsafe { used_index_pointer.read_volatile() } < last_index + 1 {}
+    }
+}

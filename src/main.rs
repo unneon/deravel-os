@@ -1,13 +1,15 @@
 #![feature(abi_riscv_interrupt)]
 #![feature(adt_const_params)]
+#![feature(arbitrary_self_types)]
 #![feature(decl_macro)]
 #![feature(never_type)]
 #![feature(slice_from_ptr_range)]
-#![allow(internal_features)]
+#![allow(static_mut_refs)]
 #![no_std]
 #![no_main]
 
 mod net;
+mod page;
 mod sbi;
 mod virtio;
 
@@ -18,11 +20,6 @@ use riscv::interrupt::supervisor::{Exception, Interrupt};
 use riscv::register::stvec::{Stvec, TrapMode};
 use virtio::virtio_blk::VirtioBlk;
 use virtio::virtio_net::VirtioNet;
-
-#[repr(align(4096))]
-struct PageAligned<T>(T);
-
-const PAGE_SIZE: usize = 4096;
 
 unsafe extern "C" {
     static mut bss_start: u8;

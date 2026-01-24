@@ -1,10 +1,11 @@
 use crate::net::arp::{ArpHardwareType, ArpOperation, ArpPacket};
 use crate::net::{EtherType, EthernetHeader, MacAddress};
+use crate::page::{PAGE_SIZE, PageAligned};
+use crate::sbi;
 use crate::virtio::queue::{QUEUE_SIZE, Queue, VIRTQ_DESC_F_WRITE};
 use crate::virtio::registers::{
     LegacyMmioDeviceRegisters, STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK,
 };
-use crate::{PAGE_SIZE, PageAligned, sbi};
 use core::net::Ipv4Addr;
 
 pub struct VirtioNet {
@@ -71,11 +72,10 @@ fn initialize_device(regs: &LegacyMmioDeviceRegisters) {
 
     regs.set_guest_page_size(PAGE_SIZE as u32);
 
-    initialize_queue(0, &raw const RECEIVE_QUEUE, regs);
-    initialize_queue(1, &raw const TRANSMIT_QUEUE, regs);
+    unsafe { &RECEIVE_QUEUE }.initialize(0, regs);
+    unsafe { &TRANSMIT_QUEUE }.initialize(1, regs);
 
-    #[allow(static_mut_refs)]
-    let receive_queue = unsafe { &mut RECEIVE_QUEUE.0 };
+    let receive_queue = unsafe { &mut RECEIVE_QUEUE };
     for (index, descriptor) in receive_queue.descriptors.iter_mut().enumerate() {
         descriptor.address = unsafe { &raw mut RECEIVE_BUFFERS[index] } as u64;
         descriptor.length = 1514;
@@ -108,55 +108,20 @@ fn send_arp_request(regs: &LegacyMmioDeviceRegisters) {
     packet.arp.target_mac = MacAddress([0; 6]);
     packet.arp.target_ip = Ipv4Addr::new(192, 168, 100, 1);
 
-    #[allow(static_mut_refs)]
-    let transmit_queue = unsafe { &mut TRANSMIT_QUEUE.0 };
+    let transmit_queue = unsafe { &mut *TRANSMIT_QUEUE };
     transmit_queue.descriptors[0].address = &packet as *const _ as u64;
     transmit_queue.descriptors[0].length = size_of::<Packet>() as u32;
 
-    transmit_queue.available.ring[transmit_queue.available.index as usize % QUEUE_SIZE] = 0;
-    transmit_queue.available.index += 1;
-    riscv::asm::fence();
-    regs.set_queue_notify(1);
-
-    while is_transmit_busy(1) {}
+    transmit_queue.send_and_recv(0, 1, regs);
 }
 
 fn receive_arp_reply(regs: &LegacyMmioDeviceRegisters) {
-    #[allow(static_mut_refs)]
-    let receive_queue = unsafe { &mut RECEIVE_QUEUE.0 };
-    receive_queue.available.ring[receive_queue.available.index as usize % QUEUE_SIZE] = 0;
-    receive_queue.available.index += 1;
-    riscv::asm::fence();
-    regs.set_queue_notify(0);
+    let receive_queue = unsafe { &mut *RECEIVE_QUEUE };
+    receive_queue.send_and_recv(0, 0, regs);
 
-    while is_receive_busy(1) {}
-
-    #[allow(static_mut_refs)]
-    let receive_queue = unsafe { &mut RECEIVE_QUEUE.0 };
     let response_length = receive_queue.used.ring[0].len;
     sbi::console_writeln!("net: ARP response has length {response_length}");
 
     let response = unsafe { &*((&raw const RECEIVE_BUFFERS[0]) as *const Packet) };
     sbi::console_writeln!("net: received ARP response {response:#?}");
-}
-
-fn initialize_queue(
-    index: u32,
-    queue: *const PageAligned<Queue>,
-    regs: &LegacyMmioDeviceRegisters,
-) {
-    regs.set_queue_sel(index);
-    assert_eq!(regs.queue_pfn(), 0);
-    assert!(QUEUE_SIZE <= regs.queue_size_max() as usize);
-    regs.set_queue_size(QUEUE_SIZE as u32);
-    regs.set_queue_align(PAGE_SIZE as u32);
-    regs.set_queue_pfn((queue as usize / PAGE_SIZE) as u32);
-}
-
-fn is_receive_busy(waiting_for: u16) -> bool {
-    (unsafe { (&raw const RECEIVE_QUEUE.0.used.index).read_volatile() }) != waiting_for
-}
-
-fn is_transmit_busy(waiting_for: u16) -> bool {
-    (unsafe { (&raw const TRANSMIT_QUEUE.0.used.index).read_volatile() }) != waiting_for
 }

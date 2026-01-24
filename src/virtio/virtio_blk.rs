@@ -1,10 +1,10 @@
+use crate::page::{PAGE_SIZE, PageAligned};
 use crate::virtio::queue::{
-    QUEUE_SIZE, Queue, VIRTIO_BLK_T_IN, VIRTIO_BLK_T_OUT, VIRTQ_DESC_F_NEXT, VIRTQ_DESC_F_WRITE,
+    Queue, VIRTIO_BLK_T_IN, VIRTIO_BLK_T_OUT, VIRTQ_DESC_F_NEXT, VIRTQ_DESC_F_WRITE,
 };
 use crate::virtio::registers::{
     LegacyMmioDeviceRegisters, STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK,
 };
-use crate::{PAGE_SIZE, PageAligned};
 
 #[repr(C, packed)]
 struct RequestHeader {
@@ -54,17 +54,8 @@ fn initialize_device(regs: &LegacyMmioDeviceRegisters) {
     regs.or_device_status(STATUS_DRIVER);
     regs.set_guest_page_size(PAGE_SIZE as u32);
 
-    initialize_queue(regs);
+    unsafe { &VIRTQ }.initialize(0, regs);
     regs.or_device_status(STATUS_DRIVER_OK);
-}
-
-fn initialize_queue(regs: &LegacyMmioDeviceRegisters) {
-    regs.set_queue_sel(0);
-    assert_eq!(regs.queue_pfn(), 0);
-    assert!(QUEUE_SIZE <= regs.queue_size_max() as usize);
-    regs.set_queue_size(QUEUE_SIZE as u32);
-    regs.set_queue_align(PAGE_SIZE as u32);
-    regs.set_queue_pfn(({ &raw const VIRTQ as usize } / PAGE_SIZE) as u32);
 }
 
 fn request(
@@ -83,9 +74,7 @@ fn request(
     };
     let status: u8 = 0;
 
-    #[allow(static_mut_refs)]
-    let queue = unsafe { &mut VIRTQ.0 };
-    let prev_used_index = queue.used.index;
+    let queue = unsafe { &mut *VIRTQ };
 
     queue.descriptors[0].address = &request as *const _ as u64;
     queue.descriptors[0].length = 16;
@@ -105,20 +94,10 @@ fn request(
     queue.descriptors[2].length = 1;
     queue.descriptors[2].flags = VIRTQ_DESC_F_WRITE;
 
-    queue.available.ring[queue.available.index as usize % QUEUE_SIZE] = 0; // first descriptor index
-    queue.available.index += 1;
-    riscv::asm::fence();
-    regs.set_queue_notify(0);
-
-    while is_busy(prev_used_index + 1) {}
-
+    queue.send_and_recv(0, 0, regs);
     match status {
         0 => Ok(()),
         1 => Err(VirtioBlkError),
         _ => unreachable!(),
     }
-}
-
-fn is_busy(waiting_for: u16) -> bool {
-    (unsafe { (&raw const VIRTQ.0.used.index).read_volatile() }) != waiting_for
 }
