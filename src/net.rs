@@ -1,26 +1,26 @@
 pub mod arp;
 
-use core::fmt::Formatter;
 use core::marker::PhantomData;
-use core::mem::{MaybeUninit, transmute_copy};
+use core::mem::{MaybeUninit, transmute};
 
 macro endianness($type:ident $size:ident) {
-    unsafe impl Endianness for $type {
-        type Size = $size;
-        fn to_be(value: $size) -> $size {
-            $size::to_be(value)
-        }
-        fn from_be(value: $size) -> $size {
-            $size::from_be(value)
+    impl From<$type> for BigEndian<$type> {
+        fn from(value: $type) -> BigEndian<$type> {
+            unsafe {
+                transmute::<$size, BigEndian<$type>>($size::to_be(transmute::<$type, $size>(value)))
+            }
         }
     }
-}
 
-#[allow(clippy::missing_safety_doc)]
-pub unsafe trait Endianness: Clone + Copy {
-    type Size;
-    fn to_be(value: Self::Size) -> Self::Size;
-    fn from_be(value: Self::Size) -> Self::Size;
+    impl From<BigEndian<$type>> for $type {
+        fn from(value: BigEndian<$type>) -> $type {
+            unsafe {
+                transmute::<$size, $type>($size::from_be(transmute::<BigEndian<$type>, $size>(
+                    value,
+                )))
+            }
+        }
+    }
 }
 
 #[repr(transparent)]
@@ -52,31 +52,13 @@ endianness!(EtherType u16);
 #[derive(Clone, Copy)]
 pub struct MacAddress(pub [u8; 6]);
 
-impl<T: Endianness> BigEndian<T> {
-    pub fn get(&self) -> T {
-        unsafe {
-            transmute_copy::<T::Size, T>(&T::from_be(transmute_copy::<BigEndian<T>, T::Size>(self)))
-        }
-    }
-}
-
 impl MacAddress {
     pub const BROADCAST: MacAddress = MacAddress([0xFF; 6]);
 }
 
-endianness!(u16 u16);
-
-impl<T: Endianness> From<T> for BigEndian<T> {
-    fn from(value: T) -> Self {
-        unsafe {
-            transmute_copy::<T::Size, BigEndian<T>>(&T::to_be(transmute_copy::<T, T::Size>(&value)))
-        }
-    }
-}
-
-impl<T: Endianness + core::fmt::Debug> core::fmt::Debug for BigEndian<T> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        <T as core::fmt::Debug>::fmt(&self.get(), f)
+impl<T: From<BigEndian<T>> + Copy + core::fmt::Debug> core::fmt::Debug for BigEndian<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        <T as core::fmt::Debug>::fmt(&T::from(*self), f)
     }
 }
 
