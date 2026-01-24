@@ -1,7 +1,8 @@
+pub mod arp;
+
 use core::fmt::Formatter;
 use core::marker::PhantomData;
 use core::mem::{MaybeUninit, transmute_copy};
-use core::net::Ipv4Addr;
 
 macro endianness($type:ident $size:ident) {
     unsafe impl Endianness for $type {
@@ -20,29 +21,6 @@ pub unsafe trait Endianness: Clone + Copy {
     type Size;
     fn to_be(value: Self::Size) -> Self::Size;
     fn from_be(value: Self::Size) -> Self::Size;
-}
-
-#[repr(u16)]
-#[derive(Debug, Clone, Copy)]
-pub enum ArpHardwareType {
-    #[allow(dead_code)]
-    Undefined = 0,
-    Ethernet = 1,
-}
-endianness!(ArpHardwareType u16);
-
-#[repr(C, packed)]
-#[derive(Debug, Clone, Copy)]
-pub struct ArpPacket {
-    pub htype: BigEndian<ArpHardwareType>,
-    pub ptype: BigEndian<EtherType>,
-    pub hlen: u8,
-    pub plen: u8,
-    pub oper: BigEndian<u16>,
-    pub sender_mac: MacAddress,
-    pub sender_ip: Ipv4Addr,
-    pub target_mac: MacAddress,
-    pub target_ip: Ipv4Addr,
 }
 
 #[repr(transparent)]

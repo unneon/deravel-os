@@ -1,4 +1,5 @@
-use crate::net::{ArpHardwareType, ArpPacket, EtherType, EthernetHeader, MacAddress};
+use crate::net::arp::{ArpHardwareType, ArpOperation, ArpPacket};
+use crate::net::{EtherType, EthernetHeader, MacAddress};
 use crate::virtio::queue::{QUEUE_SIZE, Queue, VIRTQ_DESC_F_WRITE};
 use crate::virtio::registers::{
     LegacyMmioDeviceRegisters, STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK,
@@ -101,7 +102,7 @@ fn send_arp_request(regs: &LegacyMmioDeviceRegisters) {
     packet.arp.ptype = EtherType::IpV4.into();
     packet.arp.hlen = 6;
     packet.arp.plen = 4;
-    packet.arp.oper = 1.into();
+    packet.arp.oper = ArpOperation::Request.into();
     packet.arp.sender_mac = mac_address;
     packet.arp.sender_ip = Ipv4Addr::new(192, 168, 100, 2);
     packet.arp.target_mac = MacAddress([0; 6]);
