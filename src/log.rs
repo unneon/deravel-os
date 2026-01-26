@@ -1,11 +1,18 @@
 use crate::sbi;
-use log::{Level, LevelFilter, Metadata, Record};
+use fdt::Fdt;
+use log::{Level, LevelFilter, Metadata, Record, info};
 
-struct Logger;
+struct Logger {
+    start_time: u64,
+    timebase_frequency: usize,
+}
 
 struct PrettyModulePath<'a>(&'a str);
 
-static LOGGER: Logger = Logger;
+static mut LOGGER: Logger = Logger {
+    start_time: 0,
+    timebase_frequency: 0,
+};
 
 impl log::Log for Logger {
     fn enabled(&self, metadata: &Metadata) -> bool {
@@ -14,6 +21,8 @@ impl log::Log for Logger {
 
     fn log(&self, record: &Record) {
         if self.enabled(record.metadata()) {
+            let time = (riscv::register::time::read64() - self.start_time) as f64
+                / self.timebase_frequency as f64;
             let level = match record.level() {
                 Level::Error => "\x1B[1;31mERRO\x1B[0m",
                 Level::Warn => "\x1B[1;33mWARN\x1B[0m",
@@ -22,7 +31,7 @@ impl log::Log for Logger {
                 Level::Trace => "\x1B[1;34mTRCE\x1B[0m",
             };
             let module = PrettyModulePath(record.module_path().unwrap());
-            sbi::console_writeln!("{level} {module}{}", record.args());
+            sbi::console_writeln!("[{time:>13.7}] {level} {module}{}", record.args());
         }
     }
 
@@ -39,7 +48,19 @@ impl core::fmt::Display for PrettyModulePath<'_> {
     }
 }
 
-pub fn initialize_log() {
-    log::set_logger(&LOGGER).unwrap();
+pub fn initialize_log(device_tree: &Fdt) {
+    let timebase_frequency = device_tree
+        .find_node("/cpus")
+        .unwrap()
+        .property("timebase-frequency")
+        .unwrap()
+        .as_usize()
+        .unwrap();
+    unsafe {
+        LOGGER.start_time = riscv::register::time::read64();
+        LOGGER.timebase_frequency = timebase_frequency;
+        log::set_logger(&LOGGER).unwrap();
+    };
     log::set_max_level(LevelFilter::Trace);
+    info!("timebase frequency is {timebase_frequency}");
 }

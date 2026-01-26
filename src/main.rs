@@ -18,6 +18,7 @@ use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use ::log::{debug, error};
 use core::arch::{asm, naked_asm};
 use core::panic::PanicInfo;
+use fdt::Fdt;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
 use riscv::register::stvec::{Stvec, TrapMode};
 use virtio::virtio_blk::VirtioBlk;
@@ -41,9 +42,11 @@ unsafe extern "C" fn boot() -> ! {
     )
 }
 
-fn main() -> ! {
+fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     clear_bss();
-    initialize_log();
+
+    let device_tree = unsafe { Fdt::from_ptr(device_tree) }.unwrap();
+    initialize_log(&device_tree);
     register_trap_handler();
     log_sbi_metadata();
 
