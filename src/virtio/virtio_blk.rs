@@ -3,6 +3,7 @@ use crate::virtio::queue::Queue;
 use crate::virtio::registers::{
     LegacyMmioDeviceRegisters, STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK,
 };
+use log::debug;
 
 #[repr(C, packed)]
 struct Header {
@@ -24,8 +25,7 @@ pub const VIRTIO_BLK_T_OUT: u32 = 1;
 static mut VIRTQ: PageAligned<Queue> = unsafe { core::mem::zeroed() };
 
 impl VirtioBlk {
-    pub fn new(base_address: usize) -> VirtioBlk {
-        let regs = LegacyMmioDeviceRegisters::new(base_address);
+    pub fn new(regs: LegacyMmioDeviceRegisters) -> VirtioBlk {
         initialize_device(&regs);
         VirtioBlk { regs }
     }
@@ -60,13 +60,15 @@ impl VirtioBlk {
         queue.send_and_recv(0, 0, &self.regs);
         result_from_status(status)
     }
+
+    pub fn demo(&mut self) {
+        let mut buf = [0; 512];
+        self.read(0, &mut buf).unwrap();
+        debug!("read from disk: {:?}", str::from_utf8(&buf).unwrap());
+    }
 }
 
 fn initialize_device(regs: &LegacyMmioDeviceRegisters) {
-    assert_eq!(regs.magic_value(), 0x74726976);
-    assert_eq!(regs.version(), 1);
-    assert_eq!(regs.device_id(), 2);
-
     regs.set_device_status(0);
     regs.or_device_status(STATUS_ACKNOWLEDGE);
     regs.or_device_status(STATUS_DRIVER);

@@ -37,8 +37,7 @@ static mut RECEIVE_QUEUE: PageAligned<Queue> = unsafe { core::mem::zeroed() };
 static mut TRANSMIT_QUEUE: PageAligned<Queue> = unsafe { core::mem::zeroed() };
 
 impl VirtioNet {
-    pub fn new(base_address: usize) -> VirtioNet {
-        let regs = LegacyMmioDeviceRegisters::new(base_address);
+    pub fn new(regs: LegacyMmioDeviceRegisters) -> VirtioNet {
         initialize_device(&regs);
         VirtioNet { regs }
     }
@@ -50,10 +49,6 @@ impl VirtioNet {
 }
 
 fn initialize_device(regs: &LegacyMmioDeviceRegisters) {
-    assert_eq!(regs.magic_value(), 0x74726976);
-    assert_eq!(regs.version(), 1);
-    assert_eq!(regs.device_id(), 1);
-
     regs.set_device_status(0);
     regs.or_device_status(STATUS_ACKNOWLEDGE);
     regs.or_device_status(STATUS_DRIVER);

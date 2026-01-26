@@ -2,6 +2,7 @@
 #![feature(adt_const_params)]
 #![feature(arbitrary_self_types)]
 #![feature(decl_macro)]
+#![feature(iter_array_chunks)]
 #![feature(never_type)]
 #![feature(slice_from_ptr_range)]
 #![allow(static_mut_refs)]
@@ -15,14 +16,13 @@ mod virtio;
 
 use crate::log::initialize_log;
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
-use ::log::{debug, error};
+use crate::virtio::initialize_all_virtio_mmio;
+use ::log::error;
 use core::arch::{asm, naked_asm};
 use core::panic::PanicInfo;
 use fdt::Fdt;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
 use riscv::register::stvec::{Stvec, TrapMode};
-use virtio::virtio_blk::VirtioBlk;
-use virtio::virtio_net::VirtioNet;
 
 unsafe extern "C" {
     static mut bss_start: u8;
@@ -47,16 +47,9 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
 
     let device_tree = unsafe { Fdt::from_ptr(device_tree) }.unwrap();
     initialize_log(&device_tree);
-    register_trap_handler();
+    initialize_trap_handler();
     log_sbi_metadata();
-
-    let mut virtio_blk = VirtioBlk::new(0x1000_1000);
-    let mut buf = [0; 512];
-    virtio_blk.read(0, &mut buf).unwrap();
-    debug!("read from disk: {:?}", str::from_utf8(&buf).unwrap());
-
-    let mut virtio_net = VirtioNet::new(0x1000_2000);
-    virtio_net.arp_handshake();
+    initialize_all_virtio_mmio(&device_tree);
 
     sbi::system_reset(ResetType::Shutdown, ResetReason::NoReason).unwrap()
 }
@@ -66,7 +59,7 @@ fn clear_bss() {
     bss.fill(0);
 }
 
-fn register_trap_handler() {
+fn initialize_trap_handler() {
     let address = trap_handler as *const () as usize;
     unsafe { riscv::register::stvec::write(Stvec::new(address, TrapMode::Direct)) }
 }

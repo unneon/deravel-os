@@ -34,10 +34,6 @@ pub const STATUS_DRIVER: u32 = 2;
 pub const STATUS_DRIVER_OK: u32 = 4;
 
 impl LegacyMmioDeviceRegisters {
-    pub fn new(base_address: usize) -> Self {
-        Self { base_address }
-    }
-
     register!(0x000, u32, read magic_value);
     register!(0x004, u32, read version);
     register!(0x008, u32, read device_id);
@@ -53,4 +49,10 @@ impl LegacyMmioDeviceRegisters {
     register!(0x040, u32, read queue_pfn, write set_queue_pfn);
     register!(0x050, u32, write set_queue_notify);
     register!(0x070, u32, read device_status, write set_device_status, or or_device_status);
+}
+
+impl core::fmt::Display for LegacyMmioDeviceRegisters {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{:#x}", self.base_address)
+    }
 }
