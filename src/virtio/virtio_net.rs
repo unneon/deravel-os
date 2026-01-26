@@ -1,9 +1,9 @@
 use crate::page::{PAGE_SIZE, PageAligned};
-use crate::sbi;
 use crate::virtio::queue::Queue;
 use crate::virtio::registers::{
     LegacyMmioDeviceRegisters, STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK,
 };
+use log::{debug, info};
 use smoltcp::wire::{
     ArpHardware, ArpOperation, ArpPacket, EthernetAddress, EthernetFrame, EthernetProtocol,
     Ipv4Address,
@@ -75,7 +75,7 @@ fn initialize_device(regs: &LegacyMmioDeviceRegisters) {
 fn send_arp_request(regs: &LegacyMmioDeviceRegisters) {
     let mac_address: EthernetAddress =
         unsafe { ((regs.base_address + 0x100) as *const EthernetAddress).read_volatile() };
-    sbi::console_writeln!("net: mac address {mac_address}");
+    info!("hardware-assigned MAC address is {mac_address}");
 
     let mut packet = Packet {
         header: Header::default(),
@@ -108,17 +108,17 @@ fn receive_arp_reply(regs: &LegacyMmioDeviceRegisters) {
     receive_queue.descriptor_writeonly(0, &mut packet, None);
     receive_queue.send_and_recv(0, 0, regs);
 
-    sbi::console_writeln!("net: received virtio... {:?}", packet.header);
+    debug!("received virtio-net header... {:?}", packet.header);
     let eth = EthernetFrame::new_checked(&packet.payload).unwrap();
-    sbi::console_writeln!(
-        "net: received ethernet... dst={} src={} ethtype={}",
+    debug!(
+        "received ethernet header... dst={} src={} ethtype={}",
         eth.dst_addr(),
         eth.src_addr(),
         eth.ethertype()
     );
     let arp = ArpPacket::new_checked(eth.payload()).unwrap();
-    sbi::console_writeln!(
-        "net: received arp htype={:?} ptype={} oper={:?} sh={} sp={} dh={} dp={}",
+    debug!(
+        "received arp packet htype={:?} ptype={} oper={:?} sh={} sp={} dh={} dp={}",
         arp.hardware_type(),
         arp.protocol_type(),
         arp.operation(),

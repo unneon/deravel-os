@@ -8,11 +8,14 @@
 #![no_std]
 #![no_main]
 
+mod log;
 mod page;
 mod sbi;
 mod virtio;
 
-use crate::sbi::{ResetReason, ResetType};
+use crate::log::initialize_log;
+use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
+use ::log::{debug, error};
 use core::arch::{asm, naked_asm};
 use core::panic::PanicInfo;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
@@ -40,13 +43,14 @@ unsafe extern "C" fn boot() -> ! {
 
 fn main() -> ! {
     clear_bss();
+    initialize_log();
     register_trap_handler();
     log_sbi_metadata();
 
     let mut virtio_blk = VirtioBlk::new(0x1000_1000);
     let mut buf = [0; 512];
     virtio_blk.read(0, &mut buf).unwrap();
-    sbi::console_writeln!("read from disk: {:?}", str::from_utf8(&buf).unwrap());
+    debug!("read from disk: {:?}", str::from_utf8(&buf).unwrap());
 
     let mut virtio_net = VirtioNet::new(0x1000_2000);
     virtio_net.arp_handshake();
@@ -56,21 +60,12 @@ fn main() -> ! {
 
 fn clear_bss() {
     let bss = unsafe { core::slice::from_mut_ptr_range(&raw mut bss_start..&raw mut bss_end) };
-    sbi::console_writeln!("bss section is {:#x} bytes long", bss.len());
     bss.fill(0);
 }
 
 fn register_trap_handler() {
     let address = trap_handler as *const () as usize;
     unsafe { riscv::register::stvec::write(Stvec::new(address, TrapMode::Direct)) }
-}
-
-fn log_sbi_metadata() {
-    let spec_version = sbi::get_spec_version();
-    sbi::console_writeln!("SBI specification version: {spec_version}");
-    let impl_id = sbi::get_impl_id();
-    let impl_version = sbi::get_impl_version();
-    sbi::console_writeln!("SBI implementation: {impl_id}, version {impl_version}");
 }
 
 #[unsafe(no_mangle)]
@@ -87,7 +82,7 @@ unsafe extern "riscv-interrupt-s" fn trap_handler() {
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    sbi::console_writeln!("{}", info);
+    error!("{}", info);
     let _ = sbi::system_reset(ResetType::Shutdown, ResetReason::SystemFailure);
     loop {}
 }

@@ -1,5 +1,7 @@
 mod ffi;
 
+use log::info;
+
 #[cfg(doc)]
 use Error::*;
 
@@ -215,4 +217,13 @@ pub fn debug_console_write_byte(byte: u8) -> Result<(), Error> {
 /// | [`Failed`] | The reset request failed for unspecified or unknown other reasons. |
 pub fn system_reset(type_: ResetType, reason: ResetReason) -> Result<!, Error> {
     ffi::sbi_system_reset(type_ as u32, reason as u32)
+}
+
+pub fn log_sbi_metadata() {
+    let spec_version = get_spec_version();
+    let impl_id = get_impl_id();
+    let impl_version = get_impl_version();
+    info!(
+        "bootloader is {impl_id}, version {impl_version:#x}, implements RISC-V SBI {spec_version}"
+    );
 }
