@@ -1,13 +1,17 @@
 use crate::page::{PAGE_SIZE, PageAligned};
 use crate::virtio::queue::Queue;
 use crate::virtio::registers::{
-    LegacyMmioDeviceRegisters, STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK,
+    Mmio, Registers, STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, mmio,
 };
 use log::{debug, info};
 use smoltcp::wire::{
     ArpHardware, ArpOperation, ArpPacket, EthernetAddress, EthernetFrame, EthernetProtocol,
     Ipv4Address,
 };
+
+mmio! { pub struct Configuration {
+    0x000 mac: EthernetAddress Readonly,
+} }
 
 #[repr(C, packed)]
 #[derive(Clone, Copy, Debug)]
@@ -28,7 +32,7 @@ struct Header {
 }
 
 pub struct VirtioNet {
-    regs: LegacyMmioDeviceRegisters,
+    regs: Mmio<Registers<Configuration>>,
 }
 
 const VIRTIO_NET_F_MAC: u32 = 1 << 5;
@@ -37,39 +41,38 @@ static mut RECEIVE_QUEUE: PageAligned<Queue> = unsafe { core::mem::zeroed() };
 static mut TRANSMIT_QUEUE: PageAligned<Queue> = unsafe { core::mem::zeroed() };
 
 impl VirtioNet {
-    pub fn new(regs: LegacyMmioDeviceRegisters) -> VirtioNet {
-        initialize_device(&regs);
+    pub fn new(regs: Mmio<Registers<Configuration>>) -> VirtioNet {
+        initialize_device(regs);
         VirtioNet { regs }
     }
 
     pub fn arp_handshake(&mut self) {
-        send_arp_request(&self.regs);
-        receive_arp_reply(&self.regs);
+        send_arp_request(self.regs);
+        receive_arp_reply(self.regs);
     }
 }
 
-fn initialize_device(regs: &LegacyMmioDeviceRegisters) {
-    regs.set_device_status(0);
-    regs.or_device_status(STATUS_ACKNOWLEDGE);
-    regs.or_device_status(STATUS_DRIVER);
+fn initialize_device(regs: Mmio<Registers<Configuration>>) {
+    regs.status().write(0);
+    regs.status().or(STATUS_ACKNOWLEDGE);
+    regs.status().or(STATUS_DRIVER);
 
-    regs.set_device_features_sel(0);
-    assert_ne!(regs.device_features() & VIRTIO_NET_F_MAC, 0);
+    regs.host_features_sel().write(0);
+    assert_ne!(regs.host_features().read() & VIRTIO_NET_F_MAC, 0);
 
-    regs.set_driver_features_sel(0);
-    regs.set_driver_features(VIRTIO_NET_F_MAC);
+    regs.driver_features_sel().write(0);
+    regs.driver_features().write(VIRTIO_NET_F_MAC);
 
-    regs.set_guest_page_size(PAGE_SIZE as u32);
+    regs.guest_page_size().write(PAGE_SIZE as u32);
 
     unsafe { &RECEIVE_QUEUE }.initialize(0, regs);
     unsafe { &TRANSMIT_QUEUE }.initialize(1, regs);
 
-    regs.or_device_status(STATUS_DRIVER_OK);
+    regs.status().or(STATUS_DRIVER_OK);
 }
 
-fn send_arp_request(regs: &LegacyMmioDeviceRegisters) {
-    let mac_address: EthernetAddress =
-        unsafe { ((regs.base_address + 0x100) as *const EthernetAddress).read_volatile() };
+fn send_arp_request(regs: Mmio<Registers<Configuration>>) {
+    let mac_address = regs.config().mac().read();
     info!("hardware-assigned MAC address is {mac_address}");
 
     let mut packet = Packet {
@@ -96,7 +99,7 @@ fn send_arp_request(regs: &LegacyMmioDeviceRegisters) {
     transmit_queue.send_and_recv(0, 1, regs);
 }
 
-fn receive_arp_reply(regs: &LegacyMmioDeviceRegisters) {
+fn receive_arp_reply(regs: Mmio<Registers<Configuration>>) {
     let mut packet: Packet<[u8; 42]> = unsafe { core::mem::zeroed() };
 
     let receive_queue = unsafe { &mut *RECEIVE_QUEUE };

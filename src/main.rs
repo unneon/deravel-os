@@ -3,6 +3,7 @@
 #![feature(arbitrary_self_types)]
 #![feature(decl_macro)]
 #![feature(iter_array_chunks)]
+#![feature(macro_metavar_expr_concat)]
 #![feature(never_type)]
 #![feature(slice_from_ptr_range)]
 #![allow(static_mut_refs)]

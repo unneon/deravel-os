@@ -1,5 +1,5 @@
 use crate::page::{PAGE_SIZE, PageAligned};
-use crate::virtio::registers::LegacyMmioDeviceRegisters;
+use crate::virtio::registers::{Mmio, ReadWrite, Registers};
 
 pub const QUEUE_SIZE: usize = 16;
 
@@ -43,17 +43,18 @@ const VIRTQ_DESC_F_NEXT: u16 = 1;
 const VIRTQ_DESC_F_WRITE: u16 = 2;
 
 impl Queue {
-    pub fn initialize(
+    pub fn initialize<T>(
         self: &PageAligned<Self>,
         queue_index: u32,
-        regs: &LegacyMmioDeviceRegisters,
+        regs: Mmio<Registers<T>, ReadWrite>,
     ) {
-        regs.set_queue_sel(queue_index);
-        assert_eq!(regs.queue_pfn(), 0);
-        assert!(QUEUE_SIZE <= regs.queue_size_max() as usize);
-        regs.set_queue_size(QUEUE_SIZE as u32);
-        regs.set_queue_align(PAGE_SIZE as u32);
-        regs.set_queue_pfn(((self as *const _ as usize) / PAGE_SIZE) as u32);
+        regs.queue_sel().write(queue_index);
+        assert_eq!(regs.queue_pfn().read(), 0);
+        assert!(QUEUE_SIZE <= regs.queue_size_max().read() as usize);
+        regs.queue_size().write(QUEUE_SIZE as u32);
+        regs.queue_align().write(PAGE_SIZE as u32);
+        regs.queue_pfn()
+            .write(((self as *const _ as usize) / PAGE_SIZE) as u32);
     }
 
     pub fn descriptor_readonly<T>(&mut self, index: u16, data: &T, next: Option<u16>) {
@@ -72,16 +73,16 @@ impl Queue {
         descriptor.next = next.unwrap_or(0);
     }
 
-    pub fn send_and_recv(
+    pub fn send_and_recv<T>(
         &mut self,
         descriptor: u16,
         queue_index: u32,
-        regs: &LegacyMmioDeviceRegisters,
+        regs: Mmio<Registers<T>, ReadWrite>,
     ) {
         self.available.ring[self.available.index as usize % QUEUE_SIZE] = descriptor;
         self.available.index += 1;
         riscv::asm::fence();
-        regs.set_queue_notify(queue_index);
+        regs.queue_notify().write(queue_index);
         while unsafe { (&raw const self.used.index).read_volatile() } < self.available.index {}
     }
 }

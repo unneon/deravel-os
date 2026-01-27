@@ -1,4 +1,4 @@
-use crate::virtio::registers::LegacyMmioDeviceRegisters;
+use crate::virtio::registers::Registers;
 use crate::virtio::virtio_blk::VirtioBlk;
 use crate::virtio::virtio_net::VirtioNet;
 use fdt::Fdt;
@@ -14,29 +14,31 @@ pub fn initialize_all_virtio_mmio(device_tree: &Fdt) {
         let region = mmio.property("reg").unwrap().value;
         let base_address =
             usize::from_be_bytes(region.iter().copied().array_chunks().next().unwrap());
-        let device = LegacyMmioDeviceRegisters { base_address };
-        if device.magic_value() != 0x74726976 {
+        let device = unsafe { Registers::new(base_address as *mut Registers<()>) };
+        if device.magic_value().read() != 0x74726976 {
             error!("{device} magic value is not 0x74726976");
             continue;
         }
-        if device.version() != 0x1 {
+        if device.version().read() != 0x1 {
             error!("{device} version is not 0x1");
             continue;
         }
 
-        let device_id = device.device_id();
+        let device_id = device.device_id().read();
         if device_id == 0x0 {
             debug!("ignoring {device} as device id is 0x0");
             continue;
         }
 
-        let vendor = device.vendor_id();
+        let vendor = device.vendor_id().read();
         if device_id == 0x1 {
             info!("found virtio-net device {device} from vendor {vendor:#x}");
+            let device = unsafe { device.with_configuration() };
             let mut virtio_net = VirtioNet::new(device);
             virtio_net.arp_handshake();
         } else if device_id == 0x2 {
             info!("found virtio-blk device {device} from vendor {vendor:#x}");
+            let device = unsafe { device.with_configuration() };
             let mut virtio_blk = VirtioBlk::new(device);
             virtio_blk.demo();
         } else {
