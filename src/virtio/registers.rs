@@ -37,6 +37,7 @@ impl LegacyMmioDeviceRegisters {
     register!(0x000, u32, read magic_value);
     register!(0x004, u32, read version);
     register!(0x008, u32, read device_id);
+    register!(0x00c, u32, read vendor_id);
     register!(0x010, u32, read device_features);
     register!(0x014, u32, write set_device_features_sel);
     register!(0x020, u32, write set_driver_features);

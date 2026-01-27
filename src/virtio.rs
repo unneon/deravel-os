@@ -30,12 +30,13 @@ pub fn initialize_all_virtio_mmio(device_tree: &Fdt) {
             continue;
         }
 
+        let vendor = device.vendor_id();
         if device_id == 0x1 {
-            info!("found virtio-net device {device}");
+            info!("found virtio-net device {device} from vendor {vendor:#x}");
             let mut virtio_net = VirtioNet::new(device);
             virtio_net.arp_handshake();
         } else if device_id == 0x2 {
-            info!("found virtio-blk device {device}");
+            info!("found virtio-blk device {device} from vendor {vendor:#x}");
             let mut virtio_blk = VirtioBlk::new(device);
             virtio_blk.demo();
         } else {
