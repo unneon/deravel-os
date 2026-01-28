@@ -19,13 +19,6 @@ mmio! { pub struct Configuration {
 } }
 
 #[repr(C, packed)]
-#[derive(Clone, Copy, Debug)]
-struct Packet<T> {
-    header: Header,
-    payload: T,
-}
-
-#[repr(C, packed)]
 #[derive(Clone, Copy, Debug, Default)]
 struct Header {
     flags: u8,
@@ -36,9 +29,19 @@ struct Header {
     csum_offset: u16,
 }
 
+#[repr(C, packed)]
+#[derive(Clone, Copy, Debug)]
+struct Packet<T> {
+    header: Header,
+    payload: T,
+}
+
+pub struct PacketReceiveToken<'a>(Mmio<Registers<Configuration>>, PhantomData<&'a mut ()>);
+
+pub struct PacketTransmitToken<'a>(Mmio<Registers<Configuration>>, PhantomData<&'a ()>);
+
 pub struct VirtioNet {
     regs: Mmio<Registers<Configuration>>,
-    receive_index: u16,
 }
 
 const VIRTIO_NET_F_MAC: u32 = 1 << 5;
@@ -51,10 +54,7 @@ static mut TRANSMIT_QUEUE: PageAligned<Queue> = unsafe { core::mem::zeroed() };
 impl VirtioNet {
     pub fn new(regs: Mmio<Registers<Configuration>>) -> VirtioNet {
         initialize_device(regs);
-        VirtioNet {
-            regs,
-            receive_index: 0,
-        }
+        VirtioNet { regs }
     }
 
     pub fn demo(&mut self) {
@@ -105,27 +105,25 @@ impl VirtioNet {
     }
 }
 
-pub struct VirtioNetRxToken<'a>(u16, PhantomData<&'a ()>);
-pub struct VirtioNetTxToken<'a>(Mmio<Registers<Configuration>>, PhantomData<&'a ()>);
-
 impl smoltcp::phy::Device for VirtioNet {
-    type RxToken<'a> = VirtioNetRxToken<'a>;
-    type TxToken<'a> = VirtioNetTxToken<'a>;
+    type RxToken<'a> = PacketReceiveToken<'a>;
+    type TxToken<'a> = PacketTransmitToken<'a>;
 
     fn receive(&mut self, _: Instant) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
-        if unsafe { (&raw const RECEIVE_QUEUE.used.index).read_volatile() } == self.receive_index {
+        riscv::asm::fence();
+        let receive_queue = unsafe { &mut RECEIVE_QUEUE };
+        if receive_queue.available.index == receive_queue.used.index + QUEUE_SIZE as u16 {
             return None;
         }
-        let index = self.receive_index;
-        self.receive_index += 1;
+
         Some((
-            VirtioNetRxToken(index, PhantomData),
-            VirtioNetTxToken(self.regs, PhantomData),
+            PacketReceiveToken(self.regs, PhantomData),
+            PacketTransmitToken(self.regs, PhantomData),
         ))
     }
 
     fn transmit(&mut self, _: Instant) -> Option<Self::TxToken<'_>> {
-        Some(VirtioNetTxToken(self.regs, PhantomData))
+        Some(PacketTransmitToken(self.regs, PhantomData))
     }
 
     fn capabilities(&self) -> DeviceCapabilities {
@@ -135,15 +133,27 @@ impl smoltcp::phy::Device for VirtioNet {
         caps
     }
 }
-impl smoltcp::phy::RxToken for VirtioNetRxToken<'_> {
-    fn consume<R, F>(self, f: F) -> R
-    where
-        F: FnOnce(&[u8]) -> R,
-    {
-        f(unsafe { &RECEIVE_BUFFERS[self.0 as usize].payload })
+
+impl smoltcp::phy::RxToken for PacketReceiveToken<'_> {
+    fn consume<R, F: FnOnce(&[u8]) -> R>(self, f: F) -> R {
+        let receive_queue = unsafe { &mut RECEIVE_QUEUE };
+        let ring_index = receive_queue.available.index as usize % QUEUE_SIZE;
+        let used_element = &receive_queue.used.ring[ring_index];
+        let descriptor_index = used_element.id as usize;
+        let packet = unsafe { &RECEIVE_BUFFERS[descriptor_index] };
+        let payload_length = used_element.len as usize - size_of::<Header>();
+        let payload = &packet.payload[..payload_length];
+        let result = f(payload);
+
+        receive_queue.available.index += 1;
+        riscv::asm::fence();
+        self.0.queue_notify().write(0);
+
+        result
     }
 }
-impl smoltcp::phy::TxToken for VirtioNetTxToken<'_> {
+
+impl smoltcp::phy::TxToken for PacketTransmitToken<'_> {
     fn consume<R, F>(self, _len: usize, f: F) -> R
     where
         F: FnOnce(&mut [u8]) -> R,
