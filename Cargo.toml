@@ -7,4 +7,4 @@ edition = "2024"
 fdt = { version = "0.1", features = ["pretty-printing"] }
 log = "0.4"
 riscv = "0.16"
-smoltcp = { version = "0.12", features = ["medium-ethernet", "proto-ipv4", "socket-udp"], default-features = false }
+smoltcp = { version = "0.12", features = ["log", "medium-ethernet", "proto-ipv4", "socket-dns", "socket-udp"], default-features = false }

@@ -35,7 +35,7 @@ pub fn initialize_all_virtio_mmio(device_tree: &Fdt) {
             info!("found virtio-net device {device} from vendor {vendor:#x}");
             let device = unsafe { device.with_configuration() };
             let mut virtio_net = VirtioNet::new(device);
-            virtio_net.arp_handshake();
+            virtio_net.demo();
         } else if device_id == 0x2 {
             info!("found virtio-blk device {device} from vendor {vendor:#x}");
             let device = unsafe { device.with_configuration() };
