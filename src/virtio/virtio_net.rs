@@ -1,4 +1,4 @@
-use crate::page::{PAGE_SIZE, PageAligned};
+use crate::PAGE_SIZE;
 use crate::virtio::queue::{QUEUE_SIZE, Queue};
 use crate::virtio::registers::{
     Mmio, Registers, STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, mmio,
@@ -46,10 +46,10 @@ pub struct VirtioNet {
 
 const VIRTIO_NET_F_MAC: u32 = 1 << 5;
 
-static mut RECEIVE_QUEUE: PageAligned<Queue> = unsafe { core::mem::zeroed() };
-static mut RECEIVE_BUFFERS: [Packet<[u8; PAGE_SIZE - size_of::<Header>()]>; QUEUE_SIZE] =
-    unsafe { core::mem::zeroed() };
-static mut TRANSMIT_QUEUE: PageAligned<Queue> = unsafe { core::mem::zeroed() };
+static mut RECEIVE_QUEUE: Queue = unsafe { core::mem::zeroed() };
+static mut RECEIVE_BUFFERS: [Packet<[u8; 1514]>; QUEUE_SIZE] = unsafe { core::mem::zeroed() };
+static mut TRANSMIT_QUEUE: Queue = unsafe { core::mem::zeroed() };
+static mut TRANSMIT_BUFFERS: [Packet<[u8; 1514]>; QUEUE_SIZE] = unsafe { core::mem::zeroed() };
 
 impl VirtioNet {
     pub fn new(regs: Mmio<Registers<Configuration>>) -> VirtioNet {
@@ -115,6 +115,10 @@ impl smoltcp::phy::Device for VirtioNet {
         if receive_queue.available.index == receive_queue.used.index + QUEUE_SIZE as u16 {
             return None;
         }
+        let transmit_queue = unsafe { &mut TRANSMIT_QUEUE };
+        if transmit_queue.available.index == transmit_queue.used.index + QUEUE_SIZE as u16 {
+            return None;
+        }
 
         Some((
             PacketReceiveToken(self.regs, PhantomData),
@@ -123,6 +127,12 @@ impl smoltcp::phy::Device for VirtioNet {
     }
 
     fn transmit(&mut self, _: Instant) -> Option<Self::TxToken<'_>> {
+        riscv::asm::fence();
+        let transmit_queue = unsafe { &mut TRANSMIT_QUEUE };
+        if transmit_queue.available.index == transmit_queue.used.index + QUEUE_SIZE as u16 {
+            return None;
+        }
+
         Some(PacketTransmitToken(self.regs, PhantomData))
     }
 
@@ -154,15 +164,17 @@ impl smoltcp::phy::RxToken for PacketReceiveToken<'_> {
 }
 
 impl smoltcp::phy::TxToken for PacketTransmitToken<'_> {
-    fn consume<R, F>(self, _len: usize, f: F) -> R
-    where
-        F: FnOnce(&mut [u8]) -> R,
-    {
-        let mut buf: Packet<[u8; 2000]> = unsafe { core::mem::zeroed() };
-        let result = f(buf.payload.as_mut());
+    fn consume<R, F: FnOnce(&mut [u8]) -> R>(self, len: usize, f: F) -> R {
         let transmit_queue = unsafe { &mut TRANSMIT_QUEUE };
-        transmit_queue.descriptor_readonly(0, &buf, None);
-        transmit_queue.send_and_recv(0, 1, self.0);
+        let index = transmit_queue.available.index as usize % QUEUE_SIZE;
+        let packet = unsafe { &mut TRANSMIT_BUFFERS[index] };
+        let result = f(&mut packet.payload[..len]);
+
+        transmit_queue.descriptors[index].length = (size_of::<Header>() + len) as u32;
+        transmit_queue.available.index += 1;
+        riscv::asm::fence();
+        self.0.queue_notify().write(1);
+
         result
     }
 }
@@ -184,6 +196,7 @@ fn initialize_device(regs: Mmio<Registers<Configuration>>) {
     unsafe { &TRANSMIT_QUEUE }.initialize(1, regs);
 
     initialize_receive_buffers(regs);
+    initialize_transmit_buffers();
 
     regs.status().or(STATUS_DRIVER_OK);
 }
@@ -198,4 +211,13 @@ fn initialize_receive_buffers(regs: Mmio<Registers<Configuration>>) {
     queue.available.index = QUEUE_SIZE as u16;
     riscv::asm::fence();
     regs.queue_notify().write(0);
+}
+
+fn initialize_transmit_buffers() {
+    let queue = unsafe { &mut TRANSMIT_QUEUE };
+    for (i, buffer) in unsafe { TRANSMIT_BUFFERS.iter() }.enumerate() {
+        queue.available.ring[i] = i as u16;
+        queue.descriptor_readonly(i as u16, buffer, None);
+    }
+    riscv::asm::fence();
 }

@@ -1,4 +1,4 @@
-use crate::page::{PAGE_SIZE, PageAligned};
+use crate::PAGE_SIZE;
 use crate::virtio::queue::Queue;
 use crate::virtio::registers::{
     Mmio, Registers, STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, mmio,
@@ -26,7 +26,7 @@ pub struct VirtioBlkError;
 pub const VIRTIO_BLK_T_IN: u32 = 0;
 pub const VIRTIO_BLK_T_OUT: u32 = 1;
 
-static mut VIRTQ: PageAligned<Queue> = unsafe { core::mem::zeroed() };
+static mut VIRTQ: Queue = unsafe { core::mem::zeroed() };
 
 impl VirtioBlk {
     pub fn new(regs: Mmio<Registers<Configuration>>) -> VirtioBlk {
@@ -41,7 +41,7 @@ impl VirtioBlk {
             sector,
         };
         let mut status: u8 = 0;
-        let queue = unsafe { &mut *VIRTQ };
+        let queue = unsafe { &mut VIRTQ };
         queue.descriptor_readonly(0, &header, Some(1));
         queue.descriptor_writeonly(1, buf, Some(2));
         queue.descriptor_writeonly(2, &mut status, None);
@@ -57,7 +57,7 @@ impl VirtioBlk {
             sector,
         };
         let mut status: u8 = 0;
-        let queue = unsafe { &mut *VIRTQ };
+        let queue = unsafe { &mut VIRTQ };
         queue.descriptor_readonly(0, &header, Some(1));
         queue.descriptor_readonly(1, buf, Some(2));
         queue.descriptor_writeonly(2, &mut status, None);

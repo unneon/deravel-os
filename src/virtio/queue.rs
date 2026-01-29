@@ -1,4 +1,4 @@
-use crate::page::{PAGE_SIZE, PageAligned};
+use crate::PAGE_SIZE;
 use crate::virtio::registers::{Mmio, ReadWrite, Registers};
 
 pub const QUEUE_SIZE: usize = 16;
@@ -24,18 +24,17 @@ pub struct UsedElement {
     pub len: u32,
 }
 
-#[repr(C, packed)]
+#[repr(C, align(4096))]
 pub struct Used {
     pub flags: u16,
     pub index: u16,
     pub ring: [UsedElement; QUEUE_SIZE],
 }
 
-#[repr(C, packed)]
+#[repr(C, align(4096))]
 pub struct Queue {
     pub descriptors: [Descriptor; QUEUE_SIZE],
     pub available: Available,
-    _used_pad: [u8; PAGE_SIZE - size_of::<[Descriptor; QUEUE_SIZE]>() - size_of::<Available>()],
     pub used: Used,
 }
 
@@ -43,11 +42,7 @@ const VIRTQ_DESC_F_NEXT: u16 = 1;
 const VIRTQ_DESC_F_WRITE: u16 = 2;
 
 impl Queue {
-    pub fn initialize<T>(
-        self: &PageAligned<Self>,
-        queue_index: u32,
-        regs: Mmio<Registers<T>, ReadWrite>,
-    ) {
+    pub fn initialize<T>(&self, queue_index: u32, regs: Mmio<Registers<T>, ReadWrite>) {
         regs.queue_sel().write(queue_index);
         assert_eq!(regs.queue_pfn().read(), 0);
         assert!(QUEUE_SIZE <= regs.queue_size_max().read() as usize);

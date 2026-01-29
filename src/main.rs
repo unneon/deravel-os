@@ -11,7 +11,6 @@
 #![no_main]
 
 mod log;
-mod page;
 mod sbi;
 mod virtio;
 
@@ -30,6 +29,8 @@ unsafe extern "C" {
     static mut bss_end: u8;
     static mut stack_top: u8;
 }
+
+pub const PAGE_SIZE: usize = 4096;
 
 #[unsafe(link_section = ".text.boot")]
 #[unsafe(naked)]
