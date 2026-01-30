@@ -14,9 +14,9 @@ use smoltcp::wire::{
     DnsQueryType, EthernetAddress, HardwareAddress, IpAddress, IpCidr, Ipv4Address,
 };
 
-mmio! { pub struct Config {
+mmio! { pub Config
     0x000 mac: Readonly EthernetAddress,
-} }
+}
 
 features! { VirtioNet Features 0
     has_mac enable_mac 5

@@ -5,9 +5,9 @@ use crate::virtio::registers::{
 };
 use log::{debug, info};
 
-mmio! { pub struct Config {
+mmio! { pub Config
     0x000 capacity: Readonly u64,
-} }
+}
 
 #[repr(C, packed)]
 struct Header {

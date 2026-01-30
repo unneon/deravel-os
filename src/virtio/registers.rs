@@ -29,7 +29,7 @@ pub macro features($driver:ident $struct:ident $base:literal $($has_name:ident $
     }
 }
 
-pub macro mmio($pub:vis struct $struct:ident $(<$($param:ident),*>)? $(where $param0:ident: $req0:ident)? { $($offset:literal $field_name:ident: $access:ident $field_type:ty,)* }) {
+pub macro mmio($pub:vis $struct:ident $(<$($param:ident),*>)? $(where $param0:ident: $req0:ident)? $($offset:literal $field_name:ident: $access:ident $field_type:ty,)*) {
     $pub struct $struct $(<$($param),*> ($(PhantomData<$param>),*))?;
 
     impl$(<$($param),*>)? $struct $(<$($param),*>)? $(where $param0: $req0)? {
@@ -60,7 +60,7 @@ pub struct Readonly;
 pub struct Writeonly;
 pub struct ReadWrite;
 
-mmio! { pub struct Registers<T> where T: Driver {
+mmio! { pub Registers<T> where T: Driver
     0x000 magic_value: Readonly u32,
     0x004 version: Readonly u32,
     0x008 device_id: Readonly u32,
@@ -78,7 +78,7 @@ mmio! { pub struct Registers<T> where T: Driver {
     0x050 queue_notify: Writeonly u32,
     0x070 status: ReadWrite u32,
     0x100 config: ReadWrite <T as Driver>::Config,
-} }
+}
 
 pub const STATUS_ACKNOWLEDGE: u32 = 1;
 pub const STATUS_DRIVER: u32 = 2;
