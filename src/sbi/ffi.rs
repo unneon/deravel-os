@@ -2,16 +2,17 @@ use crate::sbi::Error;
 use core::arch::asm;
 use core::mem::transmute;
 
-macro function(#[eid = $eid:expr, fid = $fid:expr] $name:ident ($($a0name:ident: $a0type:ty $(, $a1name:ident: $a1type:ty $(, $a2name:ident: $a2type:ty)?)?)?) $ret:ty) {
-    pub fn $name($($a0name: $a0type,)? $($($a1name: $a1type,)?)? $($($($a2name: $a2type,)?)?)?) -> $ret {
+macro functions($(#[eid = $eid:expr, fid = $fid:expr] pub fn $name:ident ($($a0name:ident: $a0type:ty $(, $a1name:ident: $a1type:ty $(, $a2name:ident: $a2type:ty)?)?)?) -> $ret:ty;)*) {
+    $(pub fn $name($($a0name: $a0type,)? $($($a1name: $a1type,)?)? $($($($a2name: $a2type,)?)?)?) -> $ret {
         let error: isize;
         let value: usize;
         unsafe {
             asm!(
                 "ecall",
-                $(in("a0") $a0name,)?
-                $($(in("a1") $a1name,)?)?
-                $($($(in("a2") $a2name,)?)?)?
+                $(in("a0") $a0name,
+                $(in("a1") $a1name,
+                $(in("a2") $a2name,
+                )?)?)?
                 in("a6") $fid,
                 in("a7") $eid,
                 lateout("a0") error,
@@ -19,11 +20,7 @@ macro function(#[eid = $eid:expr, fid = $fid:expr] $name:ident ($($a0name:ident:
             )
         }
         <$ret>::from_sbiret(error, value)
-    }
-}
-
-macro functions($($(#[$($docs:tt)*])* pub fn $name:ident $args:tt -> $ret:ty;)*) {
-    $(function!($(#[$($docs)*])* $name $args $ret);)*
+    })*
 }
 
 trait FromSbiret {

@@ -75,6 +75,7 @@ impl Queue {
         regs: Mmio<Registers<T>>,
     ) {
         self.available.ring[self.available.index as usize % QUEUE_SIZE] = descriptor;
+        riscv::asm::fence();
         self.available.index += 1;
         riscv::asm::fence();
         regs.queue_notify().write(queue_index);

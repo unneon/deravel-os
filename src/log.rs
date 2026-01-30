@@ -49,13 +49,7 @@ impl core::fmt::Display for PrettyModulePath<'_> {
 }
 
 pub fn initialize_log(device_tree: &Fdt) {
-    let timebase_frequency = device_tree
-        .find_node("/cpus")
-        .unwrap()
-        .property("timebase-frequency")
-        .unwrap()
-        .as_usize()
-        .unwrap();
+    let timebase_frequency = find_timebase_frequency(device_tree).unwrap();
     unsafe {
         LOGGER.start_time = riscv::register::time::read64();
         LOGGER.timebase_frequency = timebase_frequency;
@@ -63,4 +57,11 @@ pub fn initialize_log(device_tree: &Fdt) {
     };
     log::set_max_level(LevelFilter::Trace);
     info!("timebase frequency is {timebase_frequency}");
+}
+
+fn find_timebase_frequency(device_tree: &Fdt) -> Option<usize> {
+    device_tree
+        .find_node("/cpus")?
+        .property("timebase-frequency")?
+        .as_usize()
 }
