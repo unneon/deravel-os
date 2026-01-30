@@ -2,24 +2,30 @@ use core::marker::PhantomData;
 use core::mem::transmute;
 use core::ops::{BitOr, Deref};
 
-pub macro features($driver:ident $struct:ident $base:literal $($name:ident $bit:literal)*) {
+pub macro features($driver:ident $struct:ident $base:literal $($has_name:ident $enable_name:ident $bit:literal)*) {
     #[derive(Default)]
-    pub struct $struct;
+    pub struct $struct(u32);
 
-    impl DeviceFeatures<$struct> {
-        $(pub fn $name(&self) -> bool {
+    impl $struct {
+        $(pub fn $has_name(&self) -> bool {
             self.0 & (1 << $bit) != 0
-        })*
-    }
+        }
 
-    impl DriverFeatures<$struct> {
-        $(pub fn $name(&mut self) {
+        pub fn $enable_name(&mut self) {
             self.0 |= 1 << $bit;
         })*
     }
 
     impl crate::virtio::registers::DriverWithFeatureSection<{($base as u32).div_exact(32).unwrap() }> for $driver {
         type Features = $struct;
+
+        fn features_from_mask(bits: u32) -> $struct {
+            $struct(bits)
+        }
+
+        fn features_to_mask(features: Self::Features) -> u32 {
+            features.0
+        }
     }
 }
 
@@ -39,15 +45,14 @@ pub trait Driver {
 
 pub trait DriverWithFeatureSection<const SEL: u32> {
     type Features;
+
+    fn features_from_mask(bits: u32) -> Self::Features;
+
+    fn features_to_mask(features: Self::Features) -> u32;
 }
 
 pub trait Readable {}
 pub trait Writable {}
-
-pub struct DeviceFeatures<T>(u32, PhantomData<T>);
-
-#[derive(Default)]
-pub struct DriverFeatures<T>(u32, PhantomData<T>);
 
 pub struct Mmio<T, Access = ReadWrite>(*mut T, PhantomData<Access>);
 
@@ -102,22 +107,21 @@ impl<T: Driver> Registers<T> {
         Mmio(base_address, PhantomData)
     }
 
-    pub fn device_features<const SEL: u32>(self: Mmio<Self>) -> DeviceFeatures<T::Features>
+    pub fn device_features<const SEL: u32>(self: Mmio<Self>) -> T::Features
     where
         T: DriverWithFeatureSection<SEL>,
     {
         self.raw_host_features_sel().write(SEL);
-        DeviceFeatures(self.raw_host_features().read(), PhantomData)
+        T::features_from_mask(self.raw_host_features().read())
     }
 
-    pub fn driver_features_write<const SEL: u32>(
-        self: Mmio<Self>,
-        driver_features: &DriverFeatures<T::Features>,
-    ) where
+    pub fn driver_features_write<const SEL: u32>(self: Mmio<Self>, features: T::Features)
+    where
         T: DriverWithFeatureSection<SEL>,
     {
         self.raw_driver_features_sel().write(SEL);
-        self.raw_driver_features().write(driver_features.0);
+        self.raw_driver_features()
+            .write(T::features_to_mask(features));
     }
 }
 

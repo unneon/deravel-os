@@ -1,8 +1,7 @@
 use crate::PAGE_SIZE;
 use crate::virtio::queue::{QUEUE_SIZE, Queue};
 use crate::virtio::registers::{
-    DeviceFeatures, Driver, DriverFeatures, Mmio, Registers, STATUS_ACKNOWLEDGE, STATUS_DRIVER,
-    STATUS_DRIVER_OK, features, mmio,
+    Driver, Mmio, Registers, STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, features, mmio,
 };
 use core::marker::PhantomData;
 use log::{debug, error};
@@ -20,7 +19,7 @@ mmio! { pub struct Config {
 } }
 
 features! { VirtioNet Features 0
-    mac 5
+    has_mac enable_mac 5
 }
 
 #[repr(C, packed)]
@@ -191,12 +190,12 @@ fn initialize_device(regs: Mmio<Registers<VirtioNet>>) {
     regs.status().or(STATUS_ACKNOWLEDGE);
     regs.status().or(STATUS_DRIVER);
 
-    let device_features: DeviceFeatures<_> = regs.device_features();
-    assert!(device_features.mac());
+    let device_features = regs.device_features();
+    assert!(device_features.has_mac());
 
-    let mut driver_features: DriverFeatures<_> = DriverFeatures::default();
-    driver_features.mac();
-    regs.driver_features_write(&driver_features);
+    let mut driver_features = Features::default();
+    driver_features.enable_mac();
+    regs.driver_features_write(driver_features);
 
     regs.guest_page_size().write(PAGE_SIZE as u32);
 
