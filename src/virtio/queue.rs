@@ -1,5 +1,5 @@
 use crate::PAGE_SIZE;
-use crate::virtio::registers::{Mmio, ReadWrite, Registers};
+use crate::virtio::registers::{Driver, Mmio, Registers};
 
 pub const QUEUE_SIZE: usize = 16;
 
@@ -42,7 +42,7 @@ const VIRTQ_DESC_F_NEXT: u16 = 1;
 const VIRTQ_DESC_F_WRITE: u16 = 2;
 
 impl Queue {
-    pub fn initialize<T>(&self, queue_index: u32, regs: Mmio<Registers<T>, ReadWrite>) {
+    pub fn initialize<T: Driver>(&self, queue_index: u32, regs: Mmio<Registers<T>>) {
         regs.queue_sel().write(queue_index);
         assert_eq!(regs.queue_pfn().read(), 0);
         assert!(QUEUE_SIZE <= regs.queue_size_max().read() as usize);
@@ -68,11 +68,11 @@ impl Queue {
         descriptor.next = next.unwrap_or(0);
     }
 
-    pub fn send_and_recv<T>(
+    pub fn send_and_recv<T: Driver>(
         &mut self,
         descriptor: u16,
         queue_index: u32,
-        regs: Mmio<Registers<T>, ReadWrite>,
+        regs: Mmio<Registers<T>>,
     ) {
         self.available.ring[self.available.index as usize % QUEUE_SIZE] = descriptor;
         self.available.index += 1;

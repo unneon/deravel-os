@@ -1,11 +1,12 @@
 use crate::PAGE_SIZE;
 use crate::virtio::queue::{QUEUE_SIZE, Queue};
 use crate::virtio::registers::{
-    Mmio, Registers, STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, mmio,
+    DeviceFeatures, Driver, DriverFeatures, Mmio, Registers, STATUS_ACKNOWLEDGE, STATUS_DRIVER,
+    STATUS_DRIVER_OK, features, mmio,
 };
 use core::marker::PhantomData;
 use log::{debug, error};
-use smoltcp::iface::{Config, Interface, SocketSet, SocketStorage};
+use smoltcp::iface::{Interface, SocketSet, SocketStorage};
 use smoltcp::phy::{DeviceCapabilities, Medium};
 use smoltcp::socket::dns;
 use smoltcp::socket::dns::{DnsQuery, GetQueryResultError};
@@ -14,9 +15,13 @@ use smoltcp::wire::{
     DnsQueryType, EthernetAddress, HardwareAddress, IpAddress, IpCidr, Ipv4Address,
 };
 
-mmio! { pub struct Configuration {
-    0x000 mac: EthernetAddress Readonly,
+mmio! { pub struct Config {
+    0x000 mac: Readonly EthernetAddress,
 } }
+
+features! { VirtioNet Features 0
+    mac 5
+}
 
 #[repr(C, packed)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -36,15 +41,13 @@ struct Packet<T> {
     payload: T,
 }
 
-pub struct PacketReceiveToken<'a>(Mmio<Registers<Configuration>>, PhantomData<&'a mut ()>);
+pub struct PacketReceiveToken<'a>(Mmio<Registers<VirtioNet>>, PhantomData<&'a mut ()>);
 
-pub struct PacketTransmitToken<'a>(Mmio<Registers<Configuration>>, PhantomData<&'a ()>);
+pub struct PacketTransmitToken<'a>(Mmio<Registers<VirtioNet>>, PhantomData<&'a ()>);
 
 pub struct VirtioNet {
-    regs: Mmio<Registers<Configuration>>,
+    regs: Mmio<Registers<VirtioNet>>,
 }
-
-const VIRTIO_NET_F_MAC: u32 = 1 << 5;
 
 static mut RECEIVE_QUEUE: Queue = unsafe { core::mem::zeroed() };
 static mut RECEIVE_BUFFERS: [Packet<[u8; 1514]>; QUEUE_SIZE] = unsafe { core::mem::zeroed() };
@@ -52,14 +55,14 @@ static mut TRANSMIT_QUEUE: Queue = unsafe { core::mem::zeroed() };
 static mut TRANSMIT_BUFFERS: [Packet<[u8; 1514]>; QUEUE_SIZE] = unsafe { core::mem::zeroed() };
 
 impl VirtioNet {
-    pub fn new(regs: Mmio<Registers<Configuration>>) -> VirtioNet {
+    pub fn new(regs: Mmio<Registers<VirtioNet>>) -> VirtioNet {
         initialize_device(regs);
         VirtioNet { regs }
     }
 
     pub fn demo(&mut self) {
         let mut iface = Interface::new(
-            Config::new(HardwareAddress::Ethernet(self.regs.config().mac().read())),
+            smoltcp::iface::Config::new(HardwareAddress::Ethernet(self.regs.config().mac().read())),
             self,
             Instant::from_secs(0),
         );
@@ -103,6 +106,10 @@ impl VirtioNet {
             }
         }
     }
+}
+
+impl Driver for VirtioNet {
+    type Config = Config;
 }
 
 impl smoltcp::phy::Device for VirtioNet {
@@ -179,16 +186,17 @@ impl smoltcp::phy::TxToken for PacketTransmitToken<'_> {
     }
 }
 
-fn initialize_device(regs: Mmio<Registers<Configuration>>) {
+fn initialize_device(regs: Mmio<Registers<VirtioNet>>) {
     regs.status().write(0);
     regs.status().or(STATUS_ACKNOWLEDGE);
     regs.status().or(STATUS_DRIVER);
 
-    regs.host_features_sel().write(0);
-    assert_ne!(regs.host_features().read() & VIRTIO_NET_F_MAC, 0);
+    let device_features: DeviceFeatures<_> = regs.device_features();
+    assert!(device_features.mac());
 
-    regs.driver_features_sel().write(0);
-    regs.driver_features().write(VIRTIO_NET_F_MAC);
+    let mut driver_features: DriverFeatures<_> = DriverFeatures::default();
+    driver_features.mac();
+    regs.driver_features_write(&driver_features);
 
     regs.guest_page_size().write(PAGE_SIZE as u32);
 
@@ -201,7 +209,7 @@ fn initialize_device(regs: Mmio<Registers<Configuration>>) {
     regs.status().or(STATUS_DRIVER_OK);
 }
 
-fn initialize_receive_buffers(regs: Mmio<Registers<Configuration>>) {
+fn initialize_receive_buffers(regs: Mmio<Registers<VirtioNet>>) {
     let queue = unsafe { &mut RECEIVE_QUEUE };
     for (i, buffer) in unsafe { RECEIVE_BUFFERS.iter_mut() }.enumerate() {
         queue.available.ring[i] = i as u16;

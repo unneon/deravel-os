@@ -2,6 +2,7 @@
 #![feature(adt_const_params)]
 #![feature(arbitrary_self_types)]
 #![feature(decl_macro)]
+#![feature(exact_div)]
 #![feature(iter_array_chunks)]
 #![feature(macro_metavar_expr_concat)]
 #![feature(never_type)]
