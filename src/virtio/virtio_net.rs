@@ -1,7 +1,7 @@
 use crate::PAGE_SIZE;
 use crate::virtio::queue::{QUEUE_SIZE, Queue};
 use crate::virtio::registers::{
-    Driver, Mmio, Registers, STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, features, mmio,
+    Mmio, Registers, STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, features, mmio,
 };
 use core::marker::PhantomData;
 use log::{debug, error};
@@ -40,12 +40,12 @@ struct Packet<T> {
     payload: T,
 }
 
-pub struct PacketReceiveToken<'a>(Mmio<Registers<VirtioNet>>, PhantomData<&'a mut ()>);
+pub struct PacketReceiveToken<'a>(Mmio<Registers<Config>>, PhantomData<&'a mut ()>);
 
-pub struct PacketTransmitToken<'a>(Mmio<Registers<VirtioNet>>, PhantomData<&'a ()>);
+pub struct PacketTransmitToken<'a>(Mmio<Registers<Config>>, PhantomData<&'a ()>);
 
 pub struct VirtioNet {
-    regs: Mmio<Registers<VirtioNet>>,
+    regs: Mmio<Registers<Config>>,
 }
 
 static mut RECEIVE_QUEUE: Queue = unsafe { core::mem::zeroed() };
@@ -54,7 +54,7 @@ static mut TRANSMIT_QUEUE: Queue = unsafe { core::mem::zeroed() };
 static mut TRANSMIT_BUFFERS: [Packet<[u8; 1514]>; QUEUE_SIZE] = unsafe { core::mem::zeroed() };
 
 impl VirtioNet {
-    pub fn new(regs: Mmio<Registers<VirtioNet>>) -> VirtioNet {
+    pub fn new(regs: Mmio<Registers<Config>>) -> VirtioNet {
         initialize_device(regs);
         VirtioNet { regs }
     }
@@ -105,10 +105,6 @@ impl VirtioNet {
             }
         }
     }
-}
-
-impl Driver for VirtioNet {
-    type Config = Config;
 }
 
 impl smoltcp::phy::Device for VirtioNet {
@@ -185,17 +181,19 @@ impl smoltcp::phy::TxToken for PacketTransmitToken<'_> {
     }
 }
 
-fn initialize_device(regs: Mmio<Registers<VirtioNet>>) {
+fn initialize_device(regs: Mmio<Registers<Config>>) {
     regs.status().write(0);
     regs.status().or(STATUS_ACKNOWLEDGE);
     regs.status().or(STATUS_DRIVER);
 
-    let device_features = regs.device_features();
-    assert!(device_features.has_mac());
+    regs.host_features_sel().write(0);
+    let host_features = Features(regs.host_features().read());
+    assert!(host_features.has_mac());
 
     let mut driver_features = Features::default();
     driver_features.enable_mac();
-    regs.driver_features_write(driver_features);
+    regs.driver_features_sel().write(0);
+    regs.driver_features().write(driver_features.into());
 
     regs.guest_page_size().write(PAGE_SIZE as u32);
 
@@ -208,7 +206,7 @@ fn initialize_device(regs: Mmio<Registers<VirtioNet>>) {
     regs.status().or(STATUS_DRIVER_OK);
 }
 
-fn initialize_receive_buffers(regs: Mmio<Registers<VirtioNet>>) {
+fn initialize_receive_buffers(regs: Mmio<Registers<Config>>) {
     let queue = unsafe { &mut RECEIVE_QUEUE };
     for (i, buffer) in unsafe { RECEIVE_BUFFERS.iter_mut() }.enumerate() {
         queue.available.ring[i] = i as u16;

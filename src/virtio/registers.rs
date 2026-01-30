@@ -16,14 +16,8 @@ pub macro features($driver:ident $struct:ident $base:literal $($has_name:ident $
         })*
     }
 
-    impl crate::virtio::registers::DriverWithFeatureSection<{($base as u32).div_exact(32).unwrap() }> for $driver {
-        type Features = $struct;
-
-        fn features_from_mask(bits: u32) -> $struct {
-            $struct(bits)
-        }
-
-        fn features_to_mask(features: Self::Features) -> u32 {
+    impl From<$struct> for u32 {
+        fn from(features: $struct) -> u32 {
             features.0
         }
     }
@@ -33,22 +27,10 @@ pub macro mmio($pub:vis $struct:ident $(<$($param:ident),*>)? $(where $param0:id
     $pub struct $struct $(<$($param),*> ($(PhantomData<$param>),*))?;
 
     impl$(<$($param),*>)? $struct $(<$($param),*>)? $(where $param0: $req0)? {
-        $($pub fn $field_name(self: Mmio<Self, ReadWrite>) -> Mmio<$field_type, crate::virtio::registers::$access> {
+        $($pub fn $field_name(self: Mmio<Self>) -> Mmio<$field_type, crate::virtio::registers::$access> {
             unsafe { transmute(self.0.byte_add($offset)) }
         })*
     }
-}
-
-pub trait Driver {
-    type Config;
-}
-
-pub trait DriverWithFeatureSection<const SEL: u32> {
-    type Features;
-
-    fn features_from_mask(bits: u32) -> Self::Features;
-
-    fn features_to_mask(features: Self::Features) -> u32;
 }
 
 pub trait Readable {}
@@ -60,15 +42,15 @@ pub struct Readonly;
 pub struct Writeonly;
 pub struct ReadWrite;
 
-mmio! { pub Registers<T> where T: Driver
+mmio! { pub Registers<T>
     0x000 magic_value: Readonly u32,
     0x004 version: Readonly u32,
     0x008 device_id: Readonly u32,
     0x00c vendor_id: Readonly u32,
-    0x010 raw_host_features: Readonly u32,
-    0x014 raw_host_features_sel: Writeonly u32,
-    0x020 raw_driver_features: Writeonly u32,
-    0x024 raw_driver_features_sel: Writeonly u32,
+    0x010 host_features: Readonly u32,
+    0x014 host_features_sel: Writeonly u32,
+    0x020 driver_features: Writeonly u32,
+    0x024 driver_features_sel: Writeonly u32,
     0x028 guest_page_size: Writeonly u32,
     0x030 queue_sel: Writeonly u32,
     0x034 queue_size_max: Readonly u32,
@@ -77,7 +59,7 @@ mmio! { pub Registers<T> where T: Driver
     0x040 queue_pfn: ReadWrite u32,
     0x050 queue_notify: Writeonly u32,
     0x070 status: ReadWrite u32,
-    0x100 config: ReadWrite <T as Driver>::Config,
+    0x100 config: ReadWrite T,
 }
 
 pub const STATUS_ACKNOWLEDGE: u32 = 1;
@@ -102,39 +84,14 @@ impl<T: BitOr<Output = T>, Access: Readable + Writable> Mmio<T, Access> {
     }
 }
 
-impl<T: Driver> Registers<T> {
-    pub unsafe fn new(base_address: *mut Self) -> Mmio<Self, ReadWrite> {
+impl Registers<()> {
+    pub unsafe fn new(base_address: *mut Self) -> Mmio<Self> {
         Mmio(base_address, PhantomData)
     }
 
-    pub fn device_features<const SEL: u32>(self: Mmio<Self>) -> T::Features
-    where
-        T: DriverWithFeatureSection<SEL>,
-    {
-        self.raw_host_features_sel().write(SEL);
-        T::features_from_mask(self.raw_host_features().read())
-    }
-
-    pub fn driver_features_write<const SEL: u32>(self: Mmio<Self>, features: T::Features)
-    where
-        T: DriverWithFeatureSection<SEL>,
-    {
-        self.raw_driver_features_sel().write(SEL);
-        self.raw_driver_features()
-            .write(T::features_to_mask(features));
-    }
-}
-
-impl Registers<()> {
-    pub unsafe fn with_configuration<T>(
-        self: Mmio<Registers<()>, ReadWrite>,
-    ) -> Mmio<Registers<T>, ReadWrite> {
+    pub unsafe fn with_configuration<T>(self: Mmio<Registers<()>>) -> Mmio<Registers<T>> {
         Mmio(self.0 as *mut Registers<T>, PhantomData)
     }
-}
-
-impl Driver for () {
-    type Config = ();
 }
 
 impl Readable for Readonly {}

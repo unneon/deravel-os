@@ -1,7 +1,7 @@
 use crate::PAGE_SIZE;
 use crate::virtio::queue::Queue;
 use crate::virtio::registers::{
-    Driver, Mmio, Registers, STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, mmio,
+    Mmio, Registers, STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, mmio,
 };
 use log::{debug, info};
 
@@ -17,7 +17,7 @@ struct Header {
 }
 
 pub struct VirtioBlk {
-    regs: Mmio<Registers<VirtioBlk>>,
+    regs: Mmio<Registers<Config>>,
 }
 
 #[derive(Debug)]
@@ -29,7 +29,7 @@ pub const VIRTIO_BLK_T_OUT: u32 = 1;
 static mut VIRTQ: Queue = unsafe { core::mem::zeroed() };
 
 impl VirtioBlk {
-    pub fn new(regs: Mmio<Registers<VirtioBlk>>) -> VirtioBlk {
+    pub fn new(regs: Mmio<Registers<Config>>) -> VirtioBlk {
         initialize_device(regs);
         VirtioBlk { regs }
     }
@@ -72,11 +72,7 @@ impl VirtioBlk {
     }
 }
 
-impl Driver for VirtioBlk {
-    type Config = Config;
-}
-
-fn initialize_device(regs: Mmio<Registers<VirtioBlk>>) {
+fn initialize_device(regs: Mmio<Registers<Config>>) {
     regs.status().write(0);
     regs.status().or(STATUS_ACKNOWLEDGE);
     regs.status().or(STATUS_DRIVER);
