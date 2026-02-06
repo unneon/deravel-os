@@ -19,7 +19,7 @@ use crate::log::initialize_log;
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use crate::virtio::initialize_all_virtio_mmio;
 use ::log::{debug, error, info};
-use core::arch::{asm, naked_asm};
+use core::arch::naked_asm;
 use core::panic::PanicInfo;
 use fdt::Fdt;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
@@ -54,11 +54,14 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     log_sbi_metadata();
     initialize_all_virtio_mmio(&device_tree);
 
+    unsafe { IDLE_PROC = create_process(0) };
+    unsafe { (*IDLE_PROC).pid = 0 };
+    unsafe { CURRENT_PROC = IDLE_PROC };
     unsafe { PROC_A = create_process(proc_a_entry as *const () as usize) };
     unsafe { PROC_B = create_process(proc_b_entry as *const () as usize) };
-    proc_a_entry();
 
-    sbi::system_reset(ResetType::Shutdown, ResetReason::NoReason).unwrap()
+    yield_();
+    panic!("switched to idle process");
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -75,9 +78,12 @@ struct Process {
     stack: [u8; 8192],
 }
 
-static mut PROCESSES: [Process; 8] = [unsafe { core::mem::zeroed() }; 8];
+const PROCESS_COUNT: usize = 8;
+static mut PROCESSES: [Process; PROCESS_COUNT] = unsafe { core::mem::zeroed() };
 static mut PROC_A: *mut Process = core::ptr::null_mut();
 static mut PROC_B: *mut Process = core::ptr::null_mut();
+static mut CURRENT_PROC: *mut Process = core::ptr::null_mut();
+static mut IDLE_PROC: *mut Process = core::ptr::null_mut();
 
 fn create_process(pc: usize) -> *mut Process {
     let (i, proc) = unsafe {
@@ -89,7 +95,7 @@ fn create_process(pc: usize) -> *mut Process {
     .unwrap();
     let stack_size = proc.stack.len();
     unsafe { *(proc.stack.as_ptr().byte_add(stack_size).byte_sub(8 * 13) as *mut usize) = pc };
-    proc.pid = i as u32;
+    proc.pid = i as u32 + 1;
     proc.state = ProcessState::Runnable;
     proc.sp = (proc.stack.as_ptr() as usize) + stack_size - 8 * 13;
     proc
@@ -105,7 +111,7 @@ fn proc_a_entry() {
     info!("starting process A");
     loop {
         debug!("A");
-        unsafe { switch_context(&mut (*PROC_A).sp, &mut (*PROC_B).sp) };
+        yield_();
         delay();
     }
 }
@@ -114,9 +120,31 @@ fn proc_b_entry() {
     info!("starting process B");
     loop {
         debug!("B");
-        unsafe { switch_context(&mut (*PROC_B).sp, &mut (*PROC_A).sp) };
+        yield_();
         delay();
     }
+}
+
+fn yield_() {
+    let current_proc = unsafe { &*CURRENT_PROC };
+    let mut next = unsafe { IDLE_PROC };
+    for i in 0..PROCESS_COUNT {
+        let proc = unsafe { &PROCESSES[(current_proc.pid as usize + i) % PROCESS_COUNT] };
+        if proc.state == ProcessState::Runnable && proc.pid > 0 {
+            next = proc as *const Process as *mut Process;
+            break;
+        }
+    }
+
+    if next == unsafe { CURRENT_PROC } {
+        return;
+    }
+
+    unsafe { riscv::register::sscratch::write((*next).stack.as_ptr().add(8192) as usize) };
+
+    let prev = unsafe { CURRENT_PROC };
+    unsafe { CURRENT_PROC = next };
+    unsafe { switch_context(&mut (*prev).sp, &mut (*next).sp) }
 }
 
 #[unsafe(naked)]
@@ -162,13 +190,64 @@ fn clear_bss() {
 }
 
 fn initialize_trap_handler() {
-    let address = trap_handler as *const () as usize;
+    let address = trap_entry as *const () as usize;
     unsafe { riscv::register::stvec::write(Stvec::new(address, TrapMode::Direct)) }
 }
 
+#[unsafe(naked)]
 #[unsafe(no_mangle)]
-unsafe extern "riscv-interrupt-s" fn trap_handler() {
-    unsafe { asm!(".align 4") }
+unsafe extern "C" fn trap_entry() {
+    naked_asm!(
+        ".align 4",
+
+        "csrrw sp, sscratch, sp",
+
+        "addi sp, sp, -8 * 31",
+        "sd ra, 8 * 0(sp)",
+        "sd gp, 8 * 1(sp)",
+        "sd tp, 8 * 2(sp)",
+        "sd t0, 8 * 3(sp)",
+        "sd t1, 8 * 4(sp)",
+        "sd t2, 8 * 5(sp)",
+        "sd t3, 8 * 6(sp)",
+        "sd t4, 8 * 7(sp)",
+        "sd t5, 8 * 8(sp)",
+        "sd t6, 8 * 9(sp)",
+        "sd a0, 8 * 10(sp)",
+        "sd a1, 8 * 11(sp)",
+        "sd a2, 8 * 12(sp)",
+        "sd a3, 8 * 13(sp)",
+        "sd a4, 8 * 14(sp)",
+        "sd a5, 8 * 15(sp)",
+        "sd a6, 8 * 16(sp)",
+        "sd a7, 8 * 17(sp)",
+        "sd s0, 8 * 18(sp)",
+        "sd s1, 8 * 19(sp)",
+        "sd s2, 8 * 20(sp)",
+        "sd s3, 8 * 21(sp)",
+        "sd s4, 8 * 22(sp)",
+        "sd s5, 8 * 23(sp)",
+        "sd s6, 8 * 24(sp)",
+        "sd s7, 8 * 25(sp)",
+        "sd s8, 8 * 26(sp)",
+        "sd s9, 8 * 27(sp)",
+        "sd s10, 8 * 28(sp)",
+        "sd s11, 8 * 29(sp)",
+
+        "csrr a0, sscratch",
+        "sd a0, 8 * 30(sp)",
+
+        "addi a0, sp, 8 * 31",
+        "csrw sscratch, a0",
+
+        "mv a0, sp",
+        "call {handle_trap}",
+
+        handle_trap = sym handle_trap,
+    )
+}
+
+fn handle_trap() {
     let scause = riscv::register::scause::read()
         .cause()
         .try_into::<Interrupt, Exception>()
