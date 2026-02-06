@@ -1,10 +1,5 @@
-[package]
-name = "deravel"
-version = "0.0.0"
-edition = "2024"
-
-[dependencies]
-fdt = { version = "0.1", features = ["pretty-printing"] }
-log = "0.4"
-riscv = "0.16"
-smoltcp = { version = "0.12", features = ["log", "medium-ethernet", "proto-ipv4", "socket-dns", "socket-udp"], default-features = false }
+[workspace]
+members = [
+    "kernel",
+]
+resolver = "3"

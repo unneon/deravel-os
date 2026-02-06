@@ -15,8 +15,8 @@ static mut LOGGER: Logger = Logger {
 };
 
 impl log::Log for Logger {
-    fn enabled(&self, metadata: &Metadata) -> bool {
-        metadata.target().starts_with(env!("CARGO_PKG_NAME"))
+    fn enabled(&self, _: &Metadata) -> bool {
+        true
     }
 
     fn log(&self, record: &Record) {
@@ -40,7 +40,7 @@ impl log::Log for Logger {
 
 impl core::fmt::Display for PrettyModulePath<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        if self.0 == "deravel" {
+        if self.0 == "deravel_kernel" {
             return Ok(());
         }
         let last = self.0.split("::").last().unwrap();
