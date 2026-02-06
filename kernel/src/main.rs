@@ -20,16 +20,16 @@ use crate::heap::alloc_page;
 use crate::log::initialize_log;
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use crate::virtio::initialize_all_virtio_mmio;
-use ::log::error;
+use ::log::{debug, error};
 use core::arch::{asm, naked_asm};
 use core::mem::transmute;
 use core::panic::PanicInfo;
 use elf::ElfBytes;
 use elf::endian::LittleEndian;
 use fdt::Fdt;
+use riscv::interrupt::Trap;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
 use riscv::register::satp::{Mode, Satp};
-use riscv::register::sstatus::Sstatus;
 use riscv::register::stvec::{Stvec, TrapMode};
 
 unsafe extern "C" {
@@ -105,7 +105,7 @@ static mut CURRENT_PROC: *mut Process = core::ptr::null_mut();
 static mut IDLE_PROC: *mut Process = core::ptr::null_mut();
 
 fn user_entry() -> ! {
-    let mut sstatus = Sstatus::from_bits(0);
+    let mut sstatus = riscv::register::sstatus::read();
     sstatus.set_spie(true);
 
     unsafe { riscv::register::sepc::write(0x1000000) };
@@ -332,6 +332,39 @@ unsafe extern "C" fn trap_entry() {
         "mv a0, sp",
         "call {handle_trap}",
 
+        "ld ra, 8 * 0(sp)",
+        "ld gp, 8 * 1(sp)",
+        "ld tp, 8 * 2(sp)",
+        "ld t0, 8 * 3(sp)",
+        "ld t1, 8 * 4(sp)",
+        "ld t2, 8 * 5(sp)",
+        "ld t3, 8 * 6(sp)",
+        "ld t4, 8 * 7(sp)",
+        "ld t5, 8 * 8(sp)",
+        "ld t6, 8 * 9(sp)",
+        "ld a0, 8 * 10(sp)",
+        "ld a1, 8 * 11(sp)",
+        "ld a2, 8 * 12(sp)",
+        "ld a3, 8 * 13(sp)",
+        "ld a4, 8 * 14(sp)",
+        "ld a5, 8 * 15(sp)",
+        "ld a6, 8 * 16(sp)",
+        "ld a7, 8 * 17(sp)",
+        "ld s0, 8 * 18(sp)",
+        "ld s1, 8 * 19(sp)",
+        "ld s2, 8 * 20(sp)",
+        "ld s3, 8 * 21(sp)",
+        "ld s4, 8 * 22(sp)",
+        "ld s5, 8 * 23(sp)",
+        "ld s6, 8 * 24(sp)",
+        "ld s7, 8 * 25(sp)",
+        "ld s8, 8 * 26(sp)",
+        "ld s9, 8 * 27(sp)",
+        "ld s10, 8 * 28(sp)",
+        "ld s11, 8 * 29(sp)",
+        "ld sp, 8 * 30(sp)",
+        "sret",
+
         handle_trap = sym handle_trap,
     )
 }
@@ -342,13 +375,21 @@ fn handle_trap() {
         .try_into::<Interrupt, Exception>()
         .unwrap();
     let stval = riscv::register::stval::read();
-    let user_pc = riscv::register::sepc::read();
-    panic!("unexpected trap scause={scause:?} stval={stval:#x} user_pc={user_pc:#x}");
+    let mut user_pc = riscv::register::sepc::read();
+    if scause == Trap::Exception(Exception::UserEnvCall) {
+        debug!("user syscall invoked");
+        user_pc += 4;
+    } else {
+        panic!("unexpected trap scause={scause:?} stval={stval:#x} user_pc={user_pc:#x}");
+    }
+    unsafe { riscv::register::sepc::write(user_pc) };
 }
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    error!("{}", info);
+    let location = info.location().unwrap();
+    let message = info.message();
+    error!("panicked at {location}: {message}");
     let _ = sbi::system_reset(ResetType::Shutdown, ResetReason::SystemFailure);
     loop {}
 }

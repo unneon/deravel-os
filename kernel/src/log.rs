@@ -7,7 +7,7 @@ struct Logger {
     timebase_frequency: usize,
 }
 
-struct PrettyModulePath<'a>(&'a str);
+struct PrettyModulePath<'a>(Option<&'a str>);
 
 static mut LOGGER: Logger = Logger {
     start_time: 0,
@@ -30,7 +30,7 @@ impl log::Log for Logger {
                 Level::Debug => "\x1B[1;36mDEBG\x1B[0m",
                 Level::Trace => "\x1B[1;34mTRCE\x1B[0m",
             };
-            let module = PrettyModulePath(record.module_path().unwrap());
+            let module = PrettyModulePath(record.module_path());
             sbi::console_writeln!("[{time:>13.7}] {level} {module}{}", record.args());
         }
     }
@@ -40,10 +40,13 @@ impl log::Log for Logger {
 
 impl core::fmt::Display for PrettyModulePath<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        if self.0 == "deravel_kernel" {
+        let Some(path) = self.0 else {
+            return Ok(());
+        };
+        if path == "deravel_kernel" {
             return Ok(());
         }
-        let last = self.0.split("::").last().unwrap();
+        let last = path.split("::").last().unwrap();
         write!(f, "\x1B[1m{last}: \x1B[0m")
     }
 }

@@ -1,6 +1,8 @@
 #![feature(decl_macro)]
 #![no_std]
 
+use core::arch::asm;
+
 pub macro app($main:ident) {
     unsafe extern "C" {
         static mut __deravel_stack_top: u8;
@@ -22,7 +24,9 @@ pub macro app($main:ident) {
 }
 
 pub fn exit() -> ! {
-    loop {}
+    loop {
+        unsafe { asm!("nop") }
+    }
 }
 
 pub fn putchar(_ch: u8) {}
