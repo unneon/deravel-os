@@ -20,13 +20,16 @@ use crate::heap::alloc_page;
 use crate::log::initialize_log;
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use crate::virtio::initialize_all_virtio_mmio;
-use ::log::{debug, error, info};
-use core::arch::naked_asm;
+use ::log::error;
+use core::arch::{asm, naked_asm};
 use core::mem::transmute;
 use core::panic::PanicInfo;
+use elf::ElfBytes;
+use elf::endian::LittleEndian;
 use fdt::Fdt;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
 use riscv::register::satp::{Mode, Satp};
+use riscv::register::sstatus::Sstatus;
 use riscv::register::stvec::{Stvec, TrapMode};
 
 unsafe extern "C" {
@@ -63,17 +66,11 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     log_sbi_metadata();
     initialize_all_virtio_mmio(&device_tree);
 
-    debug!(
-        "hello app ELF path is {}",
-        env!("CARGO_BIN_FILE_DERAVEL_HELLO")
-    );
-    debug!("hello app ELF size is {}", HELLO_ELF.len());
-
-    unsafe { IDLE_PROC = create_process(0) };
-    unsafe { (*IDLE_PROC).pid = 0 };
+    unsafe { IDLE_PROC = create_idle_process() };
     unsafe { CURRENT_PROC = IDLE_PROC };
-    unsafe { PROC_A = create_process(proc_a_entry as *const () as usize) };
-    unsafe { PROC_B = create_process(proc_b_entry as *const () as usize) };
+
+    let hello = ElfBytes::<LittleEndian>::minimal_parse(HELLO_ELF).unwrap();
+    create_process(&hello);
 
     yield_();
     panic!("switched to idle process");
@@ -101,12 +98,20 @@ const PAGE_V: usize = 1 << 0;
 const PAGE_R: usize = 1 << 1;
 const PAGE_W: usize = 1 << 2;
 const PAGE_X: usize = 1 << 3;
+const PAGE_U: usize = 1 << 4;
 
 static mut PROCESSES: [Process; PROCESS_COUNT] = unsafe { core::mem::zeroed() };
-static mut PROC_A: *mut Process = core::ptr::null_mut();
-static mut PROC_B: *mut Process = core::ptr::null_mut();
 static mut CURRENT_PROC: *mut Process = core::ptr::null_mut();
 static mut IDLE_PROC: *mut Process = core::ptr::null_mut();
+
+fn user_entry() -> ! {
+    let mut sstatus = Sstatus::from_bits(0);
+    sstatus.set_spie(true);
+
+    unsafe { riscv::register::sepc::write(0x1000000) };
+    unsafe { riscv::register::sstatus::write(sstatus) };
+    unsafe { asm!("sret", options(noreturn)) }
+}
 
 fn map_page(table2: &mut PageTable, virtual_addr: usize, physical_addr: usize, flags: usize) {
     assert!(virtual_addr.is_multiple_of(4096));
@@ -132,7 +137,16 @@ fn map_page(table2: &mut PageTable, virtual_addr: usize, physical_addr: usize, f
     table0.0[vpn0] = ((physical_addr / PAGE_SIZE) << 10) | PAGE_V | flags;
 }
 
-fn create_process(pc: usize) -> *mut Process {
+fn create_idle_process() -> *mut Process {
+    let proc = unsafe { &mut PROCESSES[0] };
+    proc.pid = 0;
+    proc.state = ProcessState::Runnable;
+    proc.sp = 0;
+    proc.page_table = core::ptr::null_mut();
+    proc
+}
+
+fn create_process(elf: &ElfBytes<LittleEndian>) -> *mut Process {
     let (i, proc) = unsafe {
         PROCESSES
             .iter_mut()
@@ -141,7 +155,10 @@ fn create_process(pc: usize) -> *mut Process {
     }
     .unwrap();
     let stack_size = proc.stack.len();
-    unsafe { *(proc.stack.as_ptr().byte_add(stack_size).byte_sub(8 * 13) as *mut usize) = pc };
+    unsafe {
+        *(proc.stack.as_ptr().byte_add(stack_size).byte_sub(8 * 13) as *mut usize) =
+            user_entry as *const () as usize
+    };
 
     let page_table =
         unsafe { transmute::<&'static mut [u8; 4096], &'static mut PageTable>(alloc_page()) };
@@ -156,35 +173,39 @@ fn create_process(pc: usize) -> *mut Process {
         physical_addr += 4096;
     }
 
+    let (sections, section_names) = elf.section_headers_with_strtab().unwrap();
+    let sections = sections.unwrap();
+    let section_names = section_names.unwrap();
+    for section in sections {
+        let name = section_names.get(section.sh_name as usize).unwrap();
+        if name == ".text" {
+            let data = elf.section_data(&section).unwrap().0;
+
+            let mut offset = 0;
+            while offset < section.sh_size as usize {
+                let page = alloc_page();
+
+                let remaining = section.sh_size as usize - offset;
+                let copy_size = if remaining >= 4096 { 4096 } else { remaining };
+
+                page[..copy_size].copy_from_slice(&data[offset..offset + copy_size]);
+                map_page(
+                    page_table,
+                    section.sh_addr as usize + offset,
+                    page as *const _ as usize,
+                    PAGE_U | PAGE_R | PAGE_W | PAGE_X,
+                );
+
+                offset += 4096;
+            }
+        }
+    }
+
     proc.pid = i as u32 + 1;
     proc.state = ProcessState::Runnable;
     proc.sp = (proc.stack.as_ptr() as usize) + stack_size - 8 * 13;
     proc.page_table = page_table;
     proc
-}
-
-fn delay() {
-    for _ in 0..1_000_000_000 {
-        riscv::asm::nop();
-    }
-}
-
-fn proc_a_entry() {
-    info!("starting process A");
-    loop {
-        debug!("A");
-        yield_();
-        delay();
-    }
-}
-
-fn proc_b_entry() {
-    info!("starting process B");
-    loop {
-        debug!("B");
-        yield_();
-        delay();
-    }
 }
 
 fn yield_() {
