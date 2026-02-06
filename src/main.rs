@@ -18,7 +18,7 @@ mod virtio;
 use crate::log::initialize_log;
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use crate::virtio::initialize_all_virtio_mmio;
-use ::log::error;
+use ::log::{debug, error, info};
 use core::arch::{asm, naked_asm};
 use core::panic::PanicInfo;
 use fdt::Fdt;
@@ -54,7 +54,106 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     log_sbi_metadata();
     initialize_all_virtio_mmio(&device_tree);
 
+    unsafe { PROC_A = create_process(proc_a_entry as *const () as usize) };
+    unsafe { PROC_B = create_process(proc_b_entry as *const () as usize) };
+    proc_a_entry();
+
     sbi::system_reset(ResetType::Shutdown, ResetReason::NoReason).unwrap()
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum ProcessState {
+    Unused,
+    Runnable,
+}
+
+#[derive(Clone, Copy)]
+struct Process {
+    pid: u32,
+    state: ProcessState,
+    sp: usize,
+    stack: [u8; 8192],
+}
+
+static mut PROCESSES: [Process; 8] = [unsafe { core::mem::zeroed() }; 8];
+static mut PROC_A: *mut Process = core::ptr::null_mut();
+static mut PROC_B: *mut Process = core::ptr::null_mut();
+
+fn create_process(pc: usize) -> *mut Process {
+    let (i, proc) = unsafe {
+        PROCESSES
+            .iter_mut()
+            .enumerate()
+            .find(|(_, proc)| proc.state == ProcessState::Unused)
+    }
+    .unwrap();
+    let stack_size = proc.stack.len();
+    unsafe { *(proc.stack.as_ptr().byte_add(stack_size).byte_sub(8 * 13) as *mut usize) = pc };
+    proc.pid = i as u32;
+    proc.state = ProcessState::Runnable;
+    proc.sp = (proc.stack.as_ptr() as usize) + stack_size - 8 * 13;
+    proc
+}
+
+fn delay() {
+    for _ in 0..1_000_000_000 {
+        riscv::asm::nop();
+    }
+}
+
+fn proc_a_entry() {
+    info!("starting process A");
+    loop {
+        debug!("A");
+        unsafe { switch_context(&mut (*PROC_A).sp, &mut (*PROC_B).sp) };
+        delay();
+    }
+}
+
+fn proc_b_entry() {
+    info!("starting process B");
+    loop {
+        debug!("B");
+        unsafe { switch_context(&mut (*PROC_B).sp, &mut (*PROC_A).sp) };
+        delay();
+    }
+}
+
+#[unsafe(naked)]
+unsafe extern "C" fn switch_context(prev_sp: *mut usize, next_sp: *mut usize) {
+    naked_asm!(
+        "addi sp, sp, -13 * 8",
+        "sd ra, 0 * 8(sp)",
+        "sd s0, 1 * 8(sp)",
+        "sd s1, 2 * 8(sp)",
+        "sd s2, 3 * 8(sp)",
+        "sd s3, 4 * 8(sp)",
+        "sd s4, 5 * 8(sp)",
+        "sd s5, 6 * 8(sp)",
+        "sd s6, 7 * 8(sp)",
+        "sd s7, 8 * 8(sp)",
+        "sd s8, 9 * 8(sp)",
+        "sd s9, 10 * 8(sp)",
+        "sd s10, 11 * 8(sp)",
+        "sd s11, 12 * 8(sp)",
+        "sd sp, (a0)",
+        "ld sp, (a1)",
+        "ld ra, 0 * 8(sp)",
+        "ld s0, 1 * 8(sp)",
+        "ld s1, 2 * 8(sp)",
+        "ld s2, 3 * 8(sp)",
+        "ld s3, 4 * 8(sp)",
+        "ld s4, 5 * 8(sp)",
+        "ld s5, 6 * 8(sp)",
+        "ld s6, 7 * 8(sp)",
+        "ld s7, 8 * 8(sp)",
+        "ld s8, 9 * 8(sp)",
+        "ld s9, 10 * 8(sp)",
+        "ld s10, 11 * 8(sp)",
+        "ld s11, 12 * 8(sp)",
+        "addi sp, sp, 13 * 8",
+        "ret",
+    )
 }
 
 fn clear_bss() {
