@@ -1,5 +1,7 @@
 [workspace]
 members = [
+    "apps/hello",
     "kernel",
+    "kernel-api",
 ]
 resolver = "3"

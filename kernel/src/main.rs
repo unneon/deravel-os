@@ -52,6 +52,8 @@ unsafe extern "C" fn boot() -> ! {
     )
 }
 
+const HELLO_ELF: &[u8] = include_bytes!(env!("CARGO_BIN_FILE_DERAVEL_HELLO"));
+
 fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     clear_bss();
 
@@ -60,6 +62,12 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     initialize_trap_handler();
     log_sbi_metadata();
     initialize_all_virtio_mmio(&device_tree);
+
+    debug!(
+        "hello app ELF path is {}",
+        env!("CARGO_BIN_FILE_DERAVEL_HELLO")
+    );
+    debug!("hello app ELF size is {}", HELLO_ELF.len());
 
     unsafe { IDLE_PROC = create_process(0) };
     unsafe { (*IDLE_PROC).pid = 0 };

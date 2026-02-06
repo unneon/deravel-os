@@ -27,14 +27,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
 
 [[package]]
+name = "deravel-hello"
+version = "0.0.0"
+dependencies = [
+ "deravel-kernel-api",
+]
+
+[[package]]
 name = "deravel-kernel"
 version = "0.0.0"
 dependencies = [
+ "deravel-hello",
  "fdt",
  "log",
  "riscv",
  "smoltcp",
 ]
+
+[[package]]
+name = "deravel-kernel-api"
+version = "0.0.0"
 
 [[package]]
 name = "embedded-hal"

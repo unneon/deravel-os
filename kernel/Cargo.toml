@@ -2,8 +2,10 @@
 name = "deravel-kernel"
 version = "0.0.0"
 edition = "2024"
+default-run = "deravel-kernel"
 
 [dependencies]
+deravel-hello = { path = "../apps/hello", artifact = "bin" }
 fdt = { version = "0.1", features = ["pretty-printing"] }
 log = "0.4"
 riscv = "0.16"
