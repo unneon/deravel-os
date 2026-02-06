@@ -11,6 +11,7 @@
 #![no_std]
 #![no_main]
 
+mod heap;
 mod log;
 mod sbi;
 mod virtio;
@@ -29,6 +30,8 @@ unsafe extern "C" {
     static mut bss_start: u8;
     static mut bss_end: u8;
     static mut stack_top: u8;
+    static mut heap_start: u8;
+    static mut heap_end: u8;
 }
 
 pub const PAGE_SIZE: usize = 4096;
