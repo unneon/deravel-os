@@ -16,17 +16,21 @@ mod log;
 mod sbi;
 mod virtio;
 
+use crate::heap::alloc_page;
 use crate::log::initialize_log;
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use crate::virtio::initialize_all_virtio_mmio;
 use ::log::{debug, error, info};
 use core::arch::naked_asm;
+use core::mem::transmute;
 use core::panic::PanicInfo;
 use fdt::Fdt;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
+use riscv::register::satp::{Mode, Satp};
 use riscv::register::stvec::{Stvec, TrapMode};
 
 unsafe extern "C" {
+    static mut kernel_base: u8;
     static mut bss_start: u8;
     static mut bss_end: u8;
     static mut stack_top: u8;
@@ -78,15 +82,47 @@ struct Process {
     pid: u32,
     state: ProcessState,
     sp: usize,
+    page_table: *const PageTable,
     stack: [u8; 8192],
 }
 
+struct PageTable([usize; 4096 / 8]);
+
 const PROCESS_COUNT: usize = 8;
+const PAGE_V: usize = 1 << 0;
+const PAGE_R: usize = 1 << 1;
+const PAGE_W: usize = 1 << 2;
+const PAGE_X: usize = 1 << 3;
+
 static mut PROCESSES: [Process; PROCESS_COUNT] = unsafe { core::mem::zeroed() };
 static mut PROC_A: *mut Process = core::ptr::null_mut();
 static mut PROC_B: *mut Process = core::ptr::null_mut();
 static mut CURRENT_PROC: *mut Process = core::ptr::null_mut();
 static mut IDLE_PROC: *mut Process = core::ptr::null_mut();
+
+fn map_page(table2: &mut PageTable, virtual_addr: usize, physical_addr: usize, flags: usize) {
+    assert!(virtual_addr.is_multiple_of(4096));
+    assert!(physical_addr.is_multiple_of(4096));
+
+    let vpn2 = (virtual_addr >> 30) & ((1 << 9) - 1);
+    if table2.0[vpn2] & PAGE_V == 0 {
+        let table1 = alloc_page();
+        table2.0[vpn2] = (((table1 as *mut _ as usize) / 4096) << 10) | PAGE_V;
+    }
+
+    let table1 = unsafe { &mut *(((table2.0[vpn2] >> 10) * 4096) as *mut PageTable) };
+    let vpn1 = (virtual_addr >> 21) & ((1 << 9) - 1);
+    if table1.0[vpn1] & PAGE_V == 0 {
+        let table0 = alloc_page();
+        table1.0[vpn1] = (((table0 as *mut _ as usize) / 4096) << 10) | PAGE_V;
+    }
+
+    let table0 = unsafe { &mut *(((table1.0[vpn1] >> 10) * 4096) as *mut PageTable) };
+    let vpn0 = (virtual_addr >> 12) & ((1 << 9) - 1);
+    assert!(table0.0[vpn0] & PAGE_V == 0);
+
+    table0.0[vpn0] = ((physical_addr / PAGE_SIZE) << 10) | PAGE_V | flags;
+}
 
 fn create_process(pc: usize) -> *mut Process {
     let (i, proc) = unsafe {
@@ -98,9 +134,24 @@ fn create_process(pc: usize) -> *mut Process {
     .unwrap();
     let stack_size = proc.stack.len();
     unsafe { *(proc.stack.as_ptr().byte_add(stack_size).byte_sub(8 * 13) as *mut usize) = pc };
+
+    let page_table =
+        unsafe { transmute::<&'static mut [u8; 4096], &'static mut PageTable>(alloc_page()) };
+    let mut physical_addr = (&raw const kernel_base) as usize;
+    while physical_addr < (&raw const heap_end) as usize {
+        map_page(
+            page_table,
+            physical_addr,
+            physical_addr,
+            PAGE_R | PAGE_W | PAGE_X,
+        );
+        physical_addr += 4096;
+    }
+
     proc.pid = i as u32 + 1;
     proc.state = ProcessState::Runnable;
     proc.sp = (proc.stack.as_ptr() as usize) + stack_size - 8 * 13;
+    proc.page_table = page_table;
     proc
 }
 
@@ -143,6 +194,12 @@ fn yield_() {
         return;
     }
 
+    let mut satp = Satp::from_bits(0);
+    satp.set_ppn((unsafe { (*next).page_table } as usize) / 4096);
+    satp.set_mode(Mode::Sv39);
+
+    riscv::asm::sfence_vma_all();
+    unsafe { riscv::register::satp::write(satp) };
     unsafe { riscv::register::sscratch::write((*next).stack.as_ptr().add(8192) as usize) };
 
     let prev = unsafe { CURRENT_PROC };
