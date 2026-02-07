@@ -1,9 +1,13 @@
 use crate::page::PAGE_SIZE;
-use crate::{heap_end, heap_start};
 use core::alloc::{GlobalAlloc, Layout};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 pub struct Heap;
+
+unsafe extern "C" {
+    static mut heap_start: u8;
+    static mut heap_end: u8;
+}
 
 #[global_allocator]
 static HEAP: Heap = Heap;

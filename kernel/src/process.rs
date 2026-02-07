@@ -1,6 +1,6 @@
+use crate::arch::RiscvRegisters;
 use crate::elf::load_elf;
 use crate::page::{PAGE_R, PAGE_SIZE, PAGE_W, PAGE_X, PageTable, map_pages};
-use crate::{RiscvRegisters, kernel_end, kernel_start};
 use alloc::boxed::Box;
 use riscv::register::satp::{Mode, Satp};
 
@@ -19,6 +19,11 @@ pub struct Process {
 }
 
 const PROCESS_COUNT: usize = 8;
+
+unsafe extern "C" {
+    static kernel_start: u8;
+    static kernel_end: u8;
+}
 
 pub static mut PROCESSES: [Process; PROCESS_COUNT] = unsafe { core::mem::zeroed() };
 pub static mut CURRENT_PROC: Option<usize> = None;
