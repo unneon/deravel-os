@@ -67,8 +67,8 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
 
     create_process(HELLO_ELF);
 
-    yield_();
-    unreachable!()
+    unsafe { asm!("csrw sscratch, sp") }
+    switch_to_scheduled_userspace();
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -78,13 +78,11 @@ enum ProcessState {
     Finished,
 }
 
-#[derive(Clone, Copy)]
 struct Process {
-    pid: u32,
     state: ProcessState,
-    sp: usize,
+    registers: RiscvRegisters,
+    pc: usize,
     page_table: *const PageTable,
-    stack: [u8; 8192],
 }
 
 const PROCESS_COUNT: usize = 8;
@@ -92,38 +90,26 @@ const PROCESS_COUNT: usize = 8;
 static mut PROCESSES: [Process; PROCESS_COUNT] = unsafe { core::mem::zeroed() };
 static mut CURRENT_PROC: Option<usize> = None;
 
-fn user_entry() -> ! {
-    let mut sstatus = riscv::register::sstatus::read();
-    sstatus.set_spie(true);
-
-    unsafe { riscv::register::sepc::write(0x1000000) };
-    unsafe { riscv::register::sstatus::write(sstatus) };
-    unsafe { asm!("sret", options(noreturn)) }
-}
-
-fn create_process(elf: &[u8]) -> *mut Process {
-    let (i, proc) = unsafe {
-        PROCESSES
-            .iter_mut()
-            .enumerate()
-            .find(|(_, proc)| proc.state == ProcessState::Unused)
-    }
-    .unwrap();
-    let stack_size = proc.stack.len();
-    unsafe {
-        *(proc.stack.as_ptr().byte_add(stack_size).byte_sub(8 * 13) as *mut usize) =
-            user_entry as *const () as usize
-    };
+fn create_process(elf: &[u8]) {
+    let pid = find_free_process_slot().unwrap();
 
     let mut page_table = Box::new(PageTable::default());
     map_kernel_memory(&mut page_table);
     load_elf(elf, &mut page_table);
 
-    proc.pid = i as u32 + 1;
+    let proc = unsafe { &mut PROCESSES[pid] };
     proc.state = ProcessState::Runnable;
-    proc.sp = (proc.stack.as_ptr() as usize) + stack_size - 8 * 13;
+    proc.pc = 0x1000000;
     proc.page_table = Box::leak(page_table);
-    proc
+}
+
+fn find_free_process_slot() -> Option<usize> {
+    for (i, process) in unsafe { PROCESSES.iter_mut().enumerate() } {
+        if process.state == ProcessState::Unused {
+            return Some(i);
+        }
+    }
+    None
 }
 
 fn map_kernel_memory(page_table: &mut PageTable) {
@@ -139,35 +125,70 @@ fn map_kernel_memory(page_table: &mut PageTable) {
     );
 }
 
-fn yield_() {
-    let Some(next_index) = find_runnable_process() else {
+fn switch_to_scheduled_userspace() -> ! {
+    let Some(next_pid) = find_runnable_process() else {
         info!("shutting down due to all processes finishing");
         sbi::system_reset(ResetType::Shutdown, ResetReason::NoReason).unwrap()
     };
 
-    if Some(next_index) == unsafe { CURRENT_PROC } {
-        return;
-    }
+    unsafe { CURRENT_PROC = Some(next_pid) };
 
-    let next = unsafe { &mut PROCESSES[next_index] };
-    let prev_sp = match unsafe { CURRENT_PROC } {
-        Some(current) => unsafe { &raw mut PROCESSES[current].sp },
-        None => {
-            static mut DUMMY_SP: usize = 0;
-            &raw mut DUMMY_SP
-        }
-    };
+    let next = unsafe { &mut PROCESSES[next_pid] };
 
     let mut satp = Satp::from_bits(0);
     satp.set_ppn(next.page_table as usize / PAGE_SIZE);
     satp.set_mode(Mode::Sv39);
 
+    let mut sstatus = riscv::register::sstatus::read();
+    sstatus.set_spie(true);
+
     riscv::asm::sfence_vma_all();
     unsafe { riscv::register::satp::write(satp) };
-    unsafe { riscv::register::sscratch::write(next.stack.as_ptr().add(8192) as usize) };
+    unsafe { riscv::register::sepc::write(next.pc) };
+    unsafe { riscv::register::sstatus::write(sstatus) };
 
-    unsafe { CURRENT_PROC = Some(next_index) };
-    unsafe { switch_context(prev_sp, &next.sp) }
+    raw_switch_to_userspace(&next.registers)
+}
+
+fn raw_switch_to_userspace(registers: &RiscvRegisters) -> ! {
+    unsafe {
+        asm!(
+            "ld ra, 8 * 0(t6)",
+            "ld sp, 8 * 1(t6)",
+            "ld gp, 8 * 2(t6)",
+            "ld tp, 8 * 3(t6)",
+            "ld t0, 8 * 4(t6)",
+            "ld t1, 8 * 5(t6)",
+            "ld t2, 8 * 6(t6)",
+            "ld s0, 8 * 7(t6)",
+            "ld s1, 8 * 8(t6)",
+            "ld a0, 8 * 9(t6)",
+            "ld a1, 8 * 10(t6)",
+            "ld a2, 8 * 11(t6)",
+            "ld a3, 8 * 12(t6)",
+            "ld a4, 8 * 13(t6)",
+            "ld a5, 8 * 14(t6)",
+            "ld a6, 8 * 15(t6)",
+            "ld a7, 8 * 16(t6)",
+            "ld s2, 8 * 17(t6)",
+            "ld s3, 8 * 18(t6)",
+            "ld s4, 8 * 19(t6)",
+            "ld s5, 8 * 20(t6)",
+            "ld s6, 8 * 21(t6)",
+            "ld s7, 8 * 22(t6)",
+            "ld s8, 8 * 23(t6)",
+            "ld s9, 8 * 24(t6)",
+            "ld s10, 8 * 25(t6)",
+            "ld s11, 8 * 26(t6)",
+            "ld t3, 8 * 27(t6)",
+            "ld t4, 8 * 28(t6)",
+            "ld t5, 8 * 29(t6)",
+            "ld t6, 8 * 30(t6)",
+            "sret",
+            in("t6") registers,
+            options(noreturn),
+        )
+    }
 }
 
 fn find_runnable_process() -> Option<usize> {
@@ -188,41 +209,40 @@ fn find_runnable_process() -> Option<usize> {
     None
 }
 
-#[unsafe(naked)]
-unsafe extern "C" fn switch_context(prev_sp: *mut usize, next_sp: *const usize) {
-    naked_asm!(
-        "addi sp, sp, -13 * 8",
-        "sd ra, 0 * 8(sp)",
-        "sd s0, 1 * 8(sp)",
-        "sd s1, 2 * 8(sp)",
-        "sd s2, 3 * 8(sp)",
-        "sd s3, 4 * 8(sp)",
-        "sd s4, 5 * 8(sp)",
-        "sd s5, 6 * 8(sp)",
-        "sd s6, 7 * 8(sp)",
-        "sd s7, 8 * 8(sp)",
-        "sd s8, 9 * 8(sp)",
-        "sd s9, 10 * 8(sp)",
-        "sd s10, 11 * 8(sp)",
-        "sd s11, 12 * 8(sp)",
-        "sd sp, (a0)",
-        "ld sp, (a1)",
-        "ld ra, 0 * 8(sp)",
-        "ld s0, 1 * 8(sp)",
-        "ld s1, 2 * 8(sp)",
-        "ld s2, 3 * 8(sp)",
-        "ld s3, 4 * 8(sp)",
-        "ld s4, 5 * 8(sp)",
-        "ld s5, 6 * 8(sp)",
-        "ld s6, 7 * 8(sp)",
-        "ld s7, 8 * 8(sp)",
-        "ld s8, 9 * 8(sp)",
-        "ld s9, 10 * 8(sp)",
-        "ld s10, 11 * 8(sp)",
-        "ld s11, 12 * 8(sp)",
-        "addi sp, sp, 13 * 8",
-        "ret",
-    )
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct RiscvRegisters {
+    ra: usize,
+    sp: usize,
+    gp: usize,
+    tp: usize,
+    t0: usize,
+    t1: usize,
+    t2: usize,
+    s0: usize,
+    s1: usize,
+    a0: usize,
+    a1: usize,
+    a2: usize,
+    a3: usize,
+    a4: usize,
+    a5: usize,
+    a6: usize,
+    a7: usize,
+    s2: usize,
+    s3: usize,
+    s4: usize,
+    s5: usize,
+    s6: usize,
+    s7: usize,
+    s8: usize,
+    s9: usize,
+    s10: usize,
+    s11: usize,
+    t3: usize,
+    t4: usize,
+    t5: usize,
+    t6: usize,
 }
 
 fn clear_bss() {
@@ -235,44 +255,9 @@ fn initialize_trap_handler() {
     unsafe { riscv::register::stvec::write(Stvec::new(address, TrapMode::Direct)) }
 }
 
-#[repr(C)]
-struct TrapFrame {
-    ra: usize,
-    gp: usize,
-    tp: usize,
-    t0: usize,
-    t1: usize,
-    t2: usize,
-    t3: usize,
-    t4: usize,
-    t5: usize,
-    t6: usize,
-    a0: usize,
-    a1: usize,
-    a2: usize,
-    a3: usize,
-    a4: usize,
-    a5: usize,
-    a6: usize,
-    a7: usize,
-    s0: usize,
-    s1: usize,
-    s2: usize,
-    s3: usize,
-    s4: usize,
-    s5: usize,
-    s6: usize,
-    s7: usize,
-    s8: usize,
-    s9: usize,
-    s10: usize,
-    s11: usize,
-    sp: usize,
-}
-
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
-unsafe extern "C" fn trap_entry() {
+unsafe extern "C" fn trap_entry() -> ! {
     naked_asm!(
         ".align 4",
 
@@ -280,38 +265,37 @@ unsafe extern "C" fn trap_entry() {
 
         "addi sp, sp, -8 * 31",
         "sd ra, 8 * 0(sp)",
-        "sd gp, 8 * 1(sp)",
-        "sd tp, 8 * 2(sp)",
-        "sd t0, 8 * 3(sp)",
-        "sd t1, 8 * 4(sp)",
-        "sd t2, 8 * 5(sp)",
-        "sd t3, 8 * 6(sp)",
-        "sd t4, 8 * 7(sp)",
-        "sd t5, 8 * 8(sp)",
-        "sd t6, 8 * 9(sp)",
-        "sd a0, 8 * 10(sp)",
-        "sd a1, 8 * 11(sp)",
-        "sd a2, 8 * 12(sp)",
-        "sd a3, 8 * 13(sp)",
-        "sd a4, 8 * 14(sp)",
-        "sd a5, 8 * 15(sp)",
-        "sd a6, 8 * 16(sp)",
-        "sd a7, 8 * 17(sp)",
-        "sd s0, 8 * 18(sp)",
-        "sd s1, 8 * 19(sp)",
-        "sd s2, 8 * 20(sp)",
-        "sd s3, 8 * 21(sp)",
-        "sd s4, 8 * 22(sp)",
-        "sd s5, 8 * 23(sp)",
-        "sd s6, 8 * 24(sp)",
-        "sd s7, 8 * 25(sp)",
-        "sd s8, 8 * 26(sp)",
-        "sd s9, 8 * 27(sp)",
-        "sd s10, 8 * 28(sp)",
-        "sd s11, 8 * 29(sp)",
-
-        "csrr a0, sscratch",
-        "sd a0, 8 * 30(sp)",
+        "csrr ra, sscratch",
+        "sd ra, 8 * 1(sp)", // ra here is the original sp
+        "sd gp, 8 * 2(sp)",
+        "sd tp, 8 * 3(sp)",
+        "sd t0, 8 * 4(sp)",
+        "sd t1, 8 * 5(sp)",
+        "sd t2, 8 * 6(sp)",
+        "sd s0, 8 * 7(sp)",
+        "sd s1, 8 * 8(sp)",
+        "sd a0, 8 * 9(sp)",
+        "sd a1, 8 * 10(sp)",
+        "sd a2, 8 * 11(sp)",
+        "sd a3, 8 * 12(sp)",
+        "sd a4, 8 * 13(sp)",
+        "sd a5, 8 * 14(sp)",
+        "sd a6, 8 * 15(sp)",
+        "sd a7, 8 * 16(sp)",
+        "sd s2, 8 * 17(sp)",
+        "sd s3, 8 * 18(sp)",
+        "sd s4, 8 * 19(sp)",
+        "sd s5, 8 * 20(sp)",
+        "sd s6, 8 * 21(sp)",
+        "sd s7, 8 * 22(sp)",
+        "sd s8, 8 * 23(sp)",
+        "sd s9, 8 * 24(sp)",
+        "sd s10, 8 * 25(sp)",
+        "sd s11, 8 * 26(sp)",
+        "sd t3, 8 * 27(sp)",
+        "sd t4, 8 * 28(sp)",
+        "sd t5, 8 * 29(sp)",
+        "sd t6, 8 * 30(sp)",
 
         "addi a0, sp, 8 * 31",
         "csrw sscratch, a0",
@@ -319,71 +303,39 @@ unsafe extern "C" fn trap_entry() {
         "mv a0, sp",
         "call {handle_trap}",
 
-        "ld ra, 8 * 0(sp)",
-        "ld gp, 8 * 1(sp)",
-        "ld tp, 8 * 2(sp)",
-        "ld t0, 8 * 3(sp)",
-        "ld t1, 8 * 4(sp)",
-        "ld t2, 8 * 5(sp)",
-        "ld t3, 8 * 6(sp)",
-        "ld t4, 8 * 7(sp)",
-        "ld t5, 8 * 8(sp)",
-        "ld t6, 8 * 9(sp)",
-        "ld a0, 8 * 10(sp)",
-        "ld a1, 8 * 11(sp)",
-        "ld a2, 8 * 12(sp)",
-        "ld a3, 8 * 13(sp)",
-        "ld a4, 8 * 14(sp)",
-        "ld a5, 8 * 15(sp)",
-        "ld a6, 8 * 16(sp)",
-        "ld a7, 8 * 17(sp)",
-        "ld s0, 8 * 18(sp)",
-        "ld s1, 8 * 19(sp)",
-        "ld s2, 8 * 20(sp)",
-        "ld s3, 8 * 21(sp)",
-        "ld s4, 8 * 22(sp)",
-        "ld s5, 8 * 23(sp)",
-        "ld s6, 8 * 24(sp)",
-        "ld s7, 8 * 25(sp)",
-        "ld s8, 8 * 26(sp)",
-        "ld s9, 8 * 27(sp)",
-        "ld s10, 8 * 28(sp)",
-        "ld s11, 8 * 29(sp)",
-        "ld sp, 8 * 30(sp)",
-        "sret",
-
         handle_trap = sym handle_trap,
     )
 }
 
-fn handle_trap(trap_frame: &TrapFrame) {
+fn handle_trap(registers: &RiscvRegisters) -> ! {
     let scause = riscv::register::scause::read()
         .cause()
         .try_into::<Interrupt, Exception>()
         .unwrap();
     let stval = riscv::register::stval::read();
-    let mut user_pc = riscv::register::sepc::read();
+    let user_pc = riscv::register::sepc::read();
     if scause == Trap::Exception(Exception::UserEnvCall) {
-        handle_syscall(trap_frame);
-        user_pc += 4;
+        handle_syscall(user_pc, registers);
     } else {
         panic!("unexpected trap scause={scause:?} stval={stval:#x} user_pc={user_pc:#x}");
     }
-    unsafe { riscv::register::sepc::write(user_pc) };
 }
 
-fn handle_syscall(trap_frame: &TrapFrame) {
-    match trap_frame.a3 {
+fn handle_syscall(user_pc: usize, registers: &RiscvRegisters) -> ! {
+    match registers.a3 {
         1 => {
             unsafe { PROCESSES[CURRENT_PROC.unwrap()].state = ProcessState::Finished };
-            yield_();
+            switch_to_scheduled_userspace();
         }
         2 => {
-            let ch = trap_frame.a0 as u8;
+            let ch = registers.a0 as u8;
             sbi::debug_console_write_byte(ch).unwrap();
         }
-        _ => panic!("invalid syscall number {}", trap_frame.a3),
+        _ => panic!("invalid syscall number {}", registers.a3),
     }
+
+    unsafe { riscv::register::sepc::write(user_pc + 4) };
+    raw_switch_to_userspace(registers);
 }
 
 #[panic_handler]
