@@ -67,7 +67,6 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
 
     create_process(HELLO_ELF);
 
-    unsafe { asm!("csrw sscratch, sp") }
     switch_to_scheduled_userspace();
 }
 
@@ -260,13 +259,15 @@ fn initialize_trap_handler() {
 unsafe extern "C" fn trap_entry() -> ! {
     naked_asm!(
         ".align 4",
-
-        "csrrw sp, sscratch, sp",
-
+        "csrw sscratch, sp",
+        "la sp, {stack_top}",
         "addi sp, sp, -8 * 31",
+
         "sd ra, 8 * 0(sp)",
+
         "csrr ra, sscratch",
         "sd ra, 8 * 1(sp)", // ra here is the original sp
+
         "sd gp, 8 * 2(sp)",
         "sd tp, 8 * 3(sp)",
         "sd t0, 8 * 4(sp)",
@@ -297,12 +298,10 @@ unsafe extern "C" fn trap_entry() -> ! {
         "sd t5, 8 * 29(sp)",
         "sd t6, 8 * 30(sp)",
 
-        "addi a0, sp, 8 * 31",
-        "csrw sscratch, a0",
-
         "mv a0, sp",
         "call {handle_trap}",
 
+        stack_top = sym stack_top,
         handle_trap = sym handle_trap,
     )
 }
