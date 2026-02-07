@@ -1,6 +1,6 @@
 use crate::arch::RiscvRegisters;
 use crate::elf::load_elf;
-use crate::page::{PAGE_R, PAGE_SIZE, PAGE_W, PAGE_X, PageTable, map_pages};
+use crate::page::{PAGE_SIZE, PageFlags, PageTable, map_pages};
 use alloc::boxed::Box;
 use riscv::register::satp::{Mode, Satp};
 
@@ -58,7 +58,7 @@ fn map_kernel_memory(page_table: &mut PageTable) {
         page_table,
         kernel_physical_address,
         kernel_physical_address,
-        PAGE_R | PAGE_W | PAGE_X,
+        PageFlags::unsafe_readwriteexecute(),
         kernel_page_count,
     );
 }

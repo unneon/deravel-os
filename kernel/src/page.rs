@@ -1,5 +1,11 @@
 use alloc::boxed::Box;
 
+#[repr(C, align(4096))]
+pub struct PageAligned<T>(pub T);
+
+#[derive(Clone)]
+pub struct PageFlags(usize);
+
 pub struct PageTable([PageTableEntry; PAGE_SIZE / size_of::<PageTableEntry>()]);
 
 #[derive(Clone, Copy, Default)]
@@ -8,10 +14,36 @@ struct PageTableEntry(usize);
 pub const PAGE_SIZE: usize = 4096;
 
 const PAGE_V: usize = 1 << 0;
-pub const PAGE_R: usize = 1 << 1;
-pub const PAGE_W: usize = 1 << 2;
-pub const PAGE_X: usize = 1 << 3;
-pub const PAGE_U: usize = 1 << 4;
+const PAGE_R: usize = 1 << 1;
+const PAGE_W: usize = 1 << 2;
+const PAGE_X: usize = 1 << 3;
+const PAGE_U: usize = 1 << 4;
+
+impl PageFlags {
+    pub fn readonly() -> PageFlags {
+        PageFlags(PAGE_R)
+    }
+
+    pub fn readwrite() -> PageFlags {
+        PageFlags(PAGE_R | PAGE_W)
+    }
+
+    pub fn executable() -> PageFlags {
+        PageFlags(PAGE_R | PAGE_X)
+    }
+
+    pub fn unsafe_readwriteexecute() -> PageFlags {
+        PageFlags(PAGE_R | PAGE_W | PAGE_X)
+    }
+
+    pub fn user(self) -> PageFlags {
+        PageFlags(self.0 | PAGE_U)
+    }
+
+    pub fn is_writable(&self) -> bool {
+        self.0 & PAGE_W != 0
+    }
+}
 
 impl PageTable {
     unsafe fn get_or_create_indirect(&mut self, vpn_segment: usize) -> &'static mut PageTable {
@@ -30,8 +62,8 @@ impl PageTableEntry {
         PageTableEntry(((table as usize / PAGE_SIZE) << 10) | PAGE_V)
     }
 
-    fn leaf(physical_addr: usize, flags: usize) -> PageTableEntry {
-        PageTableEntry(((physical_addr / PAGE_SIZE) << 10) | PAGE_V | flags)
+    fn leaf(physical_addr: usize, flags: PageFlags) -> PageTableEntry {
+        PageTableEntry(((physical_addr / PAGE_SIZE) << 10) | PAGE_V | flags.0)
     }
 
     fn is_valid(&self) -> bool {
@@ -53,7 +85,7 @@ pub fn map_pages(
     table2: &mut PageTable,
     virtual_addr: usize,
     physical_addr: usize,
-    flags: usize,
+    flags: PageFlags,
     count: usize,
 ) {
     // TODO: Optimize using huge pages.
@@ -62,12 +94,12 @@ pub fn map_pages(
             table2,
             virtual_addr + PAGE_SIZE * i,
             physical_addr + PAGE_SIZE * i,
-            flags,
+            flags.clone(),
         );
     }
 }
 
-fn map_page(table2: &mut PageTable, virtual_addr: usize, physical_addr: usize, flags: usize) {
+fn map_page(table2: &mut PageTable, virtual_addr: usize, physical_addr: usize, flags: PageFlags) {
     assert!(virtual_addr.is_multiple_of(PAGE_SIZE));
     assert!(physical_addr.is_multiple_of(PAGE_SIZE));
 

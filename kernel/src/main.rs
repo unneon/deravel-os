@@ -23,8 +23,10 @@ use crate::arch::{
     RiscvRegisters, initialize_trap_handler, switch_to_userspace_full,
     switch_to_userspace_registers_only,
 };
+use crate::elf::const_elf;
+use crate::heap::log_heap_statistics;
 use crate::log::initialize_log;
-use crate::page::{PAGE_R, PAGE_W, PAGE_X, PageTable, map_pages};
+use crate::page::{PageTable, map_pages};
 use crate::process::{
     CURRENT_PROC, PROCESSES, ProcessState, create_process, find_runnable_process,
 };
@@ -36,7 +38,7 @@ use fdt::Fdt;
 use riscv::interrupt::Trap;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
 
-const HELLO_ELF: &[u8] = include_bytes!(env!("CARGO_BIN_FILE_DERAVEL_HELLO"));
+const_elf!(HELLO_ELF "CARGO_BIN_FILE_DERAVEL_HELLO");
 
 fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     clear_bss();
@@ -47,7 +49,7 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     log_sbi_metadata();
     initialize_all_virtio_mmio(&device_tree);
 
-    create_process(HELLO_ELF);
+    create_process(&HELLO_ELF.0);
 
     schedule_and_switch_to_userspace();
 }
@@ -64,6 +66,7 @@ fn clear_bss() {
 fn schedule_and_switch_to_userspace() -> ! {
     let Some(next_pid) = find_runnable_process() else {
         info!("shutting down due to all processes finishing");
+        log_heap_statistics();
         sbi::system_reset(ResetType::Shutdown, ResetReason::NoReason).unwrap()
     };
     let next = unsafe { &PROCESSES[next_pid] };

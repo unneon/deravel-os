@@ -1,6 +1,7 @@
 use crate::page::PAGE_SIZE;
 use core::alloc::{GlobalAlloc, Layout};
 use core::sync::atomic::{AtomicUsize, Ordering};
+use log::info;
 
 pub struct Heap;
 
@@ -26,4 +27,11 @@ unsafe impl GlobalAlloc for Heap {
     }
 
     unsafe fn dealloc(&self, _: *mut u8, _: Layout) {}
+}
+
+pub fn log_heap_statistics() {
+    info!(
+        "allocated {} pages in total",
+        ALLOCATED_SO_FAR.load(Ordering::Relaxed)
+    );
 }
