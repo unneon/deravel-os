@@ -2,6 +2,7 @@ use crate::arch::RiscvRegisters;
 use crate::elf::load_elf;
 use crate::page::{PAGE_SIZE, PageFlags, PageTable, map_pages};
 use alloc::boxed::Box;
+use log::error;
 use riscv::register::satp::{Mode, Satp};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -42,7 +43,10 @@ impl Process {
 }
 
 pub fn create_process(elf: &[u8]) {
-    let pid = find_free_process_slot().unwrap();
+    let Some(pid) = find_free_process_slot() else {
+        error!("exhausted all process slots");
+        return;
+    };
 
     let mut page_table = Box::new(PageTable::default());
     map_kernel_memory(&mut page_table);
