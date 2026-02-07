@@ -1,3 +1,4 @@
 fn main() {
-    println!("cargo:rustc-link-arg=-Tkernel/kernel.ld");
+    println!("cargo::rerun-if-changed=kernel.ld");
+    println!("cargo::rustc-link-arg=-Tkernel/kernel.ld");
 }
