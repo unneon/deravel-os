@@ -20,18 +20,19 @@ mod sbi;
 mod virtio;
 
 use crate::arch::{
-    initialize_trap_handler, switch_to_userspace_full, switch_to_userspace_registers_only,
+    RiscvRegisters, initialize_trap_handler, switch_to_userspace_full,
+    switch_to_userspace_registers_only,
 };
 use crate::log::initialize_log;
 use crate::page::{PAGE_R, PAGE_W, PAGE_X, PageTable, map_pages};
-use crate::process::{CURRENT_PROC, create_process, find_runnable_process};
+use crate::process::{
+    CURRENT_PROC, PROCESSES, ProcessState, create_process, find_runnable_process,
+};
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use crate::virtio::initialize_all_virtio_mmio;
 use ::log::{error, info};
-use arch::RiscvRegisters;
 use core::panic::PanicInfo;
 use fdt::Fdt;
-use process::{PROCESSES, ProcessState};
 use riscv::interrupt::Trap;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
 
