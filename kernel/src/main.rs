@@ -14,22 +14,22 @@ mod elf;
 mod heap;
 mod log;
 mod page;
+mod process;
 mod sbi;
 mod virtio;
 
-use crate::elf::load_elf;
 use crate::log::initialize_log;
-use crate::page::{PAGE_R, PAGE_SIZE, PAGE_W, PAGE_X, PageTable, map_pages};
+use crate::page::{PAGE_R, PAGE_W, PAGE_X, PageTable, map_pages};
+use crate::process::{CURRENT_PROC, create_process, find_runnable_process};
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use crate::virtio::initialize_all_virtio_mmio;
 use ::log::{error, info};
-use alloc::boxed::Box;
 use core::arch::{asm, naked_asm};
 use core::panic::PanicInfo;
 use fdt::Fdt;
+use process::{PROCESSES, ProcessState};
 use riscv::interrupt::Trap;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
-use riscv::register::satp::{Mode, Satp};
 use riscv::register::stvec::{Stvec, TrapMode};
 
 unsafe extern "C" {
@@ -67,89 +67,25 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
 
     create_process(HELLO_ELF);
 
-    switch_to_scheduled_userspace();
+    switch_to_userspace_full();
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum ProcessState {
-    Unused,
-    Runnable,
-    Finished,
-}
-
-struct Process {
-    state: ProcessState,
-    registers: RiscvRegisters,
-    pc: usize,
-    page_table: *const PageTable,
-}
-
-const PROCESS_COUNT: usize = 8;
-
-static mut PROCESSES: [Process; PROCESS_COUNT] = unsafe { core::mem::zeroed() };
-static mut CURRENT_PROC: Option<usize> = None;
-
-fn create_process(elf: &[u8]) {
-    let pid = find_free_process_slot().unwrap();
-
-    let mut page_table = Box::new(PageTable::default());
-    map_kernel_memory(&mut page_table);
-    load_elf(elf, &mut page_table);
-
-    let proc = unsafe { &mut PROCESSES[pid] };
-    proc.state = ProcessState::Runnable;
-    proc.pc = 0x1000000;
-    proc.page_table = Box::leak(page_table);
-}
-
-fn find_free_process_slot() -> Option<usize> {
-    for (i, process) in unsafe { PROCESSES.iter_mut().enumerate() } {
-        if process.state == ProcessState::Unused {
-            return Some(i);
-        }
-    }
-    None
-}
-
-fn map_kernel_memory(page_table: &mut PageTable) {
-    let kernel_physical_address = (&raw const kernel_start) as usize;
-    let kernel_page_count =
-        ((&raw const kernel_end as usize) - (&raw const kernel_start as usize)).div_ceil(PAGE_SIZE);
-    map_pages(
-        page_table,
-        kernel_physical_address,
-        kernel_physical_address,
-        PAGE_R | PAGE_W | PAGE_X,
-        kernel_page_count,
-    );
-}
-
-fn switch_to_scheduled_userspace() -> ! {
+fn switch_to_userspace_full() -> ! {
     let Some(next_pid) = find_runnable_process() else {
         info!("shutting down due to all processes finishing");
         sbi::system_reset(ResetType::Shutdown, ResetReason::NoReason).unwrap()
     };
-
-    unsafe { CURRENT_PROC = Some(next_pid) };
-
-    let next = unsafe { &mut PROCESSES[next_pid] };
-
-    let mut satp = Satp::from_bits(0);
-    satp.set_ppn(next.page_table as usize / PAGE_SIZE);
-    satp.set_mode(Mode::Sv39);
-
-    let mut sstatus = riscv::register::sstatus::read();
-    sstatus.set_spie(true);
+    let next = unsafe { &PROCESSES[next_pid] };
+    unsafe { CURRENT_PROC = Some(next_pid) }
 
     riscv::asm::sfence_vma_all();
-    unsafe { riscv::register::satp::write(satp) };
+    unsafe { riscv::register::satp::write(next.satp()) };
+    riscv::asm::sfence_vma_all();
     unsafe { riscv::register::sepc::write(next.pc) };
-    unsafe { riscv::register::sstatus::write(sstatus) };
-
-    raw_switch_to_userspace(&next.registers)
+    switch_to_userspace_registers_only(&next.registers)
 }
 
-fn raw_switch_to_userspace(registers: &RiscvRegisters) -> ! {
+fn switch_to_userspace_registers_only(registers: &RiscvRegisters) -> ! {
     unsafe {
         asm!(
             "ld ra, 8 * 0(t6)",
@@ -188,24 +124,6 @@ fn raw_switch_to_userspace(registers: &RiscvRegisters) -> ! {
             options(noreturn),
         )
     }
-}
-
-fn find_runnable_process() -> Option<usize> {
-    let current = unsafe { CURRENT_PROC };
-    let scan_start = match current {
-        Some(current) => current + 1,
-        None => 0,
-    };
-
-    for scan_offset in 0..PROCESS_COUNT {
-        let scan_index = (scan_start + scan_offset) % PROCESS_COUNT;
-        let process = unsafe { &PROCESSES[scan_index] };
-        if process.state == ProcessState::Runnable {
-            return Some(scan_index);
-        }
-    }
-
-    None
 }
 
 #[repr(C)]
@@ -323,8 +241,8 @@ fn handle_trap(registers: &RiscvRegisters) -> ! {
 fn handle_syscall(user_pc: usize, registers: &RiscvRegisters) -> ! {
     match registers.a3 {
         1 => {
-            unsafe { PROCESSES[CURRENT_PROC.unwrap()].state = ProcessState::Finished };
-            switch_to_scheduled_userspace();
+            unsafe { PROCESSES[CURRENT_PROC.unwrap()].state = ProcessState::Finished }
+            switch_to_userspace_full();
         }
         2 => {
             let ch = registers.a0 as u8;
@@ -334,7 +252,7 @@ fn handle_syscall(user_pc: usize, registers: &RiscvRegisters) -> ! {
     }
 
     unsafe { riscv::register::sepc::write(user_pc + 4) };
-    raw_switch_to_userspace(registers);
+    switch_to_userspace_registers_only(registers);
 }
 
 #[panic_handler]
