@@ -17,11 +17,13 @@ extern crate alloc;
 mod elf;
 mod heap;
 mod log;
+mod page;
 mod sbi;
 mod virtio;
 
 use crate::elf::load_elf;
 use crate::log::initialize_log;
+use crate::page::{PAGE_R, PAGE_SIZE, PAGE_W, PAGE_X, PageTable, map_pages};
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use crate::virtio::initialize_all_virtio_mmio;
 use ::log::{error, info};
@@ -35,15 +37,14 @@ use riscv::register::satp::{Mode, Satp};
 use riscv::register::stvec::{Stvec, TrapMode};
 
 unsafe extern "C" {
-    static mut kernel_base: u8;
+    static mut kernel_start: u8;
     static mut bss_start: u8;
     static mut bss_end: u8;
     static mut stack_top: u8;
     static mut heap_start: u8;
     static mut heap_end: u8;
+    static mut kernel_end: u8;
 }
-
-pub const PAGE_SIZE: usize = 4096;
 
 #[unsafe(link_section = ".text.boot")]
 #[unsafe(naked)]
@@ -90,23 +91,10 @@ struct Process {
     stack: [u8; 8192],
 }
 
-struct PageTable([usize; 4096 / 8]);
-
 const PROCESS_COUNT: usize = 8;
-const PAGE_V: usize = 1 << 0;
-const PAGE_R: usize = 1 << 1;
-const PAGE_W: usize = 1 << 2;
-const PAGE_X: usize = 1 << 3;
-const PAGE_U: usize = 1 << 4;
 
 static mut PROCESSES: [Process; PROCESS_COUNT] = unsafe { core::mem::zeroed() };
 static mut CURRENT_PROC: Option<usize> = None;
-
-impl Default for PageTable {
-    fn default() -> PageTable {
-        PageTable([0; 4096 / 8])
-    }
-}
 
 fn user_entry() -> ! {
     let mut sstatus = riscv::register::sstatus::read();
@@ -115,30 +103,6 @@ fn user_entry() -> ! {
     unsafe { riscv::register::sepc::write(0x1000000) };
     unsafe { riscv::register::sstatus::write(sstatus) };
     unsafe { asm!("sret", options(noreturn)) }
-}
-
-fn map_page(table2: &mut PageTable, virtual_addr: usize, physical_addr: usize, flags: usize) {
-    assert!(virtual_addr.is_multiple_of(4096));
-    assert!(physical_addr.is_multiple_of(4096));
-
-    let vpn2 = (virtual_addr >> 30) & ((1 << 9) - 1);
-    if table2.0[vpn2] & PAGE_V == 0 {
-        let table1 = Box::new([0; 4096 / 8]);
-        table2.0[vpn2] = (((table1.as_ptr() as usize) / 4096) << 10) | PAGE_V;
-    }
-
-    let table1 = unsafe { &mut *(((table2.0[vpn2] >> 10) * 4096) as *mut PageTable) };
-    let vpn1 = (virtual_addr >> 21) & ((1 << 9) - 1);
-    if table1.0[vpn1] & PAGE_V == 0 {
-        let table0 = Box::new([0; 4096 / 8]);
-        table1.0[vpn1] = (((table0.as_ptr() as usize) / 4096) << 10) | PAGE_V;
-    }
-
-    let table0 = unsafe { &mut *(((table1.0[vpn1] >> 10) * 4096) as *mut PageTable) };
-    let vpn0 = (virtual_addr >> 12) & ((1 << 9) - 1);
-    assert!(table0.0[vpn0] & PAGE_V == 0);
-
-    table0.0[vpn0] = ((physical_addr / PAGE_SIZE) << 10) | PAGE_V | flags;
 }
 
 fn create_process(elf: &[u8]) -> *mut Process {
@@ -156,17 +120,7 @@ fn create_process(elf: &[u8]) -> *mut Process {
     };
 
     let mut page_table = Box::new(PageTable::default());
-    let mut physical_addr = (&raw const kernel_base) as usize;
-    while physical_addr < (&raw const heap_end) as usize {
-        map_page(
-            &mut page_table,
-            physical_addr,
-            physical_addr,
-            PAGE_R | PAGE_W | PAGE_X,
-        );
-        physical_addr += 4096;
-    }
-
+    map_kernel_memory(&mut page_table);
     load_elf(elf, &mut page_table);
 
     proc.pid = i as u32 + 1;
@@ -174,6 +128,19 @@ fn create_process(elf: &[u8]) -> *mut Process {
     proc.sp = (proc.stack.as_ptr() as usize) + stack_size - 8 * 13;
     proc.page_table = Box::leak(page_table);
     proc
+}
+
+fn map_kernel_memory(page_table: &mut PageTable) {
+    let kernel_physical_address = (&raw const kernel_start) as usize;
+    let kernel_page_count =
+        ((&raw const kernel_end as usize) - (&raw const kernel_start as usize)).div_ceil(PAGE_SIZE);
+    map_pages(
+        page_table,
+        kernel_physical_address,
+        kernel_physical_address,
+        PAGE_R | PAGE_W | PAGE_X,
+        kernel_page_count,
+    );
 }
 
 fn yield_() {
@@ -196,7 +163,7 @@ fn yield_() {
     };
 
     let mut satp = Satp::from_bits(0);
-    satp.set_ppn(next.page_table as usize / 4096);
+    satp.set_ppn(next.page_table as usize / PAGE_SIZE);
     satp.set_mode(Mode::Sv39);
 
     riscv::asm::sfence_vma_all();

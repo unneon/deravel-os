@@ -1,4 +1,4 @@
-use crate::PAGE_SIZE;
+use crate::page::PAGE_SIZE;
 use crate::virtio::queue::Queue;
 use crate::virtio::registers::{
     Mmio, Registers, STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, mmio,

@@ -2,7 +2,7 @@ ENTRY(boot)
 
 SECTIONS {
     . = 0x80200000;
-    kernel_base = .;
+    kernel_start = .;
 
     .text :{
         KEEP(*(.text.boot));
@@ -31,4 +31,6 @@ SECTIONS {
     heap_start = .;
     . += 64 * 1024 * 1024;
     heap_end = .;
+
+    kernel_end = .;
 }

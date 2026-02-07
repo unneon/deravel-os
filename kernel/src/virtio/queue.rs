@@ -1,4 +1,4 @@
-use crate::PAGE_SIZE;
+use crate::page::PAGE_SIZE;
 use crate::virtio::registers::{Mmio, Registers};
 
 pub const QUEUE_SIZE: usize = 16;

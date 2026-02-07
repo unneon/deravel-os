@@ -1,4 +1,5 @@
-use crate::{PAGE_R, PAGE_U, PAGE_W, PAGE_X, PageTable, map_page};
+use crate::page::{PAGE_SIZE, PAGE_U};
+use crate::{PAGE_R, PAGE_W, PAGE_X, PageTable, map_pages};
 use alloc::vec;
 use alloc::vec::Vec;
 use elf::ElfBytes;
@@ -24,31 +25,30 @@ pub fn load_elf(bytes: &[u8], page_table: &mut PageTable) {
             continue;
         }
 
-        assert!(segment.p_vaddr.is_multiple_of(4096));
+        assert!(segment.p_vaddr.is_multiple_of(PAGE_SIZE as u64));
         assert!(segment.p_vaddr >= 0x1000000);
         assert!(segment.p_filesz <= segment.p_memsz);
         assert!(segment.p_memsz <= 0x1800000 - 0x1000000);
         assert!(segment.p_vaddr + segment.p_memsz <= 0x1800000);
-        assert_eq!(segment.p_align, 4096);
+        assert_eq!(segment.p_align, PAGE_SIZE as u64);
         // TODO: Validate p_flags
 
-        let page_count = segment.p_memsz.div_ceil(4096) as usize;
-        let pages = vec![0u8; 4096 * page_count];
+        let page_count = (segment.p_memsz as usize).div_ceil(PAGE_SIZE);
+        let pages = vec![0u8; PAGE_SIZE * page_count];
 
-        for i in 0..page_count {
-            map_page(
-                page_table,
-                segment.p_vaddr as usize + 4096 * i,
-                pages.as_ptr() as usize + 4096 * i,
-                // TODO: Apply p_flags.
-                PAGE_U | PAGE_R | PAGE_W | PAGE_X,
-            );
-        }
+        map_pages(
+            page_table,
+            segment.p_vaddr as usize,
+            pages.as_ptr() as usize,
+            // TODO: Apply p_flags.
+            PAGE_U | PAGE_R | PAGE_W | PAGE_X,
+            page_count,
+        );
 
         let data = elf.segment_data(&segment).unwrap();
         let flat_pointer = Vec::leak(pages).as_mut_ptr();
         let flat_memory =
-            unsafe { core::slice::from_raw_parts_mut(flat_pointer, page_count * 4096) };
+            unsafe { core::slice::from_raw_parts_mut(flat_pointer, PAGE_SIZE * page_count) };
         flat_memory[..segment.p_filesz as usize].copy_from_slice(data);
         flat_memory[segment.p_memsz as usize..].fill(0);
     }
