@@ -2,19 +2,27 @@ ENTRY(boot)
 
 SECTIONS {
     . = 0x80200000;
-    kernel_start = .;
 
     .text :{
+        text_start = .;
         KEEP(*(.text.boot));
         *(.text .text.*);
+        text_end = .;
     }
 
-    .rodata : ALIGN(4) {
+    .rodata : ALIGN(4096) {
+        rodata_start = .;
         *(.rodata .rodata.*);
+        rodata_end = .;
     }
 
-    .data : ALIGN(4) {
+    . = ALIGN(4096);
+    readwrite_start = .;
+
+    .data :{
+        data_start = .;
         *(.data .data.*);
+        data_end = .;
     }
 
     .bss : ALIGN(4) {
@@ -32,5 +40,5 @@ SECTIONS {
     . += 64 * 1024 * 1024;
     heap_end = .;
 
-    kernel_end = .;
+    readwrite_end = .;
 }

@@ -32,10 +32,6 @@ impl PageFlags {
         PageFlags(PAGE_R | PAGE_X)
     }
 
-    pub fn unsafe_readwriteexecute() -> PageFlags {
-        PageFlags(PAGE_R | PAGE_W | PAGE_X)
-    }
-
     pub fn user(self) -> PageFlags {
         PageFlags(self.0 | PAGE_U)
     }

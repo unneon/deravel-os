@@ -21,8 +21,12 @@ pub struct Process {
 const PROCESS_COUNT: usize = 8;
 
 unsafe extern "C" {
-    static kernel_start: u8;
-    static kernel_end: u8;
+    static text_start: u8;
+    static text_end: u8;
+    static rodata_start: u8;
+    static rodata_end: u8;
+    static readwrite_start: u8;
+    static readwrite_end: u8;
 }
 
 pub static mut PROCESSES: [Process; PROCESS_COUNT] = unsafe { core::mem::zeroed() };
@@ -51,16 +55,36 @@ pub fn create_process(elf: &[u8]) {
 }
 
 fn map_kernel_memory(page_table: &mut PageTable) {
-    let kernel_physical_address = (&raw const kernel_start) as usize;
-    let kernel_page_count =
-        ((&raw const kernel_end as usize) - (&raw const kernel_start as usize)).div_ceil(PAGE_SIZE);
-    map_pages(
+    map_kernel_memory_section(
         page_table,
-        kernel_physical_address,
-        kernel_physical_address,
-        PageFlags::unsafe_readwriteexecute(),
-        kernel_page_count,
+        &raw const text_start,
+        &raw const text_end,
+        PageFlags::executable(),
     );
+    map_kernel_memory_section(
+        page_table,
+        &raw const rodata_start,
+        &raw const rodata_end,
+        PageFlags::readonly(),
+    );
+    map_kernel_memory_section(
+        page_table,
+        &raw const readwrite_start,
+        &raw const readwrite_end,
+        PageFlags::readwrite(),
+    )
+}
+
+fn map_kernel_memory_section(
+    page_table: &mut PageTable,
+    start: *const u8,
+    end: *const u8,
+    flags: PageFlags,
+) {
+    let start = start as usize;
+    assert!(start.is_multiple_of(PAGE_SIZE));
+    let page_count = (end as usize - start).div_ceil(PAGE_SIZE);
+    map_pages(page_table, start, start, flags, page_count);
 }
 
 fn find_free_process_slot() -> Option<usize> {
