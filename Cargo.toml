@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "apps/hello",
+    "apps/shell",
     "kernel",
     "kernel-api",
 ]

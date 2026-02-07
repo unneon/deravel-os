@@ -23,8 +23,12 @@ pub macro app($main:ident) {
     }
 }
 
+pub macro print($($tt:tt)*) {
+    core::fmt::write(&mut KernelConsole, format_args!("{}", format_args!($($tt)*))).unwrap()
+}
+
 pub macro println($($tt:tt)*) {
-    core::fmt::write(&mut KernelConsole, format_args!("{}\n", format_args!($($tt)*))).unwrap()
+    print!("{}\n", format_args!($($tt)*))
 }
 
 macro syscalls($(#[no = $no:literal] pub fn $name:ident($($a0name:ident: $a0type:ty)?) $(-> $return_type:ty)?;)*) {
@@ -59,6 +63,9 @@ syscalls! {
 
     #[no = 2]
     pub fn putchar(ch: u8);
+
+    #[no = 3]
+    pub fn getchar() -> u8;
 }
 
 #[panic_handler]

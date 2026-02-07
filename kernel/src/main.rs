@@ -39,6 +39,7 @@ use riscv::interrupt::Trap;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
 
 const_elf!(HELLO_ELF "CARGO_BIN_FILE_DERAVEL_HELLO");
+const_elf!(SHELL_ELF "CARGO_BIN_FILE_DERAVEL_SHELL");
 
 fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     clear_bss();
@@ -50,6 +51,7 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     initialize_all_virtio_mmio(&device_tree);
 
     create_process(&HELLO_ELF.0);
+    create_process(&SHELL_ELF.0);
 
     schedule_and_switch_to_userspace();
 }
@@ -75,7 +77,7 @@ fn schedule_and_switch_to_userspace() -> ! {
     switch_to_userspace_full(next);
 }
 
-fn handle_trap(registers: &RiscvRegisters) -> ! {
+fn handle_trap(registers: &mut RiscvRegisters) -> ! {
     let scause = riscv::register::scause::read()
         .cause()
         .try_into::<Interrupt, Exception>()
@@ -89,7 +91,7 @@ fn handle_trap(registers: &RiscvRegisters) -> ! {
     }
 }
 
-fn handle_syscall(user_pc: usize, registers: &RiscvRegisters) -> ! {
+fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters) -> ! {
     match registers.a3 {
         1 => {
             unsafe { PROCESSES[CURRENT_PROC.unwrap()].state = ProcessState::Finished }
@@ -98,6 +100,11 @@ fn handle_syscall(user_pc: usize, registers: &RiscvRegisters) -> ! {
         2 => {
             let ch = registers.a0 as u8;
             sbi::debug_console_write_byte(ch).unwrap();
+        }
+        3 => {
+            let mut c = [0];
+            while sbi::debug_console_read(&mut c).unwrap() == 0 {}
+            registers.a0 = c[0] as usize;
         }
         _ => panic!("invalid syscall number {}", registers.a3),
     }
