@@ -42,11 +42,11 @@ pub fn create_process(elf: &[u8]) {
 
     let mut page_table = Box::new(PageTable::default());
     map_kernel_memory(&mut page_table);
-    load_elf(elf, &mut page_table);
+    let entry_point = load_elf(elf, &mut page_table);
 
     let proc = unsafe { &mut PROCESSES[pid] };
     proc.state = ProcessState::Runnable;
-    proc.pc = 0x1000000;
+    proc.pc = entry_point;
     proc.page_table = Box::leak(page_table);
 }
 

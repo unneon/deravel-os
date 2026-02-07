@@ -8,7 +8,6 @@ pub macro app($main:ident) {
         static mut __deravel_stack_top: u8;
     }
 
-    #[unsafe(link_section = ".text.entry")]
     #[unsafe(naked)]
     #[unsafe(no_mangle)]
     unsafe extern "C" fn __deravel_entry() -> ! {

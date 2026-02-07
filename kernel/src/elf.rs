@@ -9,12 +9,15 @@ use elf::endian::LittleEndian;
 use elf::file::Class;
 use elf::segment::ProgramHeader;
 
+const USER_START: usize = 0x1000000;
+const USER_END: usize = 0x1800000;
+
 pub macro const_elf($name:ident $path:literal) {
     const $name: PageAligned<[u8; include_bytes!(env!($path)).len()]> =
         PageAligned(*include_bytes!(env!($path)));
 }
 
-pub fn load_elf(elf_bytes: &[u8], page_table: &mut PageTable) {
+pub fn load_elf(elf_bytes: &[u8], page_table: &mut PageTable) -> usize {
     let elf = ElfBytes::<LittleEndian>::minimal_parse(elf_bytes).unwrap();
     assert_eq!(elf.ehdr.class, Class::ELF64);
     assert_eq!(elf.ehdr.endianness, LittleEndian);
@@ -23,7 +26,6 @@ pub fn load_elf(elf_bytes: &[u8], page_table: &mut PageTable) {
     assert_eq!(elf.ehdr.abiversion, 0);
     assert_eq!(elf.ehdr.e_type, ET_EXEC);
     assert_eq!(elf.ehdr.e_machine, EM_RISCV);
-    assert_eq!(elf.ehdr.e_entry, 0x1000000);
     // TODO: Consider phoff, shoff, flags, ehsize, phentsize, phnum, shentsize, shnum, shstrndx.
 
     let segments = elf.segments().unwrap();
@@ -33,10 +35,10 @@ pub fn load_elf(elf_bytes: &[u8], page_table: &mut PageTable) {
         }
 
         assert!(segment.p_vaddr.is_multiple_of(PAGE_SIZE as u64));
-        assert!(segment.p_vaddr >= 0x1000000);
+        assert!(segment.p_vaddr as usize >= USER_START);
         assert!(segment.p_filesz <= segment.p_memsz);
-        assert!(segment.p_memsz <= 0x1800000 - 0x1000000);
-        assert!(segment.p_vaddr + segment.p_memsz <= 0x1800000);
+        assert!(segment.p_memsz as usize <= USER_END - USER_START);
+        assert!(segment.p_vaddr + segment.p_memsz <= USER_END as u64);
         assert_eq!(segment.p_align, PAGE_SIZE as u64);
 
         let data = elf.segment_data(&segment).unwrap();
@@ -72,6 +74,8 @@ pub fn load_elf(elf_bytes: &[u8], page_table: &mut PageTable) {
             );
         }
     }
+
+    elf.ehdr.e_entry as usize
 }
 
 fn paging_flags(segment: &ProgramHeader) -> PageFlags {

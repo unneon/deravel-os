@@ -116,7 +116,8 @@ unsafe extern "C" fn trap_entry() -> ! {
         ".align 4",
         "csrw sscratch, sp",
         "la sp, {stack_top}",
-        "addi sp, sp, -8 * 31",
+        // 31 registers, 32 u64s so the stack is aligned.
+        "addi sp, sp, -8 * 32",
 
         "sd ra, 8 * 0(sp)",
 
@@ -154,7 +155,7 @@ unsafe extern "C" fn trap_entry() -> ! {
         "sd t6, 8 * 30(sp)",
 
         "mv a0, sp",
-        "call {handle_trap}",
+        "j {handle_trap}",
 
         stack_top = sym stack_top,
         handle_trap = sym handle_trap,

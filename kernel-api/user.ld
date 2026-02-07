@@ -4,7 +4,6 @@ SECTIONS {
     . = 0x1000000;
 
     .text :{
-        KEEP(*(.text.entry));
         *(.text .text.*);
     }
 
@@ -22,7 +21,5 @@ SECTIONS {
         . = ALIGN(16);
         . += 64 * 1024;
         __deravel_stack_top = .;
-
-       ASSERT(. < 0x1800000, "too large executable");
     }
 }
