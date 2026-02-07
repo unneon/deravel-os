@@ -1,19 +1,23 @@
 use crate::{heap_end, heap_start};
+use core::alloc::{GlobalAlloc, Layout};
+use core::sync::atomic::{AtomicUsize, Ordering};
 
-static mut ALLOCATED_SO_FAR: usize = 0;
+pub struct Heap;
 
-pub fn alloc_page() -> &'static mut [u8; 4096] {
-    &mut alloc_pages(1)[0]
-}
+#[global_allocator]
+static HEAP: Heap = Heap;
 
-pub fn alloc_pages(n: usize) -> &'static mut [[u8; 4096]] {
-    let heap_start_ptr = (&raw mut heap_start) as *mut [u8; 4096];
-    let heap_end_ptr = (&raw mut heap_end) as *mut [u8; 4096];
-    let max_pages = unsafe { heap_end_ptr.offset_from_unsigned(heap_start_ptr) };
-    let allocated_so_far = unsafe { ALLOCATED_SO_FAR };
-    assert!(allocated_so_far + n <= max_pages, "out of heap memory");
+static ALLOCATED_SO_FAR: AtomicUsize = AtomicUsize::new(0);
 
-    unsafe { ALLOCATED_SO_FAR += n };
-    let pointer = unsafe { heap_start_ptr.add(allocated_so_far) };
-    unsafe { core::slice::from_raw_parts_mut(pointer, n) }
+unsafe impl GlobalAlloc for Heap {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        assert!(layout.align() <= 4096);
+        let page_count = layout.size().div_ceil(4096);
+        let page_offset = ALLOCATED_SO_FAR.fetch_add(page_count, Ordering::Relaxed);
+        let max_pages = ((&raw const heap_end) as usize - (&raw const heap_start) as usize) / 4096;
+        assert!(max_pages - page_offset >= page_count);
+        unsafe { (&raw mut heap_start).byte_add(4096 * page_offset) }
+    }
+
+    unsafe fn dealloc(&self, _: *mut u8, _: Layout) {}
 }

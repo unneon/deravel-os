@@ -1,5 +1,6 @@
 #![feature(abi_riscv_interrupt)]
 #![feature(adt_const_params)]
+#![feature(allocator_api)]
 #![feature(arbitrary_self_types)]
 #![feature(decl_macro)]
 #![feature(exact_div)]
@@ -11,6 +12,8 @@
 #![no_std]
 #![no_main]
 
+extern crate alloc;
+
 mod elf;
 mod heap;
 mod log;
@@ -18,13 +21,12 @@ mod sbi;
 mod virtio;
 
 use crate::elf::load_elf;
-use crate::heap::alloc_page;
 use crate::log::initialize_log;
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use crate::virtio::initialize_all_virtio_mmio;
 use ::log::{error, info};
+use alloc::boxed::Box;
 use core::arch::{asm, naked_asm};
-use core::mem::transmute;
 use core::panic::PanicInfo;
 use fdt::Fdt;
 use riscv::interrupt::Trap;
@@ -100,6 +102,12 @@ const PAGE_U: usize = 1 << 4;
 static mut PROCESSES: [Process; PROCESS_COUNT] = unsafe { core::mem::zeroed() };
 static mut CURRENT_PROC: Option<usize> = None;
 
+impl Default for PageTable {
+    fn default() -> PageTable {
+        PageTable([0; 4096 / 8])
+    }
+}
+
 fn user_entry() -> ! {
     let mut sstatus = riscv::register::sstatus::read();
     sstatus.set_spie(true);
@@ -115,15 +123,15 @@ fn map_page(table2: &mut PageTable, virtual_addr: usize, physical_addr: usize, f
 
     let vpn2 = (virtual_addr >> 30) & ((1 << 9) - 1);
     if table2.0[vpn2] & PAGE_V == 0 {
-        let table1 = alloc_page();
-        table2.0[vpn2] = (((table1 as *mut _ as usize) / 4096) << 10) | PAGE_V;
+        let table1 = Box::new([0; 4096 / 8]);
+        table2.0[vpn2] = (((table1.as_ptr() as usize) / 4096) << 10) | PAGE_V;
     }
 
     let table1 = unsafe { &mut *(((table2.0[vpn2] >> 10) * 4096) as *mut PageTable) };
     let vpn1 = (virtual_addr >> 21) & ((1 << 9) - 1);
     if table1.0[vpn1] & PAGE_V == 0 {
-        let table0 = alloc_page();
-        table1.0[vpn1] = (((table0 as *mut _ as usize) / 4096) << 10) | PAGE_V;
+        let table0 = Box::new([0; 4096 / 8]);
+        table1.0[vpn1] = (((table0.as_ptr() as usize) / 4096) << 10) | PAGE_V;
     }
 
     let table0 = unsafe { &mut *(((table1.0[vpn1] >> 10) * 4096) as *mut PageTable) };
@@ -147,12 +155,11 @@ fn create_process(elf: &[u8]) -> *mut Process {
             user_entry as *const () as usize
     };
 
-    let page_table =
-        unsafe { transmute::<&'static mut [u8; 4096], &'static mut PageTable>(alloc_page()) };
+    let mut page_table = Box::new(PageTable::default());
     let mut physical_addr = (&raw const kernel_base) as usize;
     while physical_addr < (&raw const heap_end) as usize {
         map_page(
-            page_table,
+            &mut page_table,
             physical_addr,
             physical_addr,
             PAGE_R | PAGE_W | PAGE_X,
@@ -160,12 +167,12 @@ fn create_process(elf: &[u8]) -> *mut Process {
         physical_addr += 4096;
     }
 
-    load_elf(elf, page_table);
+    load_elf(elf, &mut page_table);
 
     proc.pid = i as u32 + 1;
     proc.state = ProcessState::Runnable;
     proc.sp = (proc.stack.as_ptr() as usize) + stack_size - 8 * 13;
-    proc.page_table = page_table;
+    proc.page_table = Box::leak(page_table);
     proc
 }
 
