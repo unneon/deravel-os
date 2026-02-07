@@ -11,12 +11,14 @@
 #![no_std]
 #![no_main]
 
+mod elf;
 mod heap;
 mod log;
 mod sbi;
 mod virtio;
 
-use crate::heap::{alloc_page, alloc_pages};
+use crate::elf::load_elf;
+use crate::heap::alloc_page;
 use crate::log::initialize_log;
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use crate::virtio::initialize_all_virtio_mmio;
@@ -24,8 +26,6 @@ use ::log::{error, info};
 use core::arch::{asm, naked_asm};
 use core::mem::transmute;
 use core::panic::PanicInfo;
-use elf::ElfBytes;
-use elf::endian::LittleEndian;
 use fdt::Fdt;
 use riscv::interrupt::Trap;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
@@ -66,8 +66,7 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     log_sbi_metadata();
     initialize_all_virtio_mmio(&device_tree);
 
-    let hello = ElfBytes::<LittleEndian>::minimal_parse(HELLO_ELF).unwrap();
-    create_process(&hello);
+    create_process(HELLO_ELF);
 
     yield_();
     unreachable!()
@@ -134,7 +133,7 @@ fn map_page(table2: &mut PageTable, virtual_addr: usize, physical_addr: usize, f
     table0.0[vpn0] = ((physical_addr / PAGE_SIZE) << 10) | PAGE_V | flags;
 }
 
-fn create_process(elf: &ElfBytes<LittleEndian>) -> *mut Process {
+fn create_process(elf: &[u8]) -> *mut Process {
     let (i, proc) = unsafe {
         PROCESSES
             .iter_mut()
@@ -161,44 +160,7 @@ fn create_process(elf: &ElfBytes<LittleEndian>) -> *mut Process {
         physical_addr += 4096;
     }
 
-    let (sections, section_names) = elf.section_headers_with_strtab().unwrap();
-    let sections = sections.unwrap();
-    let section_names = section_names.unwrap();
-    for section in sections {
-        let name = section_names.get(section.sh_name as usize).unwrap();
-        if name == ".text" {
-            let data = elf.section_data(&section).unwrap().0;
-
-            let mut offset = 0;
-            while offset < section.sh_size as usize {
-                let page = alloc_page();
-
-                let remaining = section.sh_size as usize - offset;
-                let copy_size = if remaining >= 4096 { 4096 } else { remaining };
-
-                page[..copy_size].copy_from_slice(&data[offset..offset + copy_size]);
-                map_page(
-                    page_table,
-                    section.sh_addr as usize + offset,
-                    page as *const _ as usize,
-                    PAGE_U | PAGE_R | PAGE_W | PAGE_X,
-                );
-
-                offset += 4096;
-            }
-        } else if name == ".bss" {
-            let pages = alloc_pages((section.sh_size as usize).div_ceil(4096));
-            for (index, page) in pages.iter_mut().enumerate() {
-                page.fill(0);
-                map_page(
-                    page_table,
-                    section.sh_addr as usize + index * 4096,
-                    page as *const _ as usize,
-                    PAGE_U | PAGE_R | PAGE_W,
-                );
-            }
-        }
-    }
+    load_elf(elf, page_table);
 
     proc.pid = i as u32 + 1;
     proc.state = ProcessState::Runnable;
