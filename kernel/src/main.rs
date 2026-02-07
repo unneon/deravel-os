@@ -98,7 +98,7 @@ const PAGE_X: usize = 1 << 3;
 const PAGE_U: usize = 1 << 4;
 
 static mut PROCESSES: [Process; PROCESS_COUNT] = unsafe { core::mem::zeroed() };
-static mut CURRENT_PROC: *mut Process = core::ptr::null_mut();
+static mut CURRENT_PROC: Option<usize> = None;
 
 fn user_entry() -> ! {
     let mut sstatus = riscv::register::sstatus::read();
@@ -169,48 +169,57 @@ fn create_process(elf: &[u8]) -> *mut Process {
     proc
 }
 
-static mut FAKE_SP: usize = 0;
-
 fn yield_() {
-    let current_proc = unsafe { &*CURRENT_PROC };
-    let mut next = None;
-    for i in 0..PROCESS_COUNT {
-        let proc = unsafe { &PROCESSES[(current_proc.pid as usize + i) % PROCESS_COUNT] };
-        if proc.state == ProcessState::Runnable && proc.pid > 0 {
-            next = Some(proc as *const Process as *mut Process);
-            break;
-        }
-    }
-
-    let Some(next) = next else {
+    let Some(next_index) = find_runnable_process() else {
         info!("shutting down due to all processes finishing");
         sbi::system_reset(ResetType::Shutdown, ResetReason::NoReason).unwrap()
     };
 
-    if next == unsafe { CURRENT_PROC } {
+    if Some(next_index) == unsafe { CURRENT_PROC } {
         return;
     }
 
+    let next = unsafe { &mut PROCESSES[next_index] };
+    let prev_sp = match unsafe { CURRENT_PROC } {
+        Some(current) => unsafe { &raw mut PROCESSES[current].sp },
+        None => {
+            static mut DUMMY_SP: usize = 0;
+            &raw mut DUMMY_SP
+        }
+    };
+
     let mut satp = Satp::from_bits(0);
-    satp.set_ppn((unsafe { (*next).page_table } as usize) / 4096);
+    satp.set_ppn(next.page_table as usize / 4096);
     satp.set_mode(Mode::Sv39);
 
     riscv::asm::sfence_vma_all();
     unsafe { riscv::register::satp::write(satp) };
-    unsafe { riscv::register::sscratch::write((*next).stack.as_ptr().add(8192) as usize) };
+    unsafe { riscv::register::sscratch::write(next.stack.as_ptr().add(8192) as usize) };
 
-    let prev = unsafe { CURRENT_PROC };
-    let prev_sp = if prev.is_null() {
-        &raw mut FAKE_SP
-    } else {
-        unsafe { &mut (*prev).sp }
+    unsafe { CURRENT_PROC = Some(next_index) };
+    unsafe { switch_context(prev_sp, &next.sp) }
+}
+
+fn find_runnable_process() -> Option<usize> {
+    let current = unsafe { CURRENT_PROC };
+    let scan_start = match current {
+        Some(current) => current + 1,
+        None => 0,
     };
-    unsafe { CURRENT_PROC = next };
-    unsafe { switch_context(prev_sp, &mut (*next).sp) }
+
+    for scan_offset in 0..PROCESS_COUNT {
+        let scan_index = (scan_start + scan_offset) % PROCESS_COUNT;
+        let process = unsafe { &PROCESSES[scan_index] };
+        if process.state == ProcessState::Runnable {
+            return Some(scan_index);
+        }
+    }
+
+    None
 }
 
 #[unsafe(naked)]
-unsafe extern "C" fn switch_context(prev_sp: *mut usize, next_sp: *mut usize) {
+unsafe extern "C" fn switch_context(prev_sp: *mut usize, next_sp: *const usize) {
     naked_asm!(
         "addi sp, sp, -13 * 8",
         "sd ra, 0 * 8(sp)",
@@ -396,7 +405,7 @@ fn handle_trap(trap_frame: &TrapFrame) {
 fn handle_syscall(trap_frame: &TrapFrame) {
     match trap_frame.a3 {
         1 => {
-            unsafe { &mut *CURRENT_PROC }.state = ProcessState::Finished;
+            unsafe { PROCESSES[CURRENT_PROC.unwrap()].state = ProcessState::Finished };
             yield_();
         }
         2 => {
