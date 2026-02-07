@@ -1,4 +1,4 @@
-#![feature(decl_macro)]
+#![feature(decl_macro, never_type)]
 #![no_std]
 
 use core::arch::asm;
@@ -23,13 +23,28 @@ pub macro app($main:ident) {
     }
 }
 
-pub fn exit() -> ! {
-    loop {
-        unsafe { asm!("nop") }
-    }
+macro syscalls($(#[no = $no:literal] pub fn $name:ident($($a0name:ident: $a0type:ty)?) $(-> $return_type:ty)?;)*) {
+    $(pub fn $name($($a0name: $a0type)?) $(-> $return_type)? {
+        let _result: u64;
+        unsafe {
+            asm!(
+                "ecall",
+                $(in("a0") $a0name,)?
+                in("a3") $no,
+                lateout("a0") _result,
+            );
+            $(core::mem::transmute_copy::<u64, $return_type>(&_result))?
+        }
+    })*
 }
 
-pub fn putchar(_ch: u8) {}
+syscalls! {
+    #[no = 1]
+    pub fn exit() -> !;
+
+    #[no = 2]
+    pub fn putchar(ch: u8);
+}
 
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {

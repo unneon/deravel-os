@@ -16,11 +16,11 @@ mod log;
 mod sbi;
 mod virtio;
 
-use crate::heap::alloc_page;
+use crate::heap::{alloc_page, alloc_pages};
 use crate::log::initialize_log;
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use crate::virtio::initialize_all_virtio_mmio;
-use ::log::{debug, error};
+use ::log::{error, info};
 use core::arch::{asm, naked_asm};
 use core::mem::transmute;
 use core::panic::PanicInfo;
@@ -66,20 +66,18 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     log_sbi_metadata();
     initialize_all_virtio_mmio(&device_tree);
 
-    unsafe { IDLE_PROC = create_idle_process() };
-    unsafe { CURRENT_PROC = IDLE_PROC };
-
     let hello = ElfBytes::<LittleEndian>::minimal_parse(HELLO_ELF).unwrap();
     create_process(&hello);
 
     yield_();
-    panic!("switched to idle process");
+    unreachable!()
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum ProcessState {
     Unused,
     Runnable,
+    Finished,
 }
 
 #[derive(Clone, Copy)]
@@ -102,7 +100,6 @@ const PAGE_U: usize = 1 << 4;
 
 static mut PROCESSES: [Process; PROCESS_COUNT] = unsafe { core::mem::zeroed() };
 static mut CURRENT_PROC: *mut Process = core::ptr::null_mut();
-static mut IDLE_PROC: *mut Process = core::ptr::null_mut();
 
 fn user_entry() -> ! {
     let mut sstatus = riscv::register::sstatus::read();
@@ -135,15 +132,6 @@ fn map_page(table2: &mut PageTable, virtual_addr: usize, physical_addr: usize, f
     assert!(table0.0[vpn0] & PAGE_V == 0);
 
     table0.0[vpn0] = ((physical_addr / PAGE_SIZE) << 10) | PAGE_V | flags;
-}
-
-fn create_idle_process() -> *mut Process {
-    let proc = unsafe { &mut PROCESSES[0] };
-    proc.pid = 0;
-    proc.state = ProcessState::Runnable;
-    proc.sp = 0;
-    proc.page_table = core::ptr::null_mut();
-    proc
 }
 
 fn create_process(elf: &ElfBytes<LittleEndian>) -> *mut Process {
@@ -198,6 +186,17 @@ fn create_process(elf: &ElfBytes<LittleEndian>) -> *mut Process {
 
                 offset += 4096;
             }
+        } else if name == ".bss" {
+            let pages = alloc_pages((section.sh_size as usize).div_ceil(4096));
+            for (index, page) in pages.iter_mut().enumerate() {
+                page.fill(0);
+                map_page(
+                    page_table,
+                    section.sh_addr as usize + index * 4096,
+                    page as *const _ as usize,
+                    PAGE_U | PAGE_R | PAGE_W,
+                );
+            }
         }
     }
 
@@ -208,16 +207,23 @@ fn create_process(elf: &ElfBytes<LittleEndian>) -> *mut Process {
     proc
 }
 
+static mut FAKE_SP: usize = 0;
+
 fn yield_() {
     let current_proc = unsafe { &*CURRENT_PROC };
-    let mut next = unsafe { IDLE_PROC };
+    let mut next = None;
     for i in 0..PROCESS_COUNT {
         let proc = unsafe { &PROCESSES[(current_proc.pid as usize + i) % PROCESS_COUNT] };
         if proc.state == ProcessState::Runnable && proc.pid > 0 {
-            next = proc as *const Process as *mut Process;
+            next = Some(proc as *const Process as *mut Process);
             break;
         }
     }
+
+    let Some(next) = next else {
+        info!("shutting down due to all processes finishing");
+        sbi::system_reset(ResetType::Shutdown, ResetReason::NoReason).unwrap()
+    };
 
     if next == unsafe { CURRENT_PROC } {
         return;
@@ -232,8 +238,13 @@ fn yield_() {
     unsafe { riscv::register::sscratch::write((*next).stack.as_ptr().add(8192) as usize) };
 
     let prev = unsafe { CURRENT_PROC };
+    let prev_sp = if prev.is_null() {
+        &raw mut FAKE_SP
+    } else {
+        unsafe { &mut (*prev).sp }
+    };
     unsafe { CURRENT_PROC = next };
-    unsafe { switch_context(&mut (*prev).sp, &mut (*next).sp) }
+    unsafe { switch_context(prev_sp, &mut (*next).sp) }
 }
 
 #[unsafe(naked)]
@@ -281,6 +292,41 @@ fn clear_bss() {
 fn initialize_trap_handler() {
     let address = trap_entry as *const () as usize;
     unsafe { riscv::register::stvec::write(Stvec::new(address, TrapMode::Direct)) }
+}
+
+#[repr(C)]
+struct TrapFrame {
+    ra: usize,
+    gp: usize,
+    tp: usize,
+    t0: usize,
+    t1: usize,
+    t2: usize,
+    t3: usize,
+    t4: usize,
+    t5: usize,
+    t6: usize,
+    a0: usize,
+    a1: usize,
+    a2: usize,
+    a3: usize,
+    a4: usize,
+    a5: usize,
+    a6: usize,
+    a7: usize,
+    s0: usize,
+    s1: usize,
+    s2: usize,
+    s3: usize,
+    s4: usize,
+    s5: usize,
+    s6: usize,
+    s7: usize,
+    s8: usize,
+    s9: usize,
+    s10: usize,
+    s11: usize,
+    sp: usize,
 }
 
 #[unsafe(naked)]
@@ -369,7 +415,7 @@ unsafe extern "C" fn trap_entry() {
     )
 }
 
-fn handle_trap() {
+fn handle_trap(trap_frame: &TrapFrame) {
     let scause = riscv::register::scause::read()
         .cause()
         .try_into::<Interrupt, Exception>()
@@ -377,12 +423,26 @@ fn handle_trap() {
     let stval = riscv::register::stval::read();
     let mut user_pc = riscv::register::sepc::read();
     if scause == Trap::Exception(Exception::UserEnvCall) {
-        debug!("user syscall invoked");
+        handle_syscall(trap_frame);
         user_pc += 4;
     } else {
         panic!("unexpected trap scause={scause:?} stval={stval:#x} user_pc={user_pc:#x}");
     }
     unsafe { riscv::register::sepc::write(user_pc) };
+}
+
+fn handle_syscall(trap_frame: &TrapFrame) {
+    match trap_frame.a3 {
+        1 => {
+            unsafe { &mut *CURRENT_PROC }.state = ProcessState::Finished;
+            yield_();
+        }
+        2 => {
+            let ch = trap_frame.a0 as u8;
+            sbi::debug_console_write_byte(ch).unwrap();
+        }
+        _ => panic!("invalid syscall number {}", trap_frame.a3),
+    }
 }
 
 #[panic_handler]
