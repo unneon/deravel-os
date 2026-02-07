@@ -8,11 +8,11 @@ SECTIONS {
         *(.text .text.*);
     }
 
-    .rodata : ALIGN(4) {
+    .rodata : ALIGN(4096) {
         *(.rodata .rodata.*);
     }
 
-    .data : ALIGN(4) {
+    .data : ALIGN(4096) {
         *(.data .data.*);
     }
 

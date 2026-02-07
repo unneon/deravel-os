@@ -23,6 +23,10 @@ pub macro app($main:ident) {
     }
 }
 
+pub macro println($($tt:tt)*) {
+    core::fmt::write(&mut KernelConsole, format_args!("{}\n", format_args!($($tt)*))).unwrap()
+}
+
 macro syscalls($(#[no = $no:literal] pub fn $name:ident($($a0name:ident: $a0type:ty)?) $(-> $return_type:ty)?;)*) {
     $(pub fn $name($($a0name: $a0type)?) $(-> $return_type)? {
         let _result: u64;
@@ -36,6 +40,17 @@ macro syscalls($(#[no = $no:literal] pub fn $name:ident($($a0name:ident: $a0type
             $(core::mem::transmute_copy::<u64, $return_type>(&_result))?
         }
     })*
+}
+
+pub struct KernelConsole;
+
+impl core::fmt::Write for KernelConsole {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        for byte in s.bytes() {
+            putchar(byte);
+        }
+        Ok(())
+    }
 }
 
 syscalls! {
