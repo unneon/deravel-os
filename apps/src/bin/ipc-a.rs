@@ -6,12 +6,12 @@ use deravel_kernel_api::*;
 fn main() {
     let b = pid_by_name("ipc-b");
 
-    let cap = Capability::create(b);
+    let cap = Capability::grant(b);
     ipc_send(&cap, b);
     yield_();
 
     let (req, req_sender) = ipc_recv::<Capability>();
-    req.validate_chain(req_sender);
+    req.validate(req_sender);
 }
 
 app! { main }
