@@ -1,5 +1,5 @@
 use crate::page::PAGE_SIZE;
-use crate::page::{PageAligned, PageFlags};
+use crate::page::PageFlags;
 use crate::{PageTable, map_pages};
 use alloc::vec;
 use alloc::vec::Vec;
@@ -11,12 +11,6 @@ use elf::segment::ProgramHeader;
 
 const USER_START: usize = 0x1000000;
 const USER_END: usize = 0x1800000;
-
-pub macro const_elf($name:ident $path:literal) {
-    #[allow(dead_code)]
-    const $name: PageAligned<[u8; include_bytes!(env!($path)).len()]> =
-        PageAligned(*include_bytes!(env!($path)));
-}
 
 pub fn load_elf(elf_bytes: &[u8], page_table: &mut PageTable) -> usize {
     let elf = ElfBytes::<LittleEndian>::minimal_parse(elf_bytes).unwrap();

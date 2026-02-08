@@ -23,7 +23,6 @@ use crate::arch::{
     RiscvRegisters, initialize_trap_handler, switch_to_userspace_full,
     switch_to_userspace_registers_only,
 };
-use crate::elf::const_elf;
 use crate::heap::log_heap_statistics;
 use crate::log::initialize_log;
 use crate::page::{PageTable, map_pages};
@@ -38,12 +37,6 @@ use fdt::Fdt;
 use riscv::interrupt::Trap;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
 
-const_elf!(HELLO_ELF "CARGO_BIN_FILE_DERAVEL_APPS_hello");
-const_elf!(IPC_A_ELF "CARGO_BIN_FILE_DERAVEL_APPS_ipc-a");
-const_elf!(IPC_B_ELF "CARGO_BIN_FILE_DERAVEL_APPS_ipc-b");
-const_elf!(IPC_C_ELF "CARGO_BIN_FILE_DERAVEL_APPS_ipc-c");
-const_elf!(SHELL_ELF "CARGO_BIN_FILE_DERAVEL_APPS_shell");
-
 fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     clear_bss();
 
@@ -53,11 +46,11 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     log_sbi_metadata();
     initialize_all_virtio_mmio(&device_tree);
 
-    // create_process(&HELLO_ELF.0);
-    create_process("ipc-a", &IPC_A_ELF.0);
-    create_process("ipc-b", &IPC_B_ELF.0);
-    create_process("ipc-c", &IPC_C_ELF.0);
-    // create_process(&SHELL_ELF.0);
+    // create_process!("hello");
+    create_process!("ipc-a");
+    create_process!("ipc-b");
+    create_process!("ipc-c");
+    // create_process!("shell");
 
     schedule_and_switch_to_userspace();
 }

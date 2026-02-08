@@ -1,9 +1,19 @@
 use crate::arch::RiscvRegisters;
 use crate::elf::load_elf;
-use crate::page::{PAGE_SIZE, PageFlags, PageTable, map_pages};
+use crate::page::{PAGE_SIZE, PageAligned, PageFlags, PageTable, map_pages};
 use alloc::boxed::Box;
 use log::error;
 use riscv::register::satp::{Mode, Satp};
+
+pub macro create_process($name:literal) {{
+    const ELF: PageAligned<
+        [u8; include_bytes!(env!(concat!("CARGO_BIN_FILE_DERAVEL_APPS_", $name))).len()],
+    > = PageAligned(*include_bytes!(env!(concat!(
+        "CARGO_BIN_FILE_DERAVEL_APPS_",
+        $name
+    ))));
+    create_process($name, &ELF.0)
+}}
 
 #[derive(Clone, Copy)]
 pub struct Capability(#[allow(dead_code)] usize);
