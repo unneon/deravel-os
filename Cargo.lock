@@ -27,28 +27,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
 
 [[package]]
-name = "deravel-hello"
-version = "0.0.0"
-dependencies = [
- "deravel-kernel-api",
-]
-
-[[package]]
-name = "deravel-ipc-a"
-version = "0.0.0"
-dependencies = [
- "deravel-kernel-api",
-]
-
-[[package]]
-name = "deravel-ipc-b"
-version = "0.0.0"
-dependencies = [
- "deravel-kernel-api",
-]
-
-[[package]]
-name = "deravel-ipc-c"
+name = "deravel-apps"
 version = "0.0.0"
 dependencies = [
  "deravel-kernel-api",
@@ -58,11 +37,7 @@ dependencies = [
 name = "deravel-kernel"
 version = "0.0.0"
 dependencies = [
- "deravel-hello",
- "deravel-ipc-a",
- "deravel-ipc-b",
- "deravel-ipc-c",
- "deravel-shell",
+ "deravel-apps",
  "elf",
  "fdt",
  "log",
@@ -73,13 +48,6 @@ dependencies = [
 [[package]]
 name = "deravel-kernel-api"
 version = "0.0.0"
-
-[[package]]
-name = "deravel-shell"
-version = "0.0.0"
-dependencies = [
- "deravel-kernel-api",
-]
 
 [[package]]
 name = "elf"

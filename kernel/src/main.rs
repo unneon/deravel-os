@@ -38,11 +38,11 @@ use fdt::Fdt;
 use riscv::interrupt::Trap;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
 
-const_elf!(HELLO_ELF "CARGO_BIN_FILE_DERAVEL_HELLO");
-const_elf!(IPC_A_ELF "CARGO_BIN_FILE_DERAVEL_IPC_A");
-const_elf!(IPC_B_ELF "CARGO_BIN_FILE_DERAVEL_IPC_B");
-const_elf!(IPC_C_ELF "CARGO_BIN_FILE_DERAVEL_IPC_C");
-const_elf!(SHELL_ELF "CARGO_BIN_FILE_DERAVEL_SHELL");
+const_elf!(HELLO_ELF "CARGO_BIN_FILE_DERAVEL_APPS_hello");
+const_elf!(IPC_A_ELF "CARGO_BIN_FILE_DERAVEL_APPS_ipc-a");
+const_elf!(IPC_B_ELF "CARGO_BIN_FILE_DERAVEL_APPS_ipc-b");
+const_elf!(IPC_C_ELF "CARGO_BIN_FILE_DERAVEL_APPS_ipc-c");
+const_elf!(SHELL_ELF "CARGO_BIN_FILE_DERAVEL_APPS_shell");
 
 fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     clear_bss();

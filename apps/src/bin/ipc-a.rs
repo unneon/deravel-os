@@ -10,7 +10,7 @@ fn main() {
     ipc_send(&cap, b);
     yield_();
 
-    let (req, req_sender): (Capability, _) = ipc_recv();
+    let (req, req_sender) = ipc_recv::<Capability>();
     req.validate_chain(req_sender);
 }
 
