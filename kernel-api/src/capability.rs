@@ -39,10 +39,10 @@ impl Capability {
 
     pub fn validate(self, claimer: ProcessId) -> Capability {
         trace!("validating capability {self:?} from process {claimer:?}");
-        assert!(self.is_in_range());
         let mut capability = self;
         let mut sender = claimer;
         let original = loop {
+            assert!(capability.is_in_range());
             let certifier = capability.certifier();
             match capability.read_export().unpack() {
                 CapabilityCertificate::Granted { grantee } => {
