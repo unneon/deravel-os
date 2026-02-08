@@ -39,8 +39,7 @@ pub fn initialize_all_virtio_mmio(device_tree: &Fdt) {
         } else if device_id == 0x2 {
             info!("found virtio-blk device {device} from vendor {vendor:#x}");
             let device = unsafe { device.with_configuration() };
-            let mut virtio_blk = VirtioBlk::new(device);
-            virtio_blk.demo();
+            let _virtio_blk = VirtioBlk::new(device);
         } else {
             debug!("ignoring {device} with unknown device id {device_id:#x}");
         }

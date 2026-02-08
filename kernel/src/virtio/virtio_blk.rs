@@ -3,7 +3,7 @@ use crate::virtio::queue::Queue;
 use crate::virtio::registers::{
     Mmio, Registers, STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, mmio,
 };
-use log::{debug, info};
+use log::info;
 
 mmio! { pub Config
     0x000 capacity: Readonly u64,
@@ -34,6 +34,7 @@ impl VirtioBlk {
         VirtioBlk { regs }
     }
 
+    #[allow(dead_code)]
     pub fn read(&mut self, sector: u64, buf: &mut [u8; 512]) -> Result<(), VirtioBlkError> {
         let header = Header {
             type_: VIRTIO_BLK_T_IN,
@@ -63,12 +64,6 @@ impl VirtioBlk {
         queue.descriptor_writeonly(2, &mut status, None);
         queue.send_and_recv(0, 0, self.regs);
         result_from_status(status)
-    }
-
-    pub fn demo(&mut self) {
-        let mut buf = [0; 512];
-        self.read(0, &mut buf).unwrap();
-        debug!("read from disk: {:?}", str::from_utf8(&buf).unwrap());
     }
 }
 

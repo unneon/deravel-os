@@ -1,13 +1,14 @@
 #![no_std]
 #![no_main]
 
-use deravel_kernel_api::{Capability, app, pid, println};
+use deravel_kernel_api::*;
 
 fn main() {
-    println!("C launched with pid {}", pid());
-    let cap = Capability::guess(0x2001000);
-    println!("C received {cap:?} from B (todo)");
-    println!("C requested sth from A with {cap:?} (todo)");
+    let a = pid_by_name("ipc-a");
+
+    let cap: Capability = ipc_recv().0;
+
+    ipc_send(&cap, a);
 }
 
 app! { main }

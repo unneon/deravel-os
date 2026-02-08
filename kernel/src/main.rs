@@ -132,6 +132,23 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters) -> ! {
                 }
             }
         }
+        6 => {
+            let data = registers.a0 as *const u8;
+            let data_len = registers.a1;
+            let dest_pid = registers.a2;
+            let message = unsafe { core::slice::from_raw_parts(data, data_len) };
+            unsafe { PROCESSES[dest_pid].message = Some((message.into(), CURRENT_PROC.unwrap())) }
+        }
+        7 => {
+            let buf = registers.a0 as *mut u8;
+            let buf_len = registers.a1;
+            let (message, sender_pid) =
+                unsafe { PROCESSES[CURRENT_PROC.unwrap()].message.take().unwrap() };
+            assert_eq!(message.len(), buf_len);
+            let buf = unsafe { core::slice::from_raw_parts_mut(buf, buf_len) };
+            buf.copy_from_slice(&message);
+            registers.a0 = sender_pid;
+        }
         _ => panic!("invalid syscall number {}", registers.a3),
     }
 

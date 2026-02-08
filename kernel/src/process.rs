@@ -25,6 +25,7 @@ pub struct Process {
     pub registers: RiscvRegisters,
     pub pc: usize,
     pub page_table: *const PageTable,
+    pub message: Option<(Box<[u8]>, usize)>,
 }
 
 const CAPABILITY_START: usize = 0x2000000;

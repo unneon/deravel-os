@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use deravel_kernel_api::{app, getchar, print, println, putchar};
+use deravel_kernel_api::*;
 
 fn main() {
     let mut buf = [0; 128];
