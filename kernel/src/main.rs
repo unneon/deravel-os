@@ -39,6 +39,9 @@ use riscv::interrupt::Trap;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
 
 const_elf!(HELLO_ELF "CARGO_BIN_FILE_DERAVEL_HELLO");
+const_elf!(IPC_A_ELF "CARGO_BIN_FILE_DERAVEL_IPC_A");
+const_elf!(IPC_B_ELF "CARGO_BIN_FILE_DERAVEL_IPC_B");
+const_elf!(IPC_C_ELF "CARGO_BIN_FILE_DERAVEL_IPC_C");
 const_elf!(SHELL_ELF "CARGO_BIN_FILE_DERAVEL_SHELL");
 
 fn main(_hart_id: u64, device_tree: *const u8) -> ! {
@@ -50,8 +53,11 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     log_sbi_metadata();
     initialize_all_virtio_mmio(&device_tree);
 
-    create_process(&HELLO_ELF.0);
-    create_process(&SHELL_ELF.0);
+    // create_process(&HELLO_ELF.0);
+    create_process(&IPC_A_ELF.0);
+    create_process(&IPC_B_ELF.0);
+    create_process(&IPC_C_ELF.0);
+    // create_process(&SHELL_ELF.0);
 
     schedule_and_switch_to_userspace();
 }
@@ -105,6 +111,12 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters) -> ! {
             let mut c = [0];
             while sbi::debug_console_read(&mut c).unwrap() == 0 {}
             registers.a0 = c[0] as usize;
+        }
+        4 => {
+            let process = unsafe { &mut PROCESSES[CURRENT_PROC.unwrap()] };
+            process.registers = registers.clone();
+            process.pc = user_pc + 4;
+            schedule_and_switch_to_userspace();
         }
         _ => panic!("invalid syscall number {}", registers.a3),
     }

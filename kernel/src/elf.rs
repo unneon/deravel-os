@@ -13,6 +13,7 @@ const USER_START: usize = 0x1000000;
 const USER_END: usize = 0x1800000;
 
 pub macro const_elf($name:ident $path:literal) {
+    #[allow(dead_code)]
     const $name: PageAligned<[u8; include_bytes!(env!($path)).len()]> =
         PageAligned(*include_bytes!(env!($path)));
 }

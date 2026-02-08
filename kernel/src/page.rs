@@ -6,10 +6,10 @@ pub struct PageAligned<T>(pub T);
 #[derive(Clone)]
 pub struct PageFlags(usize);
 
-pub struct PageTable([PageTableEntry; PAGE_SIZE / size_of::<PageTableEntry>()]);
+pub struct PageTable(pub [PageTableEntry; PAGE_SIZE / size_of::<PageTableEntry>()]);
 
 #[derive(Clone, Copy, Default)]
-struct PageTableEntry(usize);
+pub struct PageTableEntry(pub usize);
 
 pub const PAGE_SIZE: usize = 4096;
 
@@ -42,9 +42,13 @@ impl PageFlags {
 }
 
 impl PageTable {
+    pub const fn new() -> PageTable {
+        PageTable([PageTableEntry(0); PAGE_SIZE / size_of::<PageTableEntry>()])
+    }
+
     unsafe fn get_or_create_indirect(&mut self, vpn_segment: usize) -> &'static mut PageTable {
         if !self.0[vpn_segment].is_valid() {
-            let indirect = Box::leak(Box::new(PageTable::default()));
+            let indirect = Box::leak(Box::new(PageTable::new()));
             self.0[vpn_segment] = PageTableEntry::indirect(indirect as *mut PageTable);
             indirect
         } else {

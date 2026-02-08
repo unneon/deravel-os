@@ -5,6 +5,13 @@ use alloc::boxed::Box;
 use log::error;
 use riscv::register::satp::{Mode, Satp};
 
+#[derive(Clone, Copy)]
+pub struct Capability(#[allow(dead_code)] usize);
+
+#[repr(C, align(4096))]
+#[derive(Clone, Copy)]
+pub struct CapabilityPage([Capability; PAGE_SIZE / size_of::<Capability>()]);
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ProcessState {
     Unused,
@@ -19,6 +26,7 @@ pub struct Process {
     pub page_table: *const PageTable,
 }
 
+const CAPABILITY_START: usize = 0x2000000;
 const PROCESS_COUNT: usize = 8;
 
 unsafe extern "C" {
@@ -32,6 +40,8 @@ unsafe extern "C" {
 
 pub static mut PROCESSES: [Process; PROCESS_COUNT] = unsafe { core::mem::zeroed() };
 pub static mut CURRENT_PROC: Option<usize> = None;
+pub static mut CAPABILITY_PAGES: [CapabilityPage; PROCESS_COUNT] =
+    [CapabilityPage([Capability(0); PAGE_SIZE / size_of::<Capability>()]); PROCESS_COUNT];
 
 impl Process {
     pub fn satp(&self) -> Satp {
@@ -48,12 +58,14 @@ pub fn create_process(elf: &[u8]) {
         return;
     };
 
-    let mut page_table = Box::new(PageTable::default());
+    let mut page_table = Box::new(PageTable::new());
     map_kernel_memory(&mut page_table);
     let entry_point = load_elf(elf, &mut page_table);
+    map_capability_memory(&mut page_table, pid);
 
     let proc = unsafe { &mut PROCESSES[pid] };
     proc.state = ProcessState::Runnable;
+    proc.registers.a0 = pid;
     proc.pc = entry_point;
     proc.page_table = Box::leak(page_table);
 }
@@ -89,6 +101,19 @@ fn map_kernel_memory_section(
     assert!(start.is_multiple_of(PAGE_SIZE));
     let page_count = (end as usize - start).div_ceil(PAGE_SIZE);
     map_pages(page_table, start, start, flags, page_count);
+}
+
+fn map_capability_memory(pages: &mut PageTable, pid: usize) {
+    let pre_v = CAPABILITY_START;
+    let pre_p = &raw const CAPABILITY_PAGES as usize;
+    let own_v = pre_v + pid * PAGE_SIZE;
+    let own_p = pre_p + pid * PAGE_SIZE;
+    let suf_v = own_v + PAGE_SIZE;
+    let suf_p = own_p + PAGE_SIZE;
+    let suf_l = PROCESS_COUNT - pid - 1;
+    map_pages(pages, pre_v, pre_p, PageFlags::readonly().user(), pid);
+    map_pages(pages, own_v, own_p, PageFlags::readwrite().user(), 1);
+    map_pages(pages, suf_v, suf_p, PageFlags::readonly().user(), suf_l);
 }
 
 fn find_free_process_slot() -> Option<usize> {

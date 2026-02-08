@@ -6,6 +6,9 @@ default-run = "deravel-kernel"
 
 [dependencies]
 deravel-hello = { path = "../apps/hello", artifact = "bin" }
+deravel-ipc-a = { path = "../apps/ipc-a", artifact = "bin" }
+deravel-ipc-b = { path = "../apps/ipc-b", artifact = "bin" }
+deravel-ipc-c = { path = "../apps/ipc-c", artifact = "bin" }
 deravel-shell = { path = "../apps/shell", artifact = "bin" }
 elf = { version = "0.8", default-features = false }
 fdt = { version = "0.1", features = ["pretty-printing"] }

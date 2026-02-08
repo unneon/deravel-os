@@ -34,10 +34,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "deravel-ipc-a"
+version = "0.0.0"
+dependencies = [
+ "deravel-kernel-api",
+]
+
+[[package]]
+name = "deravel-ipc-b"
+version = "0.0.0"
+dependencies = [
+ "deravel-kernel-api",
+]
+
+[[package]]
+name = "deravel-ipc-c"
+version = "0.0.0"
+dependencies = [
+ "deravel-kernel-api",
+]
+
+[[package]]
 name = "deravel-kernel"
 version = "0.0.0"
 dependencies = [
  "deravel-hello",
+ "deravel-ipc-a",
+ "deravel-ipc-b",
+ "deravel-ipc-c",
  "deravel-shell",
  "elf",
  "fdt",
