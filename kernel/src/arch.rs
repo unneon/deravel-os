@@ -66,6 +66,10 @@ pub fn switch_to_userspace_full(next: &Process) -> ! {
     unsafe { riscv::register::satp::write(next.satp()) };
     riscv::asm::sfence_vma_all();
     unsafe { riscv::register::sepc::write(next.pc) };
+    let mut status = riscv::register::sstatus::read();
+    status.set_spie(true);
+    status.set_sum(true);
+    unsafe { riscv::register::sstatus::write(status) };
     switch_to_userspace_registers_only(&next.registers)
 }
 

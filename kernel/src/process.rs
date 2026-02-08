@@ -20,6 +20,7 @@ pub enum ProcessState {
 }
 
 pub struct Process {
+    pub name: Option<&'static str>,
     pub state: ProcessState,
     pub registers: RiscvRegisters,
     pub pc: usize,
@@ -52,7 +53,7 @@ impl Process {
     }
 }
 
-pub fn create_process(elf: &[u8]) {
+pub fn create_process(name: &'static str, elf: &[u8]) {
     let Some(pid) = find_free_process_slot() else {
         error!("exhausted all process slots");
         return;
@@ -64,6 +65,7 @@ pub fn create_process(elf: &[u8]) {
     map_capability_memory(&mut page_table, pid);
 
     let proc = unsafe { &mut PROCESSES[pid] };
+    proc.name = Some(name);
     proc.state = ProcessState::Runnable;
     proc.registers.a0 = pid;
     proc.pc = entry_point;

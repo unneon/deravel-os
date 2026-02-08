@@ -34,13 +34,15 @@ pub macro println($($tt:tt)*) {
     print!("{}\n", format_args!($($tt)*))
 }
 
-macro syscalls($(#[no = $no:literal] pub fn $name:ident($($a0name:ident: $a0type:ty)?) $(-> $return_type:ty)?;)*) {
-    $(pub fn $name($($a0name: $a0type)?) $(-> $return_type)? {
+macro syscalls($(#[no = $no:literal] pub fn $name:ident($($a0name:ident: $a0type:ty$(, $a1name:ident: $a1type:ty)?)?) $(-> $return_type:ty)?;)*) {
+    $(pub fn $name($($a0name: $a0type$(, $a1name: $a1type)?)?) $(-> $return_type)? {
         let _result: u64;
         unsafe {
             asm!(
                 "ecall",
-                $(in("a0") $a0name,)?
+                $(in("a0") $a0name,
+                $(in("a1") $a1name,
+                )?)?
                 in("a3") $no,
                 lateout("a0") _result,
             );
@@ -148,10 +150,17 @@ syscalls! {
 
     #[no = 4]
     pub fn yield_();
+
+    #[no = 5]
+    pub fn raw_pid_by_name(name: *const u8, name_len: usize) -> usize;
 }
 
 pub fn pid() -> usize {
     unsafe { PID }
+}
+
+pub fn pid_by_name(name: &str) -> usize {
+    raw_pid_by_name(name.as_ptr(), name.len())
 }
 
 #[panic_handler]

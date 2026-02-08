@@ -54,9 +54,9 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     initialize_all_virtio_mmio(&device_tree);
 
     // create_process(&HELLO_ELF.0);
-    create_process(&IPC_A_ELF.0);
-    create_process(&IPC_B_ELF.0);
-    create_process(&IPC_C_ELF.0);
+    create_process("ipc-a", &IPC_A_ELF.0);
+    create_process("ipc-b", &IPC_B_ELF.0);
+    create_process("ipc-c", &IPC_C_ELF.0);
     // create_process(&SHELL_ELF.0);
 
     schedule_and_switch_to_userspace();
@@ -117,6 +117,20 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters) -> ! {
             process.registers = registers.clone();
             process.pc = user_pc + 4;
             schedule_and_switch_to_userspace();
+        }
+        5 => {
+            // TODO: Handle user pointers safely.
+            let name =
+                unsafe { core::slice::from_raw_parts(registers.a0 as *const u8, registers.a1) };
+            let name = core::str::from_utf8(name).unwrap();
+            for (pid, haystack) in unsafe { PROCESSES.iter().enumerate() } {
+                if let Some(haystack_name) = haystack.name
+                    && name == haystack_name
+                {
+                    registers.a0 = pid;
+                    break;
+                }
+            }
         }
         _ => panic!("invalid syscall number {}", registers.a3),
     }
