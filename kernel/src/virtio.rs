@@ -2,7 +2,7 @@ use crate::virtio::registers::Registers;
 use crate::virtio::virtio_blk::VirtioBlk;
 use crate::virtio::virtio_net::VirtioNet;
 use fdt::Fdt;
-use log::{debug, error, info};
+use log::{debug, error, info, trace};
 
 pub mod queue;
 pub mod registers;
@@ -26,7 +26,7 @@ pub fn initialize_all_virtio_mmio(device_tree: &Fdt) {
 
         let device_id = device.device_id().read();
         if device_id == 0x0 {
-            debug!("ignoring {device} as device id is 0x0");
+            trace!("ignoring {device} as device id is 0x0");
             continue;
         }
 

@@ -1,5 +1,6 @@
-use crate::{ProcessId, current_pid, println};
+use crate::{ProcessId, current_pid};
 use core::sync::atomic::{AtomicUsize, Ordering};
+use log::trace;
 
 #[derive(Clone, Copy)]
 pub struct Capability(usize);
@@ -37,7 +38,7 @@ impl Capability {
     }
 
     pub fn validate(self, claimer: ProcessId) -> Capability {
-        println!("validating capability {self:?} from process {claimer:?}");
+        trace!("validating capability {self:?} from process {claimer:?}");
         assert!(self.is_in_range());
         let mut capability = self;
         let mut sender = claimer;
@@ -45,19 +46,19 @@ impl Capability {
             let certifier = capability.certifier();
             match capability.read_export().unpack() {
                 CapabilityCertificate::Granted { grantee } => {
-                    println!("... granted from {certifier:?} to {grantee:?}");
-                    assert_eq!(grantee, sender);
+                    trace!("... granted from {certifier:?} to {grantee:?}");
+                    assert!(grantee == sender);
                     break capability;
                 }
                 CapabilityCertificate::Forwarded { forwardee, inner } => {
-                    println!("... was {inner:?} forwarded from {certifier:?} to {forwardee:?}");
-                    assert_eq!(forwardee, sender);
+                    trace!("... forwarded {inner:?} from {certifier:?} to {forwardee:?}");
+                    assert!(forwardee == sender);
                     sender = certifier;
                     capability = inner;
                 }
             }
         };
-        assert_eq!(original.certifier(), current_pid());
+        assert!(original.certifier() == current_pid());
         original
     }
 

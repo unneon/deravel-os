@@ -6,8 +6,10 @@ mod capability;
 pub use capability::*;
 
 use core::arch::asm;
+use core::fmt::Write;
 use core::hint::unreachable_unchecked;
 use core::mem::{MaybeUninit, transmute_copy};
+use log::{Level, LevelFilter, Metadata, Record, error};
 
 pub macro app($main:ident) {
     unsafe extern "C" {
@@ -21,10 +23,12 @@ pub macro app($main:ident) {
             "la sp, {stack_top}",
             "la t0, {current_pid}",
             "sd a0, 0(t0)",
+            "call {initialize_log}",
             "call {main}",
             "call {exit}",
             stack_top = sym __deravel_stack_top,
             current_pid = sym CURRENT_PID,
+            initialize_log = sym initialize_log,
             main = sym $main,
             exit = sym exit,
         )
@@ -35,8 +39,13 @@ pub macro print($($tt:tt)*) {
     core::fmt::write(&mut KernelConsole, format_args!("{}", format_args!($($tt)*))).unwrap()
 }
 
-pub macro println($($tt:tt)*) {
-    print!("{}\n", format_args!($($tt)*))
+pub macro println {
+    () => {
+        print!("\n")
+    },
+    ($($tt:tt)*) => {
+        print!("{}\n", format_args!($($tt)*))
+    },
 }
 
 macro syscalls($(#[no = $no:literal] pub fn $name:ident($($a0name:ident: $a0type:ty$(, $a1name:ident: $a1type:ty$(, $a2name:ident: $a2type:ty)?)?)?) $(-> $return_type:ty)?;)*) {
@@ -69,9 +78,16 @@ pub struct KernelConsole;
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct ProcessId(usize);
 
+struct StackString {
+    length: usize,
+    buffer: [u8; 128],
+}
+
+struct SystemLogger;
+
 pub static mut CURRENT_PID: ProcessId = ProcessId(0);
 
-impl core::fmt::Write for KernelConsole {
+impl Write for KernelConsole {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         for byte in s.bytes() {
             putchar(byte);
@@ -84,6 +100,42 @@ impl core::fmt::Debug for ProcessId {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}", self.0)
     }
+}
+
+impl Write for StackString {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        assert!(s.len() <= 128 - self.length);
+        self.buffer[self.length..self.length + s.len()].copy_from_slice(s.as_bytes());
+        self.length += s.len();
+        Ok(())
+    }
+}
+
+impl log::Log for SystemLogger {
+    fn enabled(&self, _: &Metadata) -> bool {
+        true
+    }
+
+    fn log(&self, record: &Record) {
+        let mut text = StackString {
+            length: 0,
+            buffer: [0; 128],
+        };
+        write!(text, "{}", record.args()).unwrap();
+        let level = match record.level() {
+            Level::Error => 0,
+            Level::Warn => 1,
+            Level::Info => 2,
+            Level::Debug => 3,
+            Level::Trace => 4,
+        };
+        system_log(
+            core::str::from_utf8(&text.buffer[..text.length]).unwrap(),
+            level,
+        )
+    }
+
+    fn flush(&self) {}
 }
 
 impl FromA0A1 for u8 {
@@ -132,6 +184,14 @@ syscalls! {
 
     #[no = 7]
     pub fn raw_ipc_recv(buf: *mut u8, buf_len: usize) -> ProcessId;
+
+    #[no = 8]
+    pub fn raw_system_log(text: *const u8, text_len: usize, level: usize);
+}
+
+pub fn initialize_log() {
+    log::set_logger(&SystemLogger).unwrap();
+    log::set_max_level(LevelFilter::Trace);
 }
 
 pub fn ipc_send<T>(data: &T, dest: ProcessId) {
@@ -152,10 +212,14 @@ pub fn pid_by_name(name: &str) -> ProcessId {
     raw_pid_by_name(name.as_ptr(), name.len())
 }
 
+pub fn system_log(text: &str, level: usize) {
+    raw_system_log(text.as_ptr(), text.len(), level);
+}
+
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     let location = info.location().unwrap();
     let message = info.message();
-    println!("\x1B[1;31muser application panicked\x1B[0m at {location}: {message}");
-    loop {}
+    error!("user application panicked at {location}: {message}");
+    exit()
 }

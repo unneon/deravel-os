@@ -24,14 +24,14 @@ use crate::arch::{
     switch_to_userspace_registers_only,
 };
 use crate::heap::log_heap_statistics;
-use crate::log::initialize_log;
+use crate::log::{initialize_log, log_userspace};
 use crate::page::{PageTable, map_pages};
 use crate::process::{
     CURRENT_PROC, PROCESSES, ProcessState, create_process, find_runnable_process,
 };
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use crate::virtio::initialize_all_virtio_mmio;
-use ::log::{error, info};
+use ::log::{Level, error};
 use core::panic::PanicInfo;
 use fdt::Fdt;
 use riscv::interrupt::Trap;
@@ -66,7 +66,6 @@ fn clear_bss() {
 
 fn schedule_and_switch_to_userspace() -> ! {
     let Some(next_pid) = find_runnable_process() else {
-        info!("shutting down due to all processes finishing");
         log_heap_statistics();
         sbi::system_reset(ResetType::Shutdown, ResetReason::NoReason).unwrap()
     };
@@ -141,6 +140,29 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters) -> ! {
             let buf = unsafe { core::slice::from_raw_parts_mut(buf, buf_len) };
             buf.copy_from_slice(&message);
             registers.a0 = sender_pid;
+        }
+        8 => {
+            let text = registers.a0 as *const u8;
+            let text_len = registers.a1;
+            assert!(text_len <= 128);
+            let level = registers.a2;
+            let text = unsafe { core::slice::from_raw_parts(text, text_len) };
+            let mut text_stack = [0; 128];
+            text_stack[..text_len].copy_from_slice(text);
+            let text = unsafe { core::str::from_utf8_unchecked(&text_stack[..text_len]) };
+            let level = match level {
+                0 => Level::Error,
+                1 => Level::Warn,
+                2 => Level::Info,
+                3 => Level::Debug,
+                4 => Level::Trace,
+                _ => panic!("invalid log level {level}"),
+            };
+            log_userspace(
+                level,
+                unsafe { PROCESSES[CURRENT_PROC.unwrap()].name.unwrap() },
+                text,
+            );
         }
         _ => panic!("invalid syscall number {}", registers.a3),
     }

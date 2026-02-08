@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 deravel-kernel-api = { path = "../kernel-api" }
+log = "0.4"

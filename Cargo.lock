@@ -31,6 +31,7 @@ name = "deravel-apps"
 version = "0.0.0"
 dependencies = [
  "deravel-kernel-api",
+ "log",
 ]
 
 [[package]]
@@ -48,6 +49,9 @@ dependencies = [
 [[package]]
 name = "deravel-kernel-api"
 version = "0.0.0"
+dependencies = [
+ "log",
+]
 
 [[package]]
 name = "elf"
