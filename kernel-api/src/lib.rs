@@ -14,26 +14,10 @@ use core::mem::{MaybeUninit, transmute_copy};
 use log::{Level, LevelFilter, Metadata, Record, error};
 
 pub macro app($main:ident) {
-    unsafe extern "C" {
-        static mut __deravel_stack_top: u8;
-    }
-
-    #[unsafe(naked)]
     #[unsafe(no_mangle)]
-    unsafe extern "C" fn __deravel_entry() -> ! {
-        core::arch::naked_asm!(
-            "la sp, {stack_top}",
-            "la t0, {current_pid}",
-            "sd a0, 0(t0)",
-            "call {initialize_log}",
-            "call {main}",
-            "call {exit}",
-            stack_top = sym __deravel_stack_top,
-            current_pid = sym CURRENT_PID,
-            initialize_log = sym initialize_log,
-            main = sym $main,
-            exit = sym exit,
-        )
+    extern "C" fn __deravel_main() -> ! {
+        $main();
+        exit()
     }
 }
 
@@ -87,7 +71,11 @@ struct StackString {
 
 struct SystemLogger;
 
-pub static mut CURRENT_PID: ProcessId = ProcessId(0);
+unsafe extern "C" {
+    static mut __deravel_stack_top: u8;
+}
+
+static mut CURRENT_PID: ProcessId = ProcessId(0);
 
 impl Write for KernelConsole {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
@@ -165,6 +153,22 @@ impl FromA0A1 for ! {
     }
 }
 
+#[unsafe(link_section = ".text.entry")]
+#[unsafe(naked)]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn __deravel_entry() -> ! {
+    core::arch::naked_asm!(
+        "la sp, {stack_top}",
+        "la t0, {current_pid}",
+        "sd a0, 0(t0)",
+        "call {initialize_log}",
+        "j __deravel_main",
+        stack_top = sym __deravel_stack_top,
+        current_pid = sym CURRENT_PID,
+        initialize_log = sym initialize_log,
+    )
+}
+
 syscalls! {
     #[no = 1]
     pub fn exit() -> !;
@@ -191,7 +195,7 @@ syscalls! {
     pub fn raw_system_log(text: *const u8, text_len: usize, level: usize);
 }
 
-pub fn initialize_log() {
+fn initialize_log() {
     log::set_logger(&SystemLogger).unwrap();
     log::set_max_level(LevelFilter::Trace);
 }
