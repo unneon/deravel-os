@@ -3,10 +3,13 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use log::trace;
 
 #[derive(Clone, Copy)]
-pub struct Capability(usize);
+pub struct Capability(*const CapabilityCertificate);
+
+#[derive(Clone, Copy)]
+struct CapabilityCertificate(usize);
 
 #[derive(Debug)]
-pub enum CapabilityCertificate {
+enum CapabilityCertificateUnpacked {
     Granted {
         grantee: ProcessId,
     },
@@ -16,27 +19,24 @@ pub enum CapabilityCertificate {
     },
 }
 
-#[derive(Clone, Copy)]
-pub struct CapabilityCertificatePacked(usize);
-
 const CAPABILITIES_START: usize = 0x2000000;
 const CAPABILITIES_END: usize = 0x3000000;
 
-pub static CAPABILITIES_ALLOCATED: AtomicUsize = AtomicUsize::new(0);
+static CAPABILITIES_ALLOCATED: AtomicUsize = AtomicUsize::new(0);
 
 impl Capability {
     pub fn grant(grantee: ProcessId) -> Capability {
         let certificate = allocate_certificate();
-        *certificate = CapabilityCertificatePacked::grant(grantee);
-        let cap = Capability(certificate as *mut CapabilityCertificatePacked as usize);
+        *certificate = CapabilityCertificate::grant(grantee);
+        let cap = Capability(certificate);
         trace!("granted {cap:?} to {grantee:?}");
         cap
     }
 
     pub fn forward(self, forwardee: ProcessId) -> Capability {
         let certificate = allocate_certificate();
-        *certificate = CapabilityCertificatePacked::forward(forwardee, self);
-        let cap = Capability(certificate as *mut CapabilityCertificatePacked as usize);
+        *certificate = CapabilityCertificate::forward(forwardee, self);
+        let cap = Capability(certificate);
         trace!("forwarded {cap:?} to {forwardee:?}");
         cap
     }
@@ -46,19 +46,19 @@ impl Capability {
         let mut capability = self;
         let mut sender = claimer;
         let original = loop {
-            assert!(capability.is_in_range());
+            assert!(capability.is_pointer_valid());
             let certifier = capability.certifier();
-            match capability.read_export().unpack() {
-                CapabilityCertificate::Granted { grantee } => {
+            match capability.certificate().unpack() {
+                CapabilityCertificateUnpacked::Granted { grantee } => {
                     trace!("... granted from {certifier:?} to {grantee:?}");
                     assert!(grantee == sender);
                     break capability;
                 }
-                CapabilityCertificate::Forwarded { forwardee, inner } => {
+                CapabilityCertificateUnpacked::Forwarded { forwardee, inner } => {
                     trace!("... forwarded {inner:?} from {certifier:?} to {forwardee:?}");
                     assert!(forwardee == sender);
-                    sender = certifier;
                     capability = inner;
+                    sender = certifier;
                 }
             }
         };
@@ -66,42 +66,44 @@ impl Capability {
         original
     }
 
-    fn read_export(self) -> CapabilityCertificatePacked {
-        assert!(self.is_in_range());
-        unsafe { *(self.0 as *const CapabilityCertificatePacked) }
+    fn certificate(self) -> CapabilityCertificate {
+        assert!(self.is_pointer_valid());
+        unsafe { *self.0 }
     }
 
     fn certifier(self) -> ProcessId {
-        assert!(self.is_in_range());
-        ProcessId((self.0 - CAPABILITIES_START) / 4096)
+        assert!(self.is_pointer_valid());
+        ProcessId((self.0 as usize - CAPABILITIES_START) / 4096)
     }
 
-    fn is_in_range(self) -> bool {
-        (CAPABILITIES_START..CAPABILITIES_END).contains(&self.0)
+    fn is_pointer_valid(self) -> bool {
+        let in_range = (CAPABILITIES_START..CAPABILITIES_END).contains(&(self.0 as usize));
+        let aligned = self.0.is_aligned();
+        in_range && aligned
     }
 }
 
-impl CapabilityCertificatePacked {
-    fn grant(grantee: ProcessId) -> CapabilityCertificatePacked {
+impl CapabilityCertificate {
+    fn grant(grantee: ProcessId) -> CapabilityCertificate {
         assert!(grantee.0 < 8);
-        CapabilityCertificatePacked(grantee.0)
+        CapabilityCertificate(grantee.0)
     }
 
-    fn forward(forwardee: ProcessId, capability: Capability) -> CapabilityCertificatePacked {
+    fn forward(forwardee: ProcessId, capability: Capability) -> CapabilityCertificate {
         assert!(forwardee.0 < 8);
-        assert!(capability.0.is_multiple_of(8));
-        CapabilityCertificatePacked(forwardee.0 | capability.0)
+        assert!(capability.0.is_aligned_to(8));
+        CapabilityCertificate(forwardee.0 | capability.0 as usize)
     }
 
-    fn unpack(self) -> CapabilityCertificate {
+    fn unpack(self) -> CapabilityCertificateUnpacked {
         let certified = ProcessId(self.0 % 8);
         let raw_inner = self.0 ^ certified.0;
         if raw_inner == 0 {
-            CapabilityCertificate::Granted { grantee: certified }
+            CapabilityCertificateUnpacked::Granted { grantee: certified }
         } else {
-            CapabilityCertificate::Forwarded {
+            CapabilityCertificateUnpacked::Forwarded {
                 forwardee: certified,
-                inner: Capability(raw_inner),
+                inner: Capability(raw_inner as *const CapabilityCertificate),
             }
         }
     }
@@ -109,17 +111,17 @@ impl CapabilityCertificatePacked {
 
 impl core::fmt::Debug for Capability {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{:#x}", self.0)
+        write!(f, "{:#x}", self.0 as usize)
     }
 }
 
-fn allocate_certificate() -> &'static mut CapabilityCertificatePacked {
+fn allocate_certificate() -> &'static mut CapabilityCertificate {
     let index = CAPABILITIES_ALLOCATED.fetch_add(1, Ordering::Relaxed);
     assert!(
-        index < 4096 / size_of::<CapabilityCertificatePacked>(),
+        index < 4096 / size_of::<CapabilityCertificate>(),
         "out of capability certificate slots"
     );
-    let all_certificates = CAPABILITIES_START as *mut CapabilityCertificatePacked;
+    let all_certificates = CAPABILITIES_START as *mut CapabilityCertificate;
     let our_certificates = unsafe { all_certificates.byte_add(4096 * current_pid().0) };
     let certificate = unsafe { our_certificates.add(index) };
     unsafe { &mut *certificate }
