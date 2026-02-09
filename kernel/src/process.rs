@@ -1,8 +1,11 @@
-use crate::arch::RiscvRegisters;
+use crate::arch::{RiscvRegisters, switch_to_userspace_full};
 use crate::elf::load_elf;
+use crate::heap::log_heap_statistics;
 use crate::page::{PAGE_SIZE, PageAligned, PageFlags, PageTable, map_pages};
+use crate::sbi;
+use crate::sbi::{ResetReason, ResetType};
 use alloc::boxed::Box;
-use log::error;
+use log::{error, trace};
 use riscv::register::satp::{Mode, Satp};
 
 pub macro create_process($name:literal) {{
@@ -136,6 +139,24 @@ fn find_free_process_slot() -> Option<usize> {
         }
     }
     None
+}
+
+pub fn schedule_and_switch_to_userspace() -> ! {
+    let prev_pid = unsafe { CURRENT_PROC };
+    let Some(next_pid) = find_runnable_process() else {
+        log_heap_statistics();
+        sbi::system_reset(ResetType::Shutdown, ResetReason::NoReason).unwrap()
+    };
+    let next = unsafe { &PROCESSES[next_pid] };
+    unsafe { CURRENT_PROC = Some(next_pid) }
+
+    if let Some(prev_pid) = prev_pid {
+        trace!("switching from {prev_pid} to {next_pid}");
+    } else {
+        trace!("switching to {next_pid}");
+    }
+
+    switch_to_userspace_full(next);
 }
 
 pub fn find_runnable_process() -> Option<usize> {

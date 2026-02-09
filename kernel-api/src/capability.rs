@@ -28,13 +28,17 @@ impl Capability {
     pub fn grant(grantee: ProcessId) -> Capability {
         let certificate = allocate_certificate();
         *certificate = CapabilityCertificatePacked::grant(grantee);
-        Capability(certificate as *mut CapabilityCertificatePacked as usize)
+        let cap = Capability(certificate as *mut CapabilityCertificatePacked as usize);
+        trace!("granted {cap:?} to {grantee:?}");
+        cap
     }
 
     pub fn forward(self, forwardee: ProcessId) -> Capability {
         let certificate = allocate_certificate();
         *certificate = CapabilityCertificatePacked::forward(forwardee, self);
-        Capability(certificate as *mut CapabilityCertificatePacked as usize)
+        let cap = Capability(certificate as *mut CapabilityCertificatePacked as usize);
+        trace!("forwarded {cap:?} to {forwardee:?}");
+        cap
     }
 
     pub fn validate(self, claimer: ProcessId) -> Capability {

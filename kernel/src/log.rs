@@ -66,7 +66,7 @@ pub fn initialize_log(device_tree: &Fdt) {
         LOGGER.timebase_frequency = timebase_frequency;
         log::set_logger(&LOGGER).unwrap();
     };
-    log::set_max_level(LevelFilter::Debug);
+    log::set_max_level(LevelFilter::Trace);
     info!("timebase frequency is {timebase_frequency}");
 }
 

@@ -19,15 +19,11 @@ mod process;
 mod sbi;
 mod virtio;
 
-use crate::arch::{
-    RiscvRegisters, initialize_trap_handler, switch_to_userspace_full,
-    switch_to_userspace_registers_only,
-};
-use crate::heap::log_heap_statistics;
+use crate::arch::{RiscvRegisters, initialize_trap_handler, switch_to_userspace_registers_only};
 use crate::log::{initialize_log, log_userspace};
 use crate::page::{PageTable, map_pages};
 use crate::process::{
-    CURRENT_PROC, PROCESSES, ProcessState, create_process, find_runnable_process,
+    CURRENT_PROC, PROCESSES, ProcessState, create_process, schedule_and_switch_to_userspace,
 };
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use crate::virtio::initialize_all_virtio_mmio;
@@ -62,17 +58,6 @@ fn clear_bss() {
     }
     let bss = unsafe { core::slice::from_mut_ptr_range(&raw mut bss_start..&raw mut bss_end) };
     bss.fill(0);
-}
-
-fn schedule_and_switch_to_userspace() -> ! {
-    let Some(next_pid) = find_runnable_process() else {
-        log_heap_statistics();
-        sbi::system_reset(ResetType::Shutdown, ResetReason::NoReason).unwrap()
-    };
-    let next = unsafe { &PROCESSES[next_pid] };
-    unsafe { CURRENT_PROC = Some(next_pid) }
-
-    switch_to_userspace_full(next);
 }
 
 fn handle_trap(registers: &mut RiscvRegisters) -> ! {
