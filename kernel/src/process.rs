@@ -38,6 +38,7 @@ pub struct Process {
     pub registers: RiscvRegisters,
     pub pc: usize,
     pub page_table: *const PageTable,
+    pub heap_pages_allocated: usize,
     pub message: Option<(Box<[u8]>, usize)>,
 }
 

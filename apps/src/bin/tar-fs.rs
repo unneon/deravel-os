@@ -2,11 +2,23 @@
 #![no_std]
 #![no_main]
 
+extern crate alloc;
+
+use alloc::borrow::ToOwned;
+use alloc::string::String;
+use alloc::vec;
+use alloc::vec::Vec;
 use core::ffi::CStr;
 use deravel_kernel_api::*;
 use log::debug;
 
+struct File {
+    name: String,
+    data: Vec<u8>,
+}
+
 #[repr(C, packed)]
+#[derive(Clone, Copy)]
 struct TarHeader {
     name: [u8; 100],
     mode: [u8; 8],
@@ -27,70 +39,69 @@ struct TarHeader {
     padding: [u8; 12],
 }
 
-#[derive(Clone, Copy)]
-struct File {
-    in_use: bool,
-    name: [u8; 100],
-    data: [u8; 1024],
-    size: usize,
+union TarHeaderBuf {
+    header: TarHeader,
+    bytes: [u8; 512],
 }
 
-const MAX_DISK_SECTORS: usize = 64;
-const MAX_FILES: usize = 2;
-
-static mut FILES: [File; MAX_FILES] = [File {
-    in_use: false,
-    name: [0; 100],
-    data: [0; 1024],
-    size: 0,
-}; MAX_FILES];
-static mut DISK: [[u8; 512]; MAX_DISK_SECTORS] = [[0; 512]; MAX_DISK_SECTORS];
+const SECTOR_SIZE: usize = 512;
 
 fn main() {
-    let capacity = disk_capacity();
-    assert!(capacity <= MAX_DISK_SECTORS);
-
-    for (sector, buf) in unsafe { DISK[..capacity].iter_mut().enumerate() } {
-        disk_read(sector, buf);
+    let files = parse_tar_file();
+    for file in files {
+        let name = file.name;
+        let contents = str::from_utf8(&file.data).unwrap();
+        debug!("read file {name} with contents {contents:?}");
     }
+}
 
-    let mut offset = 0;
-    for file in unsafe { FILES.iter_mut() } {
-        let header = unsafe { &*((&raw const DISK[offset]) as *const TarHeader) };
+fn parse_tar_file() -> Vec<File> {
+    let capacity = disk_capacity();
+    let mut sector = 0;
+    let mut buf = TarHeaderBuf {
+        bytes: [0; SECTOR_SIZE],
+    };
+    let mut files = Vec::new();
+    while sector < capacity {
+        // Hopefully one day Rust will get safe transmute and something this simple will
+        // become nice and safe. The alternative is error-prone indexing with prefix
+        // sums or a macro.
+        disk_read(sector, unsafe { &mut buf.bytes });
+        sector += 1;
+        let header = unsafe { &buf.header };
+
+        // TODO: Shouldn't it be two consecutive zero-filled blocks?
         if header.name[0] == b'\0' {
             break;
         }
 
         assert_eq!(header.magic, *b"ustar\0");
 
-        let name = CStr::from_bytes_until_nul(&header.name)
-            .unwrap()
-            .to_str()
-            .unwrap();
+        // TODO: Check it's a valid UNIX path with no weird components.
+        let name = parse_string(&header.name).to_owned();
 
-        let file_size = parse_octal(&header.size);
+        let size = parse_octal(&header.size);
+        assert!(sector + size.div_ceil(SECTOR_SIZE) - 1 < capacity);
 
-        let data = unsafe {
-            core::slice::from_raw_parts(&raw const DISK[offset + 1] as *const u8, file_size)
-        };
+        let mut data = vec![0u8; size.next_multiple_of(SECTOR_SIZE)];
+        for i in 0..size.div_ceil(SECTOR_SIZE) {
+            let sector_data = &mut data[i * SECTOR_SIZE..][..SECTOR_SIZE];
+            disk_read(sector, sector_data.try_into().unwrap());
+            sector += 1;
+        }
+        data.resize(size, 0);
 
-        file.in_use = true;
-        file.name.copy_from_slice(&header.name);
-        file.data[..data.len()].copy_from_slice(data);
-        file.size = file_size;
-
-        debug!(
-            "file {name} read from disk {:?}",
-            core::str::from_utf8(&file.data[..data.len()]).unwrap()
-        );
-
-        offset += file_size.div_ceil(512) + 1;
+        files.push(File { name, data });
     }
+    files
+}
+
+fn parse_string(raw: &[u8]) -> &str {
+    CStr::from_bytes_until_nul(raw).unwrap().to_str().unwrap()
 }
 
 fn parse_octal(raw: &[u8]) -> usize {
-    let text = CStr::from_bytes_until_nul(raw).unwrap().to_str().unwrap();
-    usize::from_str_radix(text, 8).unwrap()
+    usize::from_str_radix(parse_string(raw), 8).unwrap()
 }
 
 app! { main }

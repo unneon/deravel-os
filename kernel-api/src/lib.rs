@@ -7,6 +7,7 @@ mod capability;
 
 pub use capability::*;
 
+use core::alloc::{GlobalAlloc, Layout};
 use core::arch::asm;
 use core::fmt::Write;
 use core::hint::unreachable_unchecked;
@@ -60,6 +61,8 @@ trait FromA0A1 {
 
 pub struct KernelConsole;
 
+struct PageAllocator;
+
 #[repr(transparent)]
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct ProcessId(usize);
@@ -71,11 +74,16 @@ struct StackString {
 
 struct SystemLogger;
 
+const PAGE_SIZE: usize = 4096;
+
 unsafe extern "C" {
     static mut __deravel_stack_top: u8;
 }
 
 static mut CURRENT_PID: ProcessId = ProcessId(0);
+
+#[global_allocator]
+static PAGE_ALLOCATOR: PageAllocator = PageAllocator;
 
 impl Write for KernelConsole {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
@@ -99,6 +107,16 @@ impl Write for StackString {
         self.length += s.len();
         Ok(())
     }
+}
+
+unsafe impl GlobalAlloc for PageAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        assert!(layout.align() <= PAGE_SIZE);
+        let page_count = layout.size().div_ceil(PAGE_SIZE);
+        allocate_pages(page_count)
+    }
+
+    unsafe fn dealloc(&self, _: *mut u8, _: Layout) {}
 }
 
 impl log::Log for SystemLogger {
@@ -138,6 +156,12 @@ impl FromA0A1 for u8 {
 impl FromA0A1 for usize {
     fn from_a0a1(a0: usize, _: usize) -> usize {
         a0
+    }
+}
+
+impl FromA0A1 for *mut u8 {
+    fn from_a0a1(a0: usize, _: usize) -> Self {
+        a0 as *mut u8
     }
 }
 
@@ -195,13 +219,16 @@ syscalls! {
     pub fn raw_system_log(text: *const u8, text_len: usize, level: usize);
 
     #[no = 9]
-    pub fn disk_read(sector: usize, buf: *mut [u8; 512]);
+    pub fn disk_read(sector: usize, buf: &mut [u8; 512]);
 
     #[no = 10]
-    pub fn disk_write(sector: usize, buf: *const [u8; 512]);
+    pub fn disk_write(sector: usize, buf: &[u8; 512]);
 
     #[no = 11]
     pub fn disk_capacity() -> usize;
+
+    #[no = 12]
+    pub fn allocate_pages(count: usize) -> *mut u8;
 }
 
 fn initialize_log() {

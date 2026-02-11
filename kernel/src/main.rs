@@ -21,7 +21,7 @@ mod virtio;
 
 use crate::arch::{RiscvRegisters, initialize_trap_handler, switch_to_userspace_registers_only};
 use crate::log::{initialize_log, log_userspace};
-use crate::page::{PageTable, map_pages};
+use crate::page::{PAGE_SIZE, PageFlags, PageTable, map_pages};
 use crate::process::{
     CURRENT_PROC, PROCESSES, ProcessState, create_process, schedule_and_switch_to_userspace,
 };
@@ -29,6 +29,7 @@ use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use crate::virtio::initialize_all_virtio_mmio;
 use crate::virtio::virtio_blk::VirtioBlk;
 use ::log::{Level, error};
+use alloc::vec;
 use core::panic::PanicInfo;
 use fdt::Fdt;
 use riscv::interrupt::Trap;
@@ -171,6 +172,23 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters) -> ! {
             unsafe { riscv::register::satp::set(Mode::Bare, 0, 0) }
             registers.a0 = unsafe { DISK.as_mut().unwrap().capacity() };
             unsafe { riscv::register::satp::write(satp) }
+        }
+        12 => {
+            let page_count = registers.a0;
+            let pages = vec![[0; PAGE_SIZE]; page_count];
+            let pages_allocated = unsafe { PROCESSES[CURRENT_PROC.unwrap()].heap_pages_allocated };
+            let page_table =
+                unsafe { &mut *(PROCESSES[CURRENT_PROC.unwrap()].page_table as *mut PageTable) };
+            let virtual_addr = 0x1800000 + pages_allocated * PAGE_SIZE;
+            map_pages(
+                page_table,
+                virtual_addr,
+                pages.as_ptr() as usize,
+                PageFlags::readwrite().user(),
+                page_count,
+            );
+            unsafe { PROCESSES[CURRENT_PROC.unwrap()].heap_pages_allocated += page_count }
+            registers.a0 = virtual_addr;
         }
         _ => panic!("invalid syscall number {}", registers.a3),
     }
