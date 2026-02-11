@@ -8,13 +8,9 @@ use alloc::boxed::Box;
 use log::error;
 use riscv::register::satp::{Mode, Satp};
 
-pub macro create_process($name:literal) {{
-    const ELF: PageAligned<
-        [u8; include_bytes!(env!(concat!("CARGO_BIN_FILE_DERAVEL_APPS_", $name))).len()],
-    > = PageAligned(*include_bytes!(env!(concat!(
-        "CARGO_BIN_FILE_DERAVEL_APPS_",
-        $name
-    ))));
+pub macro create_process($name:literal, $env:literal) {{
+    const ELF: PageAligned<[u8; include_bytes!(env!($env)).len()]> =
+        PageAligned(*include_bytes!(env!($env)));
     create_process($name, &ELF.0)
 }}
 

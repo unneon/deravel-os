@@ -6,6 +6,7 @@ default-run = "deravel-kernel"
 
 [dependencies]
 deravel-apps = { path = "../apps", artifact = "bin" }
+deravel-filesystem-tar = { path = "../filesystems/tar", artifact = "bin" }
 elf = { version = "0.8", default-features = false }
 fdt = { version = "0.1", features = ["pretty-printing"] }
 log = "0.4"

@@ -1,0 +1,8 @@
+[package]
+name = "deravel-filesystem-tar"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+deravel-kernel-api = { path = "../../kernel-api" }
+log = "0.4"

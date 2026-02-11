@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "apps",
+    "filesystems/tar",
     "kernel",
     "kernel-api",
 ]

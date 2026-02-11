@@ -47,12 +47,12 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     log_sbi_metadata();
     initialize_all_virtio_mmio(&device_tree);
 
-    create_process!("tar-fs");
-    // create_process!("hello");
-    create_process!("ipc-a");
-    create_process!("ipc-b");
-    create_process!("ipc-c");
-    // create_process!("shell");
+    create_process!("fs-tar", "CARGO_BIN_FILE_DERAVEL_FILESYSTEM_TAR");
+    // create_process!("hello", "CARGO_BIN_FILE_DERAVEL_APPS_hello");
+    create_process!("ipc-a", "CARGO_BIN_FILE_DERAVEL_APPS_ipc-a");
+    create_process!("ipc-b", "CARGO_BIN_FILE_DERAVEL_APPS_ipc-b");
+    create_process!("ipc-c", "CARGO_BIN_FILE_DERAVEL_APPS_ipc-c");
+    // create_process!("shell", "CARGO_BIN_FILE_DERAVEL_APPS_shell");
 
     schedule_and_switch_to_userspace();
 }
@@ -166,6 +166,15 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters) -> ! {
 
             let user_buf_ptr = unsafe { &mut *(registers.a1 as *mut [u8; 512]) };
             user_buf_ptr.copy_from_slice(&buf);
+        }
+        10 => {
+            let sector = registers.a0 as u64;
+            let buf = unsafe { *(registers.a1 as *const [u8; 512]) };
+
+            let satp = riscv::register::satp::read();
+            unsafe { riscv::register::satp::set(Mode::Bare, 0, 0) }
+            unsafe { DISK.as_mut().unwrap().write(sector, &buf).unwrap() }
+            unsafe { riscv::register::satp::write(satp) }
         }
         11 => {
             let satp = riscv::register::satp::read();

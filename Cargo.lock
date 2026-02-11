@@ -35,10 +35,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "deravel-filesystem-tar"
+version = "0.0.0"
+dependencies = [
+ "deravel-kernel-api",
+ "log",
+]
+
+[[package]]
 name = "deravel-kernel"
 version = "0.0.0"
 dependencies = [
  "deravel-apps",
+ "deravel-filesystem-tar",
  "elf",
  "fdt",
  "log",
