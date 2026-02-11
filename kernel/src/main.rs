@@ -27,11 +27,15 @@ use crate::process::{
 };
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use crate::virtio::initialize_all_virtio_mmio;
+use crate::virtio::virtio_blk::VirtioBlk;
 use ::log::{Level, error};
 use core::panic::PanicInfo;
 use fdt::Fdt;
 use riscv::interrupt::Trap;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
+use riscv::register::satp::Mode;
+
+static mut DISK: Option<VirtioBlk> = None;
 
 fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     clear_bss();
@@ -42,6 +46,7 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     log_sbi_metadata();
     initialize_all_virtio_mmio(&device_tree);
 
+    create_process!("tar-fs");
     // create_process!("hello");
     create_process!("ipc-a");
     create_process!("ipc-b");
@@ -148,6 +153,24 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters) -> ! {
                 unsafe { PROCESSES[CURRENT_PROC.unwrap()].name.unwrap() },
                 text,
             );
+        }
+        9 => {
+            let sector = registers.a0 as u64;
+            let mut buf = [0; 512];
+
+            let satp = riscv::register::satp::read();
+            unsafe { riscv::register::satp::set(Mode::Bare, 0, 0) }
+            unsafe { DISK.as_mut().unwrap().read(sector, &mut buf).unwrap() }
+            unsafe { riscv::register::satp::write(satp) }
+
+            let user_buf_ptr = unsafe { &mut *(registers.a1 as *mut [u8; 512]) };
+            user_buf_ptr.copy_from_slice(&buf);
+        }
+        11 => {
+            let satp = riscv::register::satp::read();
+            unsafe { riscv::register::satp::set(Mode::Bare, 0, 0) }
+            registers.a0 = unsafe { DISK.as_mut().unwrap().capacity() };
+            unsafe { riscv::register::satp::write(satp) }
         }
         _ => panic!("invalid syscall number {}", registers.a3),
     }

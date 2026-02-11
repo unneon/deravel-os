@@ -1,3 +1,4 @@
+use crate::DISK;
 use crate::virtio::registers::Registers;
 use crate::virtio::virtio_blk::VirtioBlk;
 use crate::virtio::virtio_net::VirtioNet;
@@ -38,7 +39,11 @@ pub fn initialize_all_virtio_mmio(device_tree: &Fdt) {
         } else if device_id == 0x2 {
             info!("found virtio-blk device {device} from vendor {vendor:#x}");
             let device = unsafe { device.with_configuration() };
-            let _virtio_blk = VirtioBlk::new(device);
+            let device = VirtioBlk::new(device);
+            unsafe {
+                assert!(DISK.is_none());
+                DISK = Some(device);
+            }
         } else {
             debug!("ignoring {device} with unknown device id {device_id:#x}");
         }

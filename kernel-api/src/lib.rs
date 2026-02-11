@@ -193,6 +193,15 @@ syscalls! {
 
     #[no = 8]
     pub fn raw_system_log(text: *const u8, text_len: usize, level: usize);
+
+    #[no = 9]
+    pub fn disk_read(sector: usize, buf: *mut [u8; 512]);
+
+    #[no = 10]
+    pub fn disk_write(sector: usize, buf: *const [u8; 512]);
+
+    #[no = 11]
+    pub fn disk_capacity() -> usize;
 }
 
 fn initialize_log() {

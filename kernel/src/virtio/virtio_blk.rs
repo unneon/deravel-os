@@ -65,6 +65,10 @@ impl VirtioBlk {
         queue.send_and_recv(0, 0, self.regs);
         result_from_status(status)
     }
+
+    pub fn capacity(&self) -> usize {
+        self.regs.config().capacity().read() as usize
+    }
 }
 
 fn initialize_device(regs: Mmio<Registers<Config>>) {

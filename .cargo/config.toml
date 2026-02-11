@@ -5,17 +5,4 @@ bindeps = true
 target = "riscv64gc-unknown-none-elf"
 
 [target.riscv64gc-unknown-none-elf]
-runner = """qemu-system-riscv64 \
-    -machine virt \
-    -bios default \
-    -nographic \
-    -serial mon:stdio \
-    --no-reboot \
-    -kernel"""
-
-#    -drive id=drive0,file=lorem.txt,format=raw,if=none \
-#    -device virtio-blk-device,drive=drive0,bus=virtio-mmio-bus.0 \
-
-#    -netdev tap,id=net0,ifname=tap0,script=no,downscript=no \
-#    -device virtio-net-device,netdev=net0,bus=virtio-mmio-bus.1 \
-#    -object filter-dump,id=f1,netdev=net0,file=dump.dat \
+runner = "./run.sh"
