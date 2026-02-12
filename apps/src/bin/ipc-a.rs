@@ -1,38 +1,33 @@
 #![no_std]
 #![no_main]
+extern crate alloc;
 
+use alloc::borrow::ToOwned;
+use deravel_interfaces::FilesystemRequest;
 use deravel_kernel_api::*;
-
-#[derive(Debug)]
-struct Request {
-    capability: Capability,
-    type_: usize,
-    text: [u8; 16],
-    text_len: usize,
-    data: [u8; 16],
-    data_len: usize,
-}
 
 fn main() {
     let b = pid_by_name("ipc-b");
 
     let (fs_root_cap, fs) = ipc_recv::<Capability>();
-    let req = Request {
-        capability: fs_root_cap,
-        type_: 0,
-        text: *b"hello.txt\0\0\0\0\0\0\0",
-        text_len: 9,
-        data: [0; _],
-        data_len: 0,
-    };
-    ipc_send(&req, fs);
+    ipc_send(
+        &FilesystemRequest::Read {
+            cap: fs_root_cap,
+            path: "hello.txt".to_owned(),
+        },
+        fs,
+    );
+    ipc_send(
+        &FilesystemRequest::Subcapability {
+            cap: fs_root_cap,
+            path: "user/".to_owned(),
+        },
+        fs,
+    );
+    let (fs_user_cap, _) = ipc_recv::<Capability>();
 
-    let cap = Capability::grant(b);
+    let cap = fs_user_cap.forward(b);
     ipc_send(&cap, b);
-    yield_();
-
-    let (req, req_sender) = ipc_recv::<Capability>();
-    req.validate(req_sender);
 }
 
 app! { main }

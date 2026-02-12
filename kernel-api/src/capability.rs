@@ -1,12 +1,13 @@
 use crate::{ProcessId, current_pid};
 use core::sync::atomic::{AtomicUsize, Ordering};
 use log::trace;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Clone, Copy)]
-pub struct Capability(*const CapabilityCertificate);
+pub struct Capability(pub(crate) *const CapabilityCertificate);
 
 #[derive(Clone, Copy)]
-struct CapabilityCertificate(usize);
+pub(crate) struct CapabilityCertificate(usize);
 
 #[derive(Debug)]
 enum CapabilityCertificateUnpacked {
@@ -117,6 +118,20 @@ impl CapabilityCertificate {
 impl core::fmt::Debug for Capability {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{:#x}", self.0 as usize)
+    }
+}
+
+impl<'de> Deserialize<'de> for Capability {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Capability(
+            usize::deserialize(deserializer)? as *const CapabilityCertificate
+        ))
+    }
+}
+
+impl Serialize for Capability {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        (self.0 as usize).serialize(serializer)
     }
 }
 

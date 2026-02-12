@@ -120,18 +120,24 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters) -> ! {
             let data_len = registers.a1;
             let dest_pid = registers.a2;
             let message = unsafe { core::slice::from_raw_parts(data, data_len) };
-            unsafe { PROCESSES[dest_pid].message = Some((message.into(), CURRENT_PROC.unwrap())) }
+            let dest_proc = unsafe { &mut PROCESSES[dest_pid] };
+            let dest_queue = dest_proc.messages.get_or_insert_default();
+            dest_queue.push_back((message.into(), unsafe { CURRENT_PROC.unwrap() }));
         }
         7 => {
-            if let Some((message, sender_pid)) =
-                unsafe { PROCESSES[CURRENT_PROC.unwrap()].message.take() }
-            {
+            if let Some((message, sender_pid)) = unsafe {
+                PROCESSES[CURRENT_PROC.unwrap()]
+                    .messages
+                    .as_mut()
+                    .and_then(|q| q.pop_front())
+            } {
                 let buf = registers.a0 as *mut u8;
-                let buf_len = registers.a1;
-                assert_eq!(message.len(), buf_len);
-                let buf = unsafe { core::slice::from_raw_parts_mut(buf, buf_len) };
+                let buf_max_len = registers.a1;
+                assert!(message.len() <= buf_max_len);
+                let buf = unsafe { core::slice::from_raw_parts_mut(buf, message.len()) };
                 buf.copy_from_slice(&message);
-                registers.a0 = sender_pid;
+                registers.a0 = message.len();
+                registers.a1 = sender_pid;
             } else {
                 let proc = unsafe { &mut PROCESSES[CURRENT_PROC.unwrap()] };
                 proc.state = ProcessState::WaitingForMessage;
@@ -144,10 +150,10 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters) -> ! {
         8 => {
             let text = registers.a0 as *const u8;
             let text_len = registers.a1;
-            assert!(text_len <= 128);
+            assert!(text_len <= 1024);
             let level = registers.a2;
             let text = unsafe { core::slice::from_raw_parts(text, text_len) };
-            let mut text_stack = [0; 128];
+            let mut text_stack = [0; 1024];
             text_stack[..text_len].copy_from_slice(text);
             let text = unsafe { core::str::from_utf8_unchecked(&text_stack[..text_len]) };
             let level = match level {

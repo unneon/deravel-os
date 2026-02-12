@@ -5,6 +5,7 @@ use crate::page::{PAGE_SIZE, PageAligned, PageFlags, PageTable, map_pages};
 use crate::sbi;
 use crate::sbi::{ResetReason, ResetType};
 use alloc::boxed::Box;
+use alloc::collections::VecDeque;
 use log::error;
 use riscv::register::satp::{Mode, Satp};
 
@@ -36,7 +37,7 @@ pub struct Process {
     pub pc: usize,
     pub page_table: *const PageTable,
     pub heap_pages_allocated: usize,
-    pub message: Option<(Box<[u8]>, usize)>,
+    pub messages: Option<Box<VecDeque<(Box<[u8]>, usize)>>>,
 }
 
 const CAPABILITY_START: usize = 0x2000000;
@@ -161,7 +162,8 @@ pub fn find_runnable_process() -> Option<usize> {
         let scan_index = (scan_start + scan_offset) % PROCESS_COUNT;
         let process = unsafe { &PROCESSES[scan_index] };
         if process.state == ProcessState::Runnable
-            || (process.state == ProcessState::WaitingForMessage && process.message.is_some())
+            || (process.state == ProcessState::WaitingForMessage
+                && process.messages.as_ref().is_some_and(|q| !q.is_empty()))
         {
             return Some(scan_index);
         }

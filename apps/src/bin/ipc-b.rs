@@ -6,7 +6,7 @@ use deravel_kernel_api::*;
 fn main() {
     let c = pid_by_name("ipc-c");
 
-    let cap = ipc_recv::<Capability>().0;
+    let (cap, _) = ipc_recv::<Capability>();
 
     let fwd = cap.forward(c);
     ipc_send(&fwd, c);

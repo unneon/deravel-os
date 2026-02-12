@@ -11,8 +11,10 @@ use core::alloc::{GlobalAlloc, Layout};
 use core::arch::asm;
 use core::fmt::Write;
 use core::hint::unreachable_unchecked;
-use core::mem::{MaybeUninit, transmute_copy};
+use core::mem::transmute_copy;
 use log::{Level, LevelFilter, Metadata, Record, error};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 pub macro app($main:ident) {
     #[unsafe(no_mangle)]
@@ -42,9 +44,9 @@ macro syscalls($(#[no = $no:literal] pub fn $name:ident($($a0name:ident: $a0type
         unsafe {
             asm!(
                 "ecall",
-                $(in("a0") $a0name,
-                $(in("a1") $a1name,
-                $(in("a2") $a2name,
+                $(in("a0") <$a0type as To1A>::to_1a($a0name),
+                $(in("a1") <$a1type as To1A>::to_1a($a1name),
+                $(in("a2") <$a2type as To1A>::to_1a($a2name),
                 )?)?)?
                 in("a3") $no,
                 lateout("a0") _a0,
@@ -59,6 +61,10 @@ trait FromA0A1 {
     fn from_a0a1(a0: usize, a1: usize) -> Self;
 }
 
+trait To1A {
+    fn to_1a(self) -> usize;
+}
+
 pub struct KernelConsole;
 
 struct PageAllocator;
@@ -69,7 +75,7 @@ pub struct ProcessId(usize);
 
 struct StackString {
     length: usize,
-    buffer: [u8; 128],
+    buffer: [u8; 1024],
 }
 
 struct SystemLogger;
@@ -102,7 +108,7 @@ impl core::fmt::Debug for ProcessId {
 
 impl Write for StackString {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        assert!(s.len() <= 128 - self.length);
+        assert!(s.len() <= self.buffer.len() - self.length);
         self.buffer[self.length..self.length + s.len()].copy_from_slice(s.as_bytes());
         self.length += s.len();
         Ok(())
@@ -127,7 +133,7 @@ impl log::Log for SystemLogger {
     fn log(&self, record: &Record) {
         let mut text = StackString {
             length: 0,
-            buffer: [0; 128],
+            buffer: [0; _],
         };
         write!(text, "{}", record.args()).unwrap();
         let level = match record.level() {
@@ -171,9 +177,63 @@ impl FromA0A1 for ProcessId {
     }
 }
 
+impl FromA0A1 for (usize, ProcessId) {
+    fn from_a0a1(a0: usize, a1: usize) -> Self {
+        (a0, ProcessId(a1))
+    }
+}
+
+impl FromA0A1 for (Capability, ProcessId) {
+    fn from_a0a1(a0: usize, a1: usize) -> Self {
+        (Capability(a0 as *const _), ProcessId(a1))
+    }
+}
+
 impl FromA0A1 for ! {
     fn from_a0a1(_: usize, _: usize) -> ! {
         unsafe { unreachable_unchecked() }
+    }
+}
+
+impl To1A for u8 {
+    fn to_1a(self) -> usize {
+        self as usize
+    }
+}
+
+impl To1A for usize {
+    fn to_1a(self) -> usize {
+        self
+    }
+}
+
+impl<T> To1A for *const T {
+    fn to_1a(self) -> usize {
+        self as usize
+    }
+}
+
+impl<T> To1A for *mut T {
+    fn to_1a(self) -> usize {
+        self as usize
+    }
+}
+
+impl<T> To1A for &T {
+    fn to_1a(self) -> usize {
+        self as *const T as usize
+    }
+}
+
+impl<T> To1A for &mut T {
+    fn to_1a(self) -> usize {
+        self as *mut T as usize
+    }
+}
+
+impl To1A for Capability {
+    fn to_1a(self) -> usize {
+        self.0 as usize
     }
 }
 
@@ -213,7 +273,7 @@ syscalls! {
     pub fn raw_ipc_send(data: *const u8, data_len: usize, dest: usize);
 
     #[no = 7]
-    pub fn raw_ipc_recv(buf: *mut u8, buf_len: usize) -> ProcessId;
+    pub fn raw_ipc_recv(buf: *mut u8, buf_max_len: usize) -> (usize, ProcessId);
 
     #[no = 8]
     pub fn raw_system_log(text: *const u8, text_len: usize, level: usize);
@@ -236,14 +296,16 @@ fn initialize_log() {
     log::set_max_level(LevelFilter::Trace);
 }
 
-pub fn ipc_send<T>(data: &T, dest: ProcessId) {
-    raw_ipc_send(data as *const T as *const u8, size_of_val(data), dest.0)
+pub fn ipc_send<T: Serialize>(data: &T, dest: ProcessId) {
+    let buf = serde_json::to_vec(data).unwrap();
+    raw_ipc_send(buf.as_ptr(), buf.len(), dest.0)
 }
 
-pub fn ipc_recv<T>() -> (T, ProcessId) {
-    let mut buf = MaybeUninit::<T>::uninit();
-    let sender_pid = raw_ipc_recv(buf.as_mut_ptr() as *mut u8, size_of::<T>());
-    (unsafe { buf.assume_init() }, sender_pid)
+pub fn ipc_recv<T: DeserializeOwned>() -> (T, ProcessId) {
+    let mut buf = [0; 1024];
+    let (byte_count, sender_pid) = raw_ipc_recv(buf.as_mut_ptr(), buf.len());
+    let value = serde_json::from_slice(&buf[..byte_count]).unwrap();
+    (value, sender_pid)
 }
 
 pub fn current_pid() -> ProcessId {
