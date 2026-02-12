@@ -37,7 +37,7 @@ impl Capability {
         let certificate = allocate_certificate();
         *certificate = CapabilityCertificate::forward(forwardee, self);
         let cap = Capability(certificate);
-        trace!("forwarded {cap:?} to {forwardee:?}");
+        trace!("forwarded {self:?} as {cap:?} to {forwardee:?}");
         cap
     }
 
@@ -64,6 +64,11 @@ impl Capability {
         };
         assert!(original.certifier() == current_pid());
         original
+    }
+
+    pub fn local_index(self) -> usize {
+        assert!(self.is_pointer_valid());
+        (self.0 as usize % 4096) / 8
     }
 
     fn certificate(self) -> CapabilityCertificate {

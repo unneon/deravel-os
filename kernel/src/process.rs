@@ -26,6 +26,7 @@ pub enum ProcessState {
     Unused,
     Runnable,
     Finished,
+    WaitingForMessage,
 }
 
 pub struct Process {
@@ -159,7 +160,9 @@ pub fn find_runnable_process() -> Option<usize> {
     for scan_offset in 0..PROCESS_COUNT {
         let scan_index = (scan_start + scan_offset) % PROCESS_COUNT;
         let process = unsafe { &PROCESSES[scan_index] };
-        if process.state == ProcessState::Runnable {
+        if process.state == ProcessState::Runnable
+            || (process.state == ProcessState::WaitingForMessage && process.message.is_some())
+        {
             return Some(scan_index);
         }
     }
