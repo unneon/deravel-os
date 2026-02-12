@@ -10,12 +10,13 @@ mod serialize;
 
 use crate::deserialize::deserialize_archive;
 use crate::serialize::serialize_archive;
+use alloc::borrow::Cow;
 use alloc::string::String;
 use alloc::vec::Vec;
 use alloc::{format, vec};
 use deravel_interfaces::FilesystemRequest;
 use deravel_kernel_api::*;
-use log::debug;
+use log::error;
 
 #[derive(Debug)]
 struct CapabilityData {
@@ -58,7 +59,7 @@ union TarHeaderBuf {
 const SECTOR_SIZE: usize = 512;
 
 fn main() {
-    let files = deserialize_archive();
+    let mut files = deserialize_archive();
 
     let mut capabilities = vec![CapabilityData {
         path: String::new(),
@@ -76,16 +77,34 @@ fn main() {
             } => {
                 let cap = &capabilities[cap.validate(req_sender).local_index()];
                 let path_prefix = &cap.path;
-                debug!("received read request of {path_prefix:?} {path_suffix:?}");
+                let path = concat_path(path_prefix, &path_suffix);
+                let file = files.iter().find(|file| file.name == path);
+                if let Some(file) = file {
+                    ipc_send(&file.data[..file.size], req_sender);
+                } else {
+                    error!("file {path:?} not found");
+                }
             }
             FilesystemRequest::Write {
                 cap,
                 path: path_suffix,
-                data: _data,
+                mut data,
             } => {
                 let cap = &capabilities[cap.validate(req_sender).local_index()];
                 let path_prefix = &cap.path;
-                debug!("received write request of {path_prefix:?} {path_suffix:?}");
+                let path = concat_path(path_prefix, &path_suffix);
+                let file = files.iter().find(|file| file.name == path);
+                if file.is_none() {
+                    let size = data.len();
+                    data.resize(size.next_multiple_of(SECTOR_SIZE), 0);
+                    files.push(File {
+                        name: path.into_owned(),
+                        data,
+                        size,
+                    });
+                } else {
+                    error!("file {path:?} already exists");
+                }
             }
             FilesystemRequest::Subcapability {
                 cap,
@@ -93,15 +112,21 @@ fn main() {
             } => {
                 let cap = &capabilities[cap.validate(req_sender).local_index()];
                 let path_prefix = &cap.path;
-                debug!("received subcapability request of {path_prefix:?} {path_suffix:?}");
-                capabilities.push(CapabilityData {
-                    path: format!("{path_prefix}{path_suffix}"),
-                });
+                let path = concat_path(path_prefix, &path_suffix).into_owned();
+                capabilities.push(CapabilityData { path });
                 let sub_cap = Capability::grant(req_sender);
                 ipc_send(&sub_cap, req_sender);
             }
         }
         serialize_archive(&files);
+    }
+}
+
+fn concat_path<'a>(prefix: &'a str, suffix: &'a str) -> Cow<'a, str> {
+    if prefix.is_empty() {
+        suffix.into()
+    } else {
+        format!("{prefix}/{suffix}").into()
     }
 }
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-(cd disk && tar cf ../disk.tar --format=ustar *.txt)
+(mkdir -p disk && cd disk && tar cf ../disk.tar --format=ustar *.txt)
 
 qemu-system-riscv64 \
     -machine virt \

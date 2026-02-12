@@ -11,16 +11,25 @@ fn main() {
 
     let (fs_root_cap, fs) = ipc_recv::<Capability>();
     ipc_send(
-        &FilesystemRequest::Read {
+        &FilesystemRequest::Write {
             cap: fs_root_cap,
-            path: "hello.txt".to_owned(),
+            path: "secret.txt".to_owned(),
+            data: b"admin secret".to_vec(),
+        },
+        fs,
+    );
+    ipc_send(
+        &FilesystemRequest::Write {
+            cap: fs_root_cap,
+            path: "user/secret.txt".to_owned(),
+            data: b"user secret".to_vec(),
         },
         fs,
     );
     ipc_send(
         &FilesystemRequest::Subcapability {
             cap: fs_root_cap,
-            path: "user/".to_owned(),
+            path: "user".to_owned(),
         },
         fs,
     );

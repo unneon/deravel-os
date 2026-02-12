@@ -296,7 +296,7 @@ fn initialize_log() {
     log::set_max_level(LevelFilter::Trace);
 }
 
-pub fn ipc_send<T: Serialize>(data: &T, dest: ProcessId) {
+pub fn ipc_send<T: Serialize + ?Sized>(data: &T, dest: ProcessId) {
     let buf = serde_json::to_vec(data).unwrap();
     raw_ipc_send(buf.as_ptr(), buf.len(), dest.0)
 }
