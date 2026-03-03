@@ -1,5 +1,9 @@
 use crate::ProcessId;
+use core::marker::PhantomData;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+#[derive(Clone, Copy)]
+pub struct CallableCapability<T>(pub *const CapabilityCertificate, PhantomData<T>);
 
 #[derive(Clone, Copy)]
 pub struct Capability(pub *const CapabilityCertificate);
@@ -65,9 +69,38 @@ impl CapabilityCertificate {
     }
 }
 
+impl<T> From<CallableCapability<T>> for Capability {
+    fn from(capability: CallableCapability<T>) -> Self {
+        unsafe { core::mem::transmute(capability) }
+    }
+}
+
+impl<T> core::ops::Deref for CallableCapability<T> {
+    type Target = Capability;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute::<&CallableCapability<_>, &Capability>(&self) }
+    }
+}
+
+impl<T> core::fmt::Debug for CallableCapability<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{:#x}", self.0 as usize)
+    }
+}
+
 impl core::fmt::Debug for Capability {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{:#x}", self.0 as usize)
+    }
+}
+
+impl<'de, T> Deserialize<'de> for CallableCapability<T> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(CallableCapability(
+            usize::deserialize(deserializer)? as *const CapabilityCertificate,
+            PhantomData,
+        ))
     }
 }
 

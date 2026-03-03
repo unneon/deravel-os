@@ -3,13 +3,10 @@
 
 use deravel_kernel_api::*;
 
-fn main() {
-    let c = pid_by_name("ipc-c");
-
-    let (cap, _) = ipc_recv::<Capability>();
-
-    let fwd = forward_capability(cap, c);
-    ipc_send(&fwd, c);
+fn main(caps: Capabilities) {
+    let (fs, _) = cap_recv::<Capability>();
+    let fs_forwarded = forward_capability(fs, caps.c.into());
+    caps.c.bar(fs_forwarded);
 }
 
-app! { main }
+app! { main ipc_b_prelude }

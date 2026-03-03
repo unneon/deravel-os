@@ -2,7 +2,8 @@ use crate::current_pid;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use deravel_types::ProcessId;
 use deravel_types::capability::{
-    CAPABILITIES_START, Capability, CapabilityCertificate, CapabilityCertificateUnpacked,
+    CAPABILITIES_START, CallableCapability, Capability, CapabilityCertificate,
+    CapabilityCertificateUnpacked,
 };
 use log::trace;
 
@@ -16,9 +17,9 @@ pub fn grant_capability(grantee: ProcessId) -> Capability {
     cap
 }
 
-pub fn forward_capability(cap: Capability, forwardee: ProcessId) -> Capability {
+pub fn forward_capability(cap: Capability, forwardee: Capability) -> Capability {
     let certificate = allocate_certificate();
-    *certificate = CapabilityCertificate::forwarded(forwardee, cap);
+    *certificate = CapabilityCertificate::forwarded(forwardee.certifier(), cap.into());
     let forwarded = Capability(certificate);
     trace!("forwarded {cap:?} as {forwarded:?} to {forwardee:?}");
     forwarded

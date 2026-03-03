@@ -30,7 +30,6 @@ checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
 name = "deravel-apps"
 version = "0.0.0"
 dependencies = [
- "deravel-interfaces",
  "deravel-kernel-api",
  "log",
 ]
@@ -39,17 +38,8 @@ dependencies = [
 name = "deravel-filesystem-tar"
 version = "0.0.0"
 dependencies = [
- "deravel-interfaces",
  "deravel-kernel-api",
  "log",
-]
-
-[[package]]
-name = "deravel-interfaces"
-version = "0.0.0"
-dependencies = [
- "deravel-kernel-api",
- "serde",
 ]
 
 [[package]]
@@ -204,7 +194,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
  "serde_core",
- "serde_derive",
 ]
 
 [[package]]

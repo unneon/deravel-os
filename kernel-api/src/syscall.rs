@@ -69,6 +69,12 @@ impl FromA0A1 for (Capability, ProcessId) {
     }
 }
 
+impl FromA0A1 for (usize, ProcessId, Capability) {
+    fn from_a0a1(a0: usize, a1: usize) -> Self {
+        todo!()
+    }
+}
+
 impl FromA0A1 for ! {
     fn from_a0a1(_: usize, _: usize) -> ! {
         unsafe { unreachable_unchecked() }
@@ -153,4 +159,10 @@ syscalls! {
 
     #[no = 12]
     pub fn allocate_pages(count: usize) -> *mut u8;
+
+    #[no = 13]
+    pub fn cap_call(capability: Capability, input: *const u8, input_len: usize);
+
+    #[no = 14]
+    pub fn cap_recv(buf: *mut u8, buf_max_len: usize) -> (usize, ProcessId, Capability);
 }

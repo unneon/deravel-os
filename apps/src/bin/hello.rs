@@ -3,8 +3,8 @@
 
 use deravel_kernel_api::*;
 
-fn main() {
+fn main(caps: Capabilities) {
     println!("Hello, world!");
 }
 
-app! { main }
+app! { main hello_prelude }

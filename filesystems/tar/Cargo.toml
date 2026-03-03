@@ -5,5 +5,4 @@ edition = "2024"
 
 [dependencies]
 deravel-kernel-api = { path = "../../kernel-api" }
-deravel-interfaces = { path = "../../interfaces" }
 log = "0.4"

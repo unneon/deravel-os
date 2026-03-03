@@ -1,8 +1,0 @@
-[package]
-name = "deravel-interfaces"
-version = "0.0.0"
-edition = "2024"
-
-[dependencies]
-deravel-kernel-api = { path = "../kernel-api" }
-serde = { version = "1.0", features = ["derive"], default-features = false }

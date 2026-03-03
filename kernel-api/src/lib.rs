@@ -7,8 +7,9 @@ mod capability;
 mod syscall;
 
 pub use capability::*;
+pub use deravel_types;
 pub use deravel_types::capability::Capability;
-pub use syscall::{disk_capacity, disk_read, disk_write, getchar, putchar};
+pub use syscall::{disk_capacity, disk_read, disk_write, exit, getchar, putchar};
 
 use core::alloc::{GlobalAlloc, Layout};
 use core::fmt::Write;
@@ -17,12 +18,17 @@ use log::{Level, LevelFilter, Metadata, Record, error};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-pub macro app($main:ident) {
-    #[unsafe(no_mangle)]
-    extern "C" fn __deravel_main() -> ! {
-        $main();
-        deravel_kernel_api::syscall::exit()
-    }
+#[macro_export]
+macro_rules! app {
+    ($main:ident $name:ident) => {
+        use deravel_kernel_api::deravel_types::interfaces::$name::Capabilities;
+
+        #[unsafe(no_mangle)]
+        extern "C" fn __deravel_main() -> ! {
+            $main(todo!());
+            deravel_kernel_api::exit()
+        }
+    };
 }
 
 pub macro print($($tt:tt)*) {
@@ -129,6 +135,11 @@ unsafe extern "C" fn __deravel_entry() -> ! {
         current_pid = sym CURRENT_PID,
         initialize_log = sym initialize_log,
     )
+}
+
+pub fn cap_recv<T: DeserializeOwned>() -> (T, Capability) {
+    // TODO: Validate received capability?
+    todo!()
 }
 
 fn initialize_log() {

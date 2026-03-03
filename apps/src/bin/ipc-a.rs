@@ -2,41 +2,14 @@
 #![no_main]
 extern crate alloc;
 
-use alloc::borrow::ToOwned;
-use deravel_interfaces::FilesystemRequest;
 use deravel_kernel_api::*;
 
-fn main() {
-    let b = pid_by_name("ipc-b");
-
-    let (fs_root_cap, fs) = ipc_recv::<Capability>();
-    ipc_send(
-        &FilesystemRequest::Write {
-            cap: fs_root_cap,
-            path: "secret.txt".to_owned(),
-            data: b"admin secret".to_vec(),
-        },
-        fs,
-    );
-    ipc_send(
-        &FilesystemRequest::Write {
-            cap: fs_root_cap,
-            path: "user/secret.txt".to_owned(),
-            data: b"user secret".to_vec(),
-        },
-        fs,
-    );
-    ipc_send(
-        &FilesystemRequest::Subcapability {
-            cap: fs_root_cap,
-            path: "user".to_owned(),
-        },
-        fs,
-    );
-    let (fs_user_cap, _) = ipc_recv::<Capability>();
-
-    let cap = forward_capability(fs_user_cap, b);
-    ipc_send(&cap, b);
+fn main(caps: Capabilities) {
+    caps.fs.write("secret.txt", b"admin secret");
+    caps.fs.write("user/secret.txt", b"user secret");
+    let user = caps.fs.subcapability("user");
+    let user = forward_capability(user, caps.b.into());
+    caps.b.foo(user);
 }
 
-app! { main }
+app! { main ipc_a_prelude }

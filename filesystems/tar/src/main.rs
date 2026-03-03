@@ -14,7 +14,6 @@ use alloc::borrow::Cow;
 use alloc::string::String;
 use alloc::vec::Vec;
 use alloc::{format, vec};
-use deravel_interfaces::FilesystemRequest;
 use deravel_kernel_api::*;
 use log::error;
 
@@ -58,7 +57,7 @@ union TarHeaderBuf {
 
 const SECTOR_SIZE: usize = 512;
 
-fn main() {
+fn main(caps: Capabilities) {
     let mut files = deserialize_archive();
 
     let mut capabilities = vec![CapabilityData {
@@ -69,56 +68,56 @@ fn main() {
     ipc_send(&root_cap, ipc_a);
 
     loop {
-        let (req, req_sender) = ipc_recv::<FilesystemRequest>();
-        match req {
-            FilesystemRequest::Read {
-                cap,
-                path: path_suffix,
-            } => {
-                let cap = &capabilities[validate_capability(cap, req_sender).local_index()];
-                let path_prefix = &cap.path;
-                let path = concat_path(path_prefix, &path_suffix);
-                let file = files.iter().find(|file| file.name == path);
-                if let Some(file) = file {
-                    ipc_send(&file.data[..file.size], req_sender);
-                } else {
-                    error!("file {path:?} not found");
-                }
-            }
-            FilesystemRequest::Write {
-                cap,
-                path: path_suffix,
-                mut data,
-            } => {
-                let cap = &capabilities[validate_capability(cap, req_sender).local_index()];
-                let path_prefix = &cap.path;
-                let path = concat_path(path_prefix, &path_suffix);
-                let file = files.iter().find(|file| file.name == path);
-                if file.is_none() {
-                    let size = data.len();
-                    data.resize(size.next_multiple_of(SECTOR_SIZE), 0);
-                    files.push(File {
-                        name: path.into_owned(),
-                        data,
-                        size,
-                    });
-                } else {
-                    error!("file {path:?} already exists");
-                }
-            }
-            FilesystemRequest::Subcapability {
-                cap,
-                path: path_suffix,
-            } => {
-                let cap = &capabilities[validate_capability(cap, req_sender).local_index()];
-                let path_prefix = &cap.path;
-                let path = concat_path(path_prefix, &path_suffix).into_owned();
-                capabilities.push(CapabilityData { path });
-                let sub_cap = grant_capability(req_sender);
-                ipc_send(&sub_cap, req_sender);
-            }
-        }
-        serialize_archive(&files);
+        // let (req, req_sender) = ipc_recv::<FilesystemRequest>();
+        // match req {
+        //     FilesystemRequest::Read {
+        //         cap,
+        //         path: path_suffix,
+        //     } => {
+        //         let cap = &capabilities[validate_capability(cap, req_sender).local_index()];
+        //         let path_prefix = &cap.path;
+        //         let path = concat_path(path_prefix, &path_suffix);
+        //         let file = files.iter().find(|file| file.name == path);
+        //         if let Some(file) = file {
+        //             ipc_send(&file.data[..file.size], req_sender);
+        //         } else {
+        //             error!("file {path:?} not found");
+        //         }
+        //     }
+        //     FilesystemRequest::Write {
+        //         cap,
+        //         path: path_suffix,
+        //         mut data,
+        //     } => {
+        //         let cap = &capabilities[validate_capability(cap, req_sender).local_index()];
+        //         let path_prefix = &cap.path;
+        //         let path = concat_path(path_prefix, &path_suffix);
+        //         let file = files.iter().find(|file| file.name == path);
+        //         if file.is_none() {
+        //             let size = data.len();
+        //             data.resize(size.next_multiple_of(SECTOR_SIZE), 0);
+        //             files.push(File {
+        //                 name: path.into_owned(),
+        //                 data,
+        //                 size,
+        //             });
+        //         } else {
+        //             error!("file {path:?} already exists");
+        //         }
+        //     }
+        //     FilesystemRequest::Subcapability {
+        //         cap,
+        //         path: path_suffix,
+        //     } => {
+        //         let cap = &capabilities[validate_capability(cap, req_sender).local_index()];
+        //         let path_prefix = &cap.path;
+        //         let path = concat_path(path_prefix, &path_suffix).into_owned();
+        //         capabilities.push(CapabilityData { path });
+        //         let sub_cap = grant_capability(req_sender);
+        //         ipc_send(&sub_cap, req_sender);
+        //     }
+        // }
+        // serialize_archive(&files);
     }
 }
 
@@ -130,4 +129,4 @@ fn concat_path<'a>(prefix: &'a str, suffix: &'a str) -> Cow<'a, str> {
     }
 }
 
-app! { main }
+app! { main tar_fs_prelude }
