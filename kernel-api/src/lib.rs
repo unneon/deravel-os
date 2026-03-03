@@ -4,15 +4,14 @@
 #![no_std]
 
 mod capability;
+mod syscall;
 
 pub use capability::*;
 pub use deravel_types::capability::Capability;
+pub use syscall::{disk_capacity, disk_read, disk_write, getchar, putchar};
 
 use core::alloc::{GlobalAlloc, Layout};
-use core::arch::asm;
 use core::fmt::Write;
-use core::hint::unreachable_unchecked;
-use core::mem::transmute_copy;
 use deravel_types::ProcessId;
 use log::{Level, LevelFilter, Metadata, Record, error};
 use serde::Serialize;
@@ -22,7 +21,7 @@ pub macro app($main:ident) {
     #[unsafe(no_mangle)]
     extern "C" fn __deravel_main() -> ! {
         $main();
-        exit()
+        deravel_kernel_api::syscall::exit()
     }
 }
 
@@ -37,34 +36,6 @@ pub macro println {
     ($($tt:tt)*) => {
         print!("{}\n", format_args!($($tt)*))
     },
-}
-
-macro syscalls($(#[no = $no:literal] pub fn $name:ident($($a0name:ident: $a0type:ty$(, $a1name:ident: $a1type:ty$(, $a2name:ident: $a2type:ty)?)?)?) $(-> $return_type:ty)?;)*) {
-    $(pub fn $name($($a0name: $a0type$(, $a1name: $a1type$(, $a2name: $a2type)?)?)?) $(-> $return_type)? {
-        let _a0: usize;
-        let _a1: usize;
-        unsafe {
-            asm!(
-                "ecall",
-                $(in("a0") <$a0type as To1A>::to_1a($a0name),
-                $(in("a1") <$a1type as To1A>::to_1a($a1name),
-                $(in("a2") <$a2type as To1A>::to_1a($a2name),
-                )?)?)?
-                in("a3") $no,
-                lateout("a0") _a0,
-                lateout("a1") _a1,
-            )
-        }
-        $(<$return_type as FromA0A1>::from_a0a1(_a0, _a1))?
-    })*
-}
-
-trait FromA0A1 {
-    fn from_a0a1(a0: usize, a1: usize) -> Self;
-}
-
-trait To1A {
-    fn to_1a(self) -> usize;
 }
 
 pub struct KernelConsole;
@@ -92,7 +63,7 @@ static PAGE_ALLOCATOR: PageAllocator = PageAllocator;
 impl Write for KernelConsole {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         for byte in s.bytes() {
-            putchar(byte);
+            syscall::putchar(byte);
         }
         Ok(())
     }
@@ -111,7 +82,7 @@ unsafe impl GlobalAlloc for PageAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         assert!(layout.align() <= PAGE_SIZE);
         let page_count = layout.size().div_ceil(PAGE_SIZE);
-        allocate_pages(page_count)
+        syscall::allocate_pages(page_count)
     }
 
     unsafe fn dealloc(&self, _: *mut u8, _: Layout) {}
@@ -144,91 +115,6 @@ impl log::Log for SystemLogger {
     fn flush(&self) {}
 }
 
-impl FromA0A1 for u8 {
-    fn from_a0a1(a0: usize, _: usize) -> u8 {
-        debug_assert!(a0 <= u8::MAX as usize);
-        unsafe { transmute_copy::<usize, u8>(&a0) }
-    }
-}
-
-impl FromA0A1 for usize {
-    fn from_a0a1(a0: usize, _: usize) -> usize {
-        a0
-    }
-}
-
-impl FromA0A1 for *mut u8 {
-    fn from_a0a1(a0: usize, _: usize) -> Self {
-        a0 as *mut u8
-    }
-}
-
-impl FromA0A1 for ProcessId {
-    fn from_a0a1(a0: usize, _: usize) -> ProcessId {
-        ProcessId(a0)
-    }
-}
-
-impl FromA0A1 for (usize, ProcessId) {
-    fn from_a0a1(a0: usize, a1: usize) -> Self {
-        (a0, ProcessId(a1))
-    }
-}
-
-impl FromA0A1 for (Capability, ProcessId) {
-    fn from_a0a1(a0: usize, a1: usize) -> Self {
-        (Capability(a0 as *const _), ProcessId(a1))
-    }
-}
-
-impl FromA0A1 for ! {
-    fn from_a0a1(_: usize, _: usize) -> ! {
-        unsafe { unreachable_unchecked() }
-    }
-}
-
-impl To1A for u8 {
-    fn to_1a(self) -> usize {
-        self as usize
-    }
-}
-
-impl To1A for usize {
-    fn to_1a(self) -> usize {
-        self
-    }
-}
-
-impl<T> To1A for *const T {
-    fn to_1a(self) -> usize {
-        self as usize
-    }
-}
-
-impl<T> To1A for *mut T {
-    fn to_1a(self) -> usize {
-        self as usize
-    }
-}
-
-impl<T> To1A for &T {
-    fn to_1a(self) -> usize {
-        self as *const T as usize
-    }
-}
-
-impl<T> To1A for &mut T {
-    fn to_1a(self) -> usize {
-        self as *mut T as usize
-    }
-}
-
-impl To1A for Capability {
-    fn to_1a(self) -> usize {
-        self.0 as usize
-    }
-}
-
 #[unsafe(link_section = ".text.entry")]
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
@@ -245,44 +131,6 @@ unsafe extern "C" fn __deravel_entry() -> ! {
     )
 }
 
-syscalls! {
-    #[no = 1]
-    pub fn exit() -> !;
-
-    #[no = 2]
-    pub fn putchar(ch: u8);
-
-    #[no = 3]
-    pub fn getchar() -> u8;
-
-    #[no = 4]
-    pub fn yield_();
-
-    #[no = 5]
-    pub fn raw_pid_by_name(name: *const u8, name_len: usize) -> ProcessId;
-
-    #[no = 6]
-    pub fn raw_ipc_send(data: *const u8, data_len: usize, dest: usize);
-
-    #[no = 7]
-    pub fn raw_ipc_recv(buf: *mut u8, buf_max_len: usize) -> (usize, ProcessId);
-
-    #[no = 8]
-    pub fn raw_system_log(text: *const u8, text_len: usize, level: usize);
-
-    #[no = 9]
-    pub fn disk_read(sector: usize, buf: &mut [u8; 512]);
-
-    #[no = 10]
-    pub fn disk_write(sector: usize, buf: &[u8; 512]);
-
-    #[no = 11]
-    pub fn disk_capacity() -> usize;
-
-    #[no = 12]
-    pub fn allocate_pages(count: usize) -> *mut u8;
-}
-
 fn initialize_log() {
     log::set_logger(&SystemLogger).unwrap();
     log::set_max_level(LevelFilter::Trace);
@@ -290,12 +138,12 @@ fn initialize_log() {
 
 pub fn ipc_send<T: Serialize + ?Sized>(data: &T, dest: ProcessId) {
     let buf = serde_json::to_vec(data).unwrap();
-    raw_ipc_send(buf.as_ptr(), buf.len(), dest.0)
+    syscall::ipc_send(buf.as_ptr(), buf.len(), dest.0)
 }
 
 pub fn ipc_recv<T: DeserializeOwned>() -> (T, ProcessId) {
     let mut buf = [0; 1024];
-    let (byte_count, sender_pid) = raw_ipc_recv(buf.as_mut_ptr(), buf.len());
+    let (byte_count, sender_pid) = syscall::ipc_recv(buf.as_mut_ptr(), buf.len());
     let value = serde_json::from_slice(&buf[..byte_count]).unwrap();
     (value, sender_pid)
 }
@@ -305,11 +153,11 @@ pub fn current_pid() -> ProcessId {
 }
 
 pub fn pid_by_name(name: &str) -> ProcessId {
-    raw_pid_by_name(name.as_ptr(), name.len())
+    syscall::pid_by_name(name.as_ptr(), name.len())
 }
 
 pub fn system_log(text: &str, level: usize) {
-    raw_system_log(text.as_ptr(), text.len(), level);
+    syscall::log(text.as_ptr(), text.len(), level);
 }
 
 #[panic_handler]
@@ -317,5 +165,5 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     let location = info.location().unwrap();
     let message = info.message();
     error!("user application panicked at {location}: {message}");
-    exit()
+    syscall::exit()
 }
