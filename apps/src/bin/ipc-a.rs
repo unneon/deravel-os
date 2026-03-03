@@ -35,7 +35,7 @@ fn main() {
     );
     let (fs_user_cap, _) = ipc_recv::<Capability>();
 
-    let cap = fs_user_cap.forward(b);
+    let cap = forward_capability(fs_user_cap, b);
     ipc_send(&cap, b);
 }
 

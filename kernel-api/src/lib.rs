@@ -6,12 +6,14 @@
 mod capability;
 
 pub use capability::*;
+pub use deravel_types::capability::Capability;
 
 use core::alloc::{GlobalAlloc, Layout};
 use core::arch::asm;
 use core::fmt::Write;
 use core::hint::unreachable_unchecked;
 use core::mem::transmute_copy;
+use deravel_types::ProcessId;
 use log::{Level, LevelFilter, Metadata, Record, error};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -69,10 +71,6 @@ pub struct KernelConsole;
 
 struct PageAllocator;
 
-#[repr(transparent)]
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub struct ProcessId(usize);
-
 struct StackString {
     length: usize,
     buffer: [u8; 1024],
@@ -97,12 +95,6 @@ impl Write for KernelConsole {
             putchar(byte);
         }
         Ok(())
-    }
-}
-
-impl core::fmt::Debug for ProcessId {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}", self.0)
     }
 }
 

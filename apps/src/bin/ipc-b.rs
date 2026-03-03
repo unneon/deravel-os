@@ -8,7 +8,7 @@ fn main() {
 
     let (cap, _) = ipc_recv::<Capability>();
 
-    let fwd = cap.forward(c);
+    let fwd = forward_capability(cap, c);
     ipc_send(&fwd, c);
 }
 

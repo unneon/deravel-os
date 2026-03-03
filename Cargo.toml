@@ -4,5 +4,6 @@ members = [
     "filesystems/tar", "interfaces",
     "kernel",
     "kernel-api",
+    "types",
 ]
 resolver = "3"

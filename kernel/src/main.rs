@@ -5,6 +5,7 @@
 #![feature(never_type)]
 #![feature(slice_from_ptr_range)]
 #![allow(static_mut_refs)]
+#![allow(clippy::type_complexity)]
 #![no_std]
 #![no_main]
 

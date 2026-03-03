@@ -69,9 +69,17 @@ dependencies = [
 name = "deravel-kernel-api"
 version = "0.0.0"
 dependencies = [
+ "deravel-types",
  "log",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "deravel-types"
+version = "0.0.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

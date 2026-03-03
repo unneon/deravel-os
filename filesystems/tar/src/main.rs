@@ -65,7 +65,7 @@ fn main() {
         path: String::new(),
     }];
     let ipc_a = pid_by_name("ipc-a");
-    let root_cap = Capability::grant(ipc_a);
+    let root_cap = grant_capability(ipc_a);
     ipc_send(&root_cap, ipc_a);
 
     loop {
@@ -75,7 +75,7 @@ fn main() {
                 cap,
                 path: path_suffix,
             } => {
-                let cap = &capabilities[cap.validate(req_sender).local_index()];
+                let cap = &capabilities[validate_capability(cap, req_sender).local_index()];
                 let path_prefix = &cap.path;
                 let path = concat_path(path_prefix, &path_suffix);
                 let file = files.iter().find(|file| file.name == path);
@@ -90,7 +90,7 @@ fn main() {
                 path: path_suffix,
                 mut data,
             } => {
-                let cap = &capabilities[cap.validate(req_sender).local_index()];
+                let cap = &capabilities[validate_capability(cap, req_sender).local_index()];
                 let path_prefix = &cap.path;
                 let path = concat_path(path_prefix, &path_suffix);
                 let file = files.iter().find(|file| file.name == path);
@@ -110,11 +110,11 @@ fn main() {
                 cap,
                 path: path_suffix,
             } => {
-                let cap = &capabilities[cap.validate(req_sender).local_index()];
+                let cap = &capabilities[validate_capability(cap, req_sender).local_index()];
                 let path_prefix = &cap.path;
                 let path = concat_path(path_prefix, &path_suffix).into_owned();
                 capabilities.push(CapabilityData { path });
-                let sub_cap = Capability::grant(req_sender);
+                let sub_cap = grant_capability(req_sender);
                 ipc_send(&sub_cap, req_sender);
             }
         }
