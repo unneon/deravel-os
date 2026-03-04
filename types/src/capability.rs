@@ -23,6 +23,16 @@ pub const CAPABILITIES_START: usize = 0x2000000;
 pub const CAPABILITIES_END: usize = 0x3000000;
 
 impl Capability {
+    pub fn new(certifier: ProcessId, local_index: usize) -> Capability {
+        assert!(certifier.0 < (CAPABILITIES_END - CAPABILITIES_START) / 4096);
+        assert!(local_index < 4096 / size_of::<CapabilityCertificate>());
+        Capability(
+            (CAPABILITIES_START
+                + certifier.0 * 4096
+                + local_index * size_of::<CapabilityCertificate>()) as *const _,
+        )
+    }
+
     pub fn certifier(self) -> ProcessId {
         assert!(self.is_pointer_valid());
         ProcessId((self.0 as usize - CAPABILITIES_START) / 4096)

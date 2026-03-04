@@ -89,7 +89,7 @@ fn read_certificate(cap: Capability) -> CapabilityCertificate {
 }
 
 fn allocate_certificate() -> &'static mut CapabilityCertificate {
-    let index = CAPABILITIES_ALLOCATED.fetch_add(1, Ordering::Relaxed);
+    let index = CAPABILITIES_ALLOCATED.fetch_add(1, Ordering::Relaxed) + 1;
     assert!(
         index < 4096 / size_of::<CapabilityCertificate>(),
         "out of capability certificate slots"

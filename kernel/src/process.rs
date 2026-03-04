@@ -29,6 +29,7 @@ pub enum ProcessState {
     Finished,
     WaitingForMessage,
     Reserved,
+    WaitingForReply,
 }
 
 pub struct Process {
@@ -87,7 +88,7 @@ pub fn reserve_process<T: ProcessTag>(elf: &'static [u8]) -> ProcessReservation<
     ProcessReservation {
         id: ProcessId(pid),
         elf,
-        export: Capability(core::ptr::null()),
+        export: Capability::new(ProcessId(pid), 0),
         _phantom: PhantomData,
     }
 }

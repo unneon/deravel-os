@@ -127,12 +127,6 @@ syscalls! {
     #[no = 5]
     pub fn pid_by_name(name: *const u8, name_len: usize) -> ProcessId;
 
-    #[no = 6]
-    pub fn ipc_call(cap: Capability, method: usize, args: *const u8, args_len: usize, result: *mut u8, result_max_len: usize) -> usize;
-
-    #[no = 7]
-    pub fn ipc_serve(args: *mut u8, args_max_len: usize) -> (Capability, usize, usize, ProcessId);
-
     #[no = 8]
     pub fn log(text: *const u8, text_len: usize, level: usize);
 
@@ -147,6 +141,15 @@ syscalls! {
 
     #[no = 12]
     pub fn allocate_pages(count: usize) -> *mut u8;
+
+    #[no = 13]
+    pub fn ipc_call(cap: Capability, method: usize, args: *const u8, args_len: usize, result: *mut u8, result_max_len: usize) -> usize;
+
+    #[no = 14]
+    pub fn ipc_receive(args: *mut u8, args_max_len: usize) -> (Capability, usize, usize, ProcessId);
+
+    #[no = 15]
+    pub fn ipc_reply(result: *const u8, result_len: usize);
 }
 
 unsafe fn to_arg<T: Copy>(rust: T) -> usize {
