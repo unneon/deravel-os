@@ -12,4 +12,4 @@ fn main(caps: Capabilities) {
     caps.b.foo(user);
 }
 
-app! { main ipc_a_prelude }
+app! { main ipc_a ipc_a_prelude }

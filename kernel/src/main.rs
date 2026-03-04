@@ -49,13 +49,21 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     log_sbi_metadata();
     initialize_all_virtio_mmio(&device_tree);
 
-    // create_process!("fs-tar", "CARGO_BIN_FILE_DERAVEL_FILESYSTEM_TAR");
-    let hello = reserve_process!(hello, "CARGO_BIN_FILE_DERAVEL_APPS_hello");
-    hello.spawn();
-    // create_process!("ipc-a", "CARGO_BIN_FILE_DERAVEL_APPS_ipc-a");
-    // create_process!("ipc-b", "CARGO_BIN_FILE_DERAVEL_APPS_ipc-b");
-    // create_process!("ipc-c", "CARGO_BIN_FILE_DERAVEL_APPS_ipc-c");
-    // create_process!("shell", "CARGO_BIN_FILE_DERAVEL_APPS_shell");
+    let fs_tar = reserve_process!(tar_fs, "CARGO_BIN_FILE_DERAVEL_FILESYSTEM_TAR");
+    // let hello = reserve_process!(hello, "CARGO_BIN_FILE_DERAVEL_APPS_hello");
+    let ipc_a = reserve_process!(ipc_a, "CARGO_BIN_FILE_DERAVEL_APPS_ipc-a");
+    let ipc_b = reserve_process!(ipc_b, "CARGO_BIN_FILE_DERAVEL_APPS_ipc-b");
+    let ipc_c = reserve_process!(ipc_c, "CARGO_BIN_FILE_DERAVEL_APPS_ipc-c");
+    let shell = reserve_process!(shell, "CARGO_BIN_FILE_DERAVEL_APPS_shell");
+    // hello.spawn(deravel_types::interfaces::hello_prelude::Capabilities {});
+    // shell.spawn(deravel_types::interfaces::shell_prelude::Capabilities {});
+    ipc_a.spawn(deravel_types::interfaces::ipc_a_prelude::Capabilities {
+        fs: fs_tar.export,
+        b: ipc_b.export,
+    });
+    ipc_b.spawn(deravel_types::interfaces::ipc_b_prelude::Capabilities { c: ipc_c.export });
+    ipc_c.spawn(deravel_types::interfaces::ipc_c_prelude::Capabilities {});
+    fs_tar.spawn(deravel_types::interfaces::tar_fs_prelude::Capabilities {});
 
     schedule_and_switch_to_userspace();
 }

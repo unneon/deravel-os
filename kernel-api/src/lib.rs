@@ -20,12 +20,17 @@ use serde::de::DeserializeOwned;
 
 #[macro_export]
 macro_rules! app {
-    ($main:ident $name:ident) => {
-        use deravel_kernel_api::deravel_types::interfaces::$name::Capabilities;
+    ($main:ident $name:ident $name_prelude:ident) => {
+        use deravel_types::interfaces::$name_prelude::Capabilities;
 
         #[unsafe(no_mangle)]
         extern "C" fn __deravel_main() -> ! {
-            $main(todo!());
+            $main(unsafe {
+                (deravel_types::INPUTS_ADDRESS
+                    as *const deravel_types::ProcessInputs<deravel_types::interfaces::$name>)
+                    .read()
+                    .args
+            });
             deravel_kernel_api::exit()
         }
     };
@@ -60,8 +65,6 @@ const PAGE_SIZE: usize = 4096;
 unsafe extern "C" {
     static mut __deravel_stack_top: u8;
 }
-
-static mut CURRENT_PID: ProcessId = ProcessId(0);
 
 #[global_allocator]
 static PAGE_ALLOCATOR: PageAllocator = PageAllocator;
@@ -127,12 +130,9 @@ impl log::Log for SystemLogger {
 unsafe extern "C" fn __deravel_entry() -> ! {
     core::arch::naked_asm!(
         "la sp, {stack_top}",
-        "la t0, {current_pid}",
-        "sd a0, 0(t0)",
         "call {initialize_log}",
         "j __deravel_main",
         stack_top = sym __deravel_stack_top,
-        current_pid = sym CURRENT_PID,
         initialize_log = sym initialize_log,
     )
 }
@@ -160,7 +160,12 @@ pub fn ipc_recv<T: DeserializeOwned>() -> (T, ProcessId) {
 }
 
 pub fn current_pid() -> ProcessId {
-    unsafe { CURRENT_PID }
+    unsafe {
+        (deravel_types::INPUTS_ADDRESS
+            as *const deravel_types::ProcessInputs<deravel_types::interfaces::hello>)
+            .read()
+            .id
+    }
 }
 
 pub fn pid_by_name(name: &str) -> ProcessId {

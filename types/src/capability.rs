@@ -3,7 +3,7 @@ use core::marker::PhantomData;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Clone, Copy)]
-pub struct CallableCapability<T>(pub *const CapabilityCertificate, PhantomData<T>);
+pub struct CallableCapability<T>(pub *const CapabilityCertificate, pub PhantomData<T>);
 
 #[derive(Clone, Copy)]
 pub struct Capability(pub *const CapabilityCertificate);

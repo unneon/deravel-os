@@ -9,4 +9,4 @@ fn main(caps: Capabilities) {
     caps.c.bar(fs_forwarded);
 }
 
-app! { main ipc_b_prelude }
+app! { main ipc_b ipc_b_prelude }

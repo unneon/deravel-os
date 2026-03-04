@@ -1,16 +1,16 @@
-app hello
+app hello()
 
 app ipc_a(fs filesystem, b ipc_b)
 
 app ipc_b(c ipc_c)
     func foo(fs filesystem)
 
-app ipc_c
+app ipc_c()
     func bar(fs filesystem)
 
-app shell
+app shell()
 
-app tar_fs implements filesystem
+app tar_fs() implements filesystem
 
 interface filesystem
     func read(path text) bytes

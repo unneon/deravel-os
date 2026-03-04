@@ -30,13 +30,19 @@ fn main() {
         let name = &interface.name;
         writeln!(&mut output, "#[derive(Clone, Copy)]").unwrap();
         writeln!(&mut output, "pub struct {name};").unwrap();
-        if matches!(&interface.details, EntityDetails::App { .. }) {
+        if let EntityDetails::App { implements, .. } = &interface.details {
             writeln!(&mut output, "impl ProcessTag for {name} {{").unwrap();
             writeln!(
                 &mut output,
                 "    type Capabilities = {name}_prelude::Capabilities;"
             )
             .unwrap();
+            if let Some(implements) = implements {
+                writeln!(&mut output, "    type Export = {implements};").unwrap();
+            } else {
+                writeln!(&mut output, "    type Export = {name};").unwrap();
+            }
+            writeln!(&mut output, "    const NAME: &'static str = \"{name}\";").unwrap();
             writeln!(&mut output, "}}").unwrap();
         }
         if let EntityDetails::App { args, .. } = &interface.details {
@@ -100,6 +106,7 @@ fn parse_interfaces(text: &str) -> Vec<Entity> {
                 let (args, line) = line.split_once(')').unwrap();
                 let args = args
                     .split(", ")
+                    .filter(|arg| !arg.is_empty())
                     .map(|arg| {
                         let (name, type_) = arg.split_once(' ').unwrap();
                         (name.to_owned(), type_.to_owned())

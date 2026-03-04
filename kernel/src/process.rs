@@ -9,7 +9,7 @@ use alloc::collections::VecDeque;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::marker::PhantomData;
-use deravel_types::capability::CAPABILITIES_START;
+use deravel_types::capability::{CAPABILITIES_START, CallableCapability};
 use deravel_types::interfaces::ProcessTag;
 use deravel_types::{INPUTS_ADDRESS, ProcessId, ProcessInputs};
 use log::error;
@@ -50,7 +50,7 @@ pub struct Process {
 pub struct ProcessReservation<T: ProcessTag> {
     pub id: ProcessId,
     pub elf: &'static [u8],
-    pub _phantom: PhantomData<T>,
+    pub export: CallableCapability<T::Export>,
 }
 
 const PROCESS_COUNT: usize = 8;
@@ -79,7 +79,9 @@ impl Process {
 }
 
 impl<T: ProcessTag> ProcessReservation<T> {
-    pub fn spawn(self) {}
+    pub fn spawn(self, args: T::Capabilities) {
+        create_process::<T>(T::NAME, self.elf, ProcessInputs { id: self.id, args })
+    }
 }
 
 pub fn reserve_process<T: ProcessTag>(elf: &'static [u8]) -> ProcessReservation<T> {
@@ -89,16 +91,12 @@ pub fn reserve_process<T: ProcessTag>(elf: &'static [u8]) -> ProcessReservation<
     ProcessReservation {
         id: ProcessId(pid),
         elf,
-        _phantom: PhantomData,
+        export: CallableCapability(core::ptr::null(), PhantomData),
     }
 }
 
 pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: ProcessInputs<T>) {
-    let Some(pid) = find_free_process_slot() else {
-        error!("exhausted all process slots");
-        return;
-    };
-
+    let pid = inputs.id.0;
     let mut page_table = Box::new(PageTable::new());
     map_kernel_memory(&mut page_table);
     let entry_point = load_elf(elf, &mut page_table);
@@ -164,7 +162,7 @@ fn map_inputs_memory<T: ProcessTag>(pages: &mut PageTable, inputs: ProcessInputs
         pages,
         INPUTS_ADDRESS,
         page as *mut _ as usize,
-        PageFlags::readonly(),
+        PageFlags::readonly().user(),
         1,
     );
 }

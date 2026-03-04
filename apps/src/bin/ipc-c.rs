@@ -14,4 +14,4 @@ fn main(caps: Capabilities) {
     debug!("read {text:?} from file");
 }
 
-app! { main ipc_c_prelude }
+app! { main ipc_c ipc_c_prelude }
