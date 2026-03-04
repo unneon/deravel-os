@@ -8,8 +8,10 @@ use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::string::String;
 use core::marker::PhantomData;
-use deravel_types::capability::{CAPABILITIES_START, Capability, CapabilityCertificate};
-use deravel_types::drvli::{CapabilityContainer, ProcessTag};
+use deravel_types::capability::{
+    CAPABILITIES_START, Capability, CapabilityCertificate, RawCapability,
+};
+use deravel_types::drvli::{ProcessArgs, ProcessTag};
 use deravel_types::{INPUTS_ADDRESS, ProcessId, ProcessInputs};
 use riscv::register::satp::{Mode, Satp};
 
@@ -42,7 +44,7 @@ pub struct Process {
     pub pc: usize,
     pub page_table: *const PageTable,
     pub heap_pages_allocated: usize,
-    pub messages: Option<Box<VecDeque<(Capability, usize, String, ProcessId)>>>,
+    pub messages: Option<Box<VecDeque<(RawCapability, usize, String, ProcessId)>>>,
     #[allow(clippy::box_collection)]
     pub reply: Option<Box<String>>,
     pub currently_serving: Option<ProcessId>,
@@ -51,8 +53,7 @@ pub struct Process {
 pub struct ProcessReservation<T: ProcessTag> {
     pub id: ProcessId,
     pub elf: &'static [u8],
-    pub export: Capability,
-    pub _phantom: PhantomData<T>,
+    pub export: Capability<T::Export>,
 }
 
 const PROCESS_COUNT: usize = 8;
@@ -69,7 +70,7 @@ unsafe extern "C" {
 pub static mut PROCESSES: [Process; PROCESS_COUNT] = unsafe { core::mem::zeroed() };
 pub static mut CURRENT_PROC: Option<usize> = None;
 pub static mut CAPABILITY_PAGES: [CapabilityPage; PROCESS_COUNT] =
-    [CapabilityPage([CapabilityCertificate(0); PAGE_SIZE / size_of::<Capability>()]);
+    [CapabilityPage([CapabilityCertificate(0); PAGE_SIZE / size_of::<RawCapability>()]);
         PROCESS_COUNT];
 
 impl Process {
@@ -82,7 +83,7 @@ impl Process {
 }
 
 impl<T: ProcessTag> ProcessReservation<T> {
-    pub fn spawn(self, args: T::Capabilities) {
+    pub fn spawn(self, args: T::Args) {
         create_process::<T>(T::NAME, self.elf, ProcessInputs { id: self.id, args })
     }
 }
@@ -94,15 +95,14 @@ pub fn reserve_process<T: ProcessTag>(elf: &'static [u8]) -> ProcessReservation<
     ProcessReservation {
         id: ProcessId(pid),
         elf,
-        export: Capability::new(ProcessId(pid), 0),
-        _phantom: PhantomData,
+        export: Capability(RawCapability::new(ProcessId(pid), 0), PhantomData),
     }
 }
 
 pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: ProcessInputs<T>) {
     let pid = inputs.id.0;
 
-    inputs.args.for_all(|cap: Capability| unsafe {
+    inputs.args.for_all(|cap: RawCapability| unsafe {
         CAPABILITY_PAGES[cap.certifier().0].0[cap.local_index()] =
             CapabilityCertificate::granted(ProcessId(pid))
     });

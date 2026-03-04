@@ -13,7 +13,7 @@ pub struct ProcessId(pub usize);
 #[repr(C)]
 pub struct ProcessInputs<T: ProcessTag> {
     pub id: ProcessId,
-    pub args: T::Capabilities,
+    pub args: T::Args,
 }
 
 pub const INPUTS_ADDRESS: usize = 0x3000000;

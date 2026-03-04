@@ -20,35 +20,42 @@ fn main() {
     let interfaces = parse_interfaces(&std::fs::read_to_string(interfaces_path).unwrap());
     let mut output = String::new();
     for interface in &interfaces {
-        let name = &interface.name;
+        let name_snake = &interface.name;
+        let name_camel = camel_case(name_snake);
         writeln!(&mut output, "#[derive(Clone, Copy)]").unwrap();
-        writeln!(&mut output, "pub struct {name};").unwrap();
+        writeln!(&mut output, "pub struct {name_camel};").unwrap();
         if let EntityDetails::App { args, implements } = &interface.details {
             writeln!(&mut output, "#[repr(C)]").unwrap();
-            writeln!(&mut output, "pub struct {name}ArgsRaw {{").unwrap();
-            for (arg_name, _) in args {
-                writeln!(&mut output, "    pub {arg_name}: Capability,").unwrap();
+            writeln!(&mut output, "pub struct {name_camel}Args {{").unwrap();
+            for (arg_name, arg_type) in args {
+                let arg_type = camel_case(arg_type);
+                writeln!(&mut output, "    pub {arg_name}: Capability<{arg_type}>,").unwrap();
             }
             writeln!(&mut output, "}}").unwrap();
-            writeln!(&mut output, "impl CapabilityContainer for {name}ArgsRaw {{").unwrap();
+            writeln!(&mut output, "impl ProcessArgs for {name_camel}Args {{").unwrap();
             writeln!(
                 &mut output,
-                "    fn for_all(&self, mut _f: impl FnMut(Capability)) {{"
+                "    fn for_all(&self, mut _f: impl FnMut(RawCapability)) {{"
             )
             .unwrap();
             for (arg_name, _) in args {
-                writeln!(&mut output, "        _f(self.{arg_name});").unwrap();
+                writeln!(&mut output, "        _f(self.{arg_name}.0);").unwrap();
             }
             writeln!(&mut output, "    }}").unwrap();
             writeln!(&mut output, "}}").unwrap();
-            writeln!(&mut output, "impl ProcessTag for {name} {{").unwrap();
-            writeln!(&mut output, "    type Capabilities = {name}ArgsRaw;").unwrap();
+            writeln!(&mut output, "impl ProcessTag for {name_camel} {{").unwrap();
+            writeln!(&mut output, "    type Args = {name_camel}Args;").unwrap();
             if let Some(implements) = implements {
-                writeln!(&mut output, "    type Export = {implements};").unwrap();
+                let implements_camel = camel_case(implements);
+                writeln!(&mut output, "    type Export = {implements_camel};").unwrap();
             } else {
-                writeln!(&mut output, "    type Export = {name};").unwrap();
+                writeln!(&mut output, "    type Export = {name_camel};").unwrap();
             }
-            writeln!(&mut output, "    const NAME: &'static str = \"{name}\";").unwrap();
+            writeln!(
+                &mut output,
+                "    const NAME: &'static str = \"{name_snake}\";"
+            )
+            .unwrap();
             writeln!(&mut output, "}}").unwrap();
         }
     }
@@ -101,4 +108,13 @@ fn parse_entity(name: &str, details: EntityDetails, lines: &mut Lines) -> Entity
         name: name.to_owned(),
         details,
     }
+}
+
+fn camel_case(name: &str) -> String {
+    let mut camel = String::new();
+    for segment in name.split('_') {
+        camel.push(segment.as_bytes()[0].to_ascii_uppercase() as char);
+        camel += &segment[1..];
+    }
+    camel
 }

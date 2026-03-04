@@ -11,7 +11,7 @@ pub mod syscall;
 
 pub use capability::*;
 pub use deravel_types;
-pub use deravel_types::capability::Capability;
+pub use deravel_types::capability::RawCapability;
 pub use syscall::{disk_capacity, disk_read, disk_write, getchar, putchar};
 
 use core::alloc::{GlobalAlloc, Layout};
@@ -27,15 +27,10 @@ macro_rules! app {
         #[unsafe(no_mangle)]
         extern "C" fn __deravel_main() -> ! {
             $main(unsafe {
-                core::mem::transmute::<
-                    <deravel_types::drvli::$name as deravel_types::drvli::ProcessTag>::Capabilities,
-                    Args,
-                >(
-                    (deravel_types::INPUTS_ADDRESS
-                        as *const deravel_types::ProcessInputs<deravel_types::drvli::$name>)
-                        .read()
-                        .args,
-                )
+                (deravel_types::INPUTS_ADDRESS
+                    as *const deravel_types::ProcessInputs<deravel_types::drvli::$name>)
+                    .read()
+                    .args
             });
             deravel_kernel_api::exit()
         }
@@ -155,7 +150,7 @@ pub fn exit() -> ! {
 pub fn current_pid() -> ProcessId {
     unsafe {
         (deravel_types::INPUTS_ADDRESS
-            as *const deravel_types::ProcessInputs<deravel_types::drvli::hello>)
+            as *const deravel_types::ProcessInputs<deravel_types::drvli::Hello>)
             .read()
             .id
     }

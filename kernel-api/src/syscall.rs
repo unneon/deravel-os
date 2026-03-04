@@ -3,7 +3,7 @@
 use core::arch::asm;
 use core::mem::transmute_copy;
 use deravel_types::ProcessId;
-use deravel_types::capability::Capability;
+use deravel_types::capability::RawCapability;
 
 macro syscalls(
     $(#[no = $no:literal] pub fn $name:ident(
@@ -72,7 +72,7 @@ unsafe impl<T> FromRet for *const T {}
 
 unsafe impl<T> FromRet for *mut T {}
 
-unsafe impl FromRet for Capability {}
+unsafe impl FromRet for RawCapability {}
 
 unsafe impl FromRet for ProcessId {}
 
@@ -144,10 +144,10 @@ syscalls! {
     pub fn allocate_pages(count: usize) -> *mut u8;
 
     #[no = 13]
-    pub fn ipc_call(cap: Capability, method: usize, args: *const u8, args_len: usize, result: *mut u8, result_max_len: usize) -> usize;
+    pub fn ipc_call(cap: RawCapability, method: usize, args: *const u8, args_len: usize, result: *mut u8, result_max_len: usize) -> usize;
 
     #[no = 14]
-    pub fn ipc_receive(args: *mut u8, args_max_len: usize) -> (Capability, usize, usize, ProcessId);
+    pub fn ipc_receive(args: *mut u8, args_max_len: usize) -> (RawCapability, usize, usize, ProcessId);
 
     #[no = 15]
     pub fn ipc_reply(result: *const u8, result_len: usize);

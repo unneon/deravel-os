@@ -15,7 +15,7 @@ struct Method {
 }
 
 enum EntityDetails {
-    App { args: Vec<(String, String)> },
+    App,
     Interface,
 }
 
@@ -25,13 +25,30 @@ fn main() {
     let interfaces = parse_interfaces(&std::fs::read_to_string(interfaces_path).unwrap());
     let mut output = String::new();
     for interface in &interfaces {
-        let name = &interface.name;
-        writeln!(&mut output, "pub trait {name}Server {{").unwrap();
+        let name_snake = &interface.name;
+        let name_camel = camel_case(name_snake);
+        writeln!(&mut output, "pub trait {name_camel}Client {{").unwrap();
+        for method in &interface.methods {
+            let method_name = &method.name;
+            write!(&mut output, "    fn {method_name}(self").unwrap();
+            for (arg_name, arg_type) in &method.args {
+                let arg_type = rust_arg_type(arg_type);
+                write!(&mut output, ", {arg_name}: {arg_type}").unwrap();
+            }
+            write!(&mut output, ")").unwrap();
+            if let Some(return_type) = &method.return_type {
+                let return_type = rust_ret_type(return_type);
+                write!(&mut output, " -> {return_type}").unwrap();
+            }
+            writeln!(&mut output, ";").unwrap();
+        }
+        writeln!(&mut output, "}}").unwrap();
+        writeln!(&mut output, "pub trait {name_camel}Server {{").unwrap();
         for method in &interface.methods {
             let method_name = &method.name;
             write!(
                 &mut output,
-                "    fn {method_name}(&mut self, cap: Capability, sender: ProcessId"
+                "    fn {method_name}(&mut self, cap: RawCapability, sender: ProcessId"
             )
             .unwrap();
             for (arg_name, arg_type) in &method.args {
@@ -46,25 +63,19 @@ fn main() {
             writeln!(&mut output, ";").unwrap();
         }
         writeln!(&mut output, "}}").unwrap();
-        if let EntityDetails::App { args, .. } = &interface.details {
-            writeln!(&mut output, "impl App for {name} {{").unwrap();
-            writeln!(&mut output, "    type Args = {name}Args;").unwrap();
-            writeln!(&mut output, "}}").unwrap();
-            writeln!(&mut output, "#[repr(C)]").unwrap();
-            writeln!(&mut output, "pub struct {name}Args {{").unwrap();
-            for (arg_name, arg_type) in args {
-                writeln!(
-                    &mut output,
-                    "    pub {arg_name}: CallableCapability<{arg_type}>,"
-                )
-                .unwrap();
-            }
+        if matches!(&interface.details, EntityDetails::App) {
+            writeln!(&mut output, "impl App for {name_camel} {{").unwrap();
+            writeln!(&mut output, "    type Args = {name_camel}Args;").unwrap();
             writeln!(&mut output, "}}").unwrap();
         }
-        writeln!(&mut output, "impl CallableCapability<{name}> {{").unwrap();
+        writeln!(
+            &mut output,
+            "impl {name_camel}Client for Capability<{name_camel}> {{"
+        )
+        .unwrap();
         for (method_id, method) in interface.methods.iter().enumerate() {
             let name = &method.name;
-            write!(&mut output, "    pub fn {name}(self").unwrap();
+            write!(&mut output, "    fn {name}(self").unwrap();
             for (arg_name, arg_type) in &method.args {
                 let arg_type = rust_arg_type(arg_type);
                 write!(&mut output, ", {arg_name}: {arg_type}").unwrap();
@@ -81,7 +92,7 @@ fn main() {
             }
             writeln!(&mut output, "        )).unwrap();").unwrap();
             writeln!(&mut output, "        let mut buf = [0u8; 4096];").unwrap();
-            writeln!(&mut output, "        let result_len = unsafe {{ ipc_call(Capability(self.0), {method_id}, data.as_ptr(), data.len(), buf.as_mut_ptr(), buf.len()) }};").unwrap();
+            writeln!(&mut output, "        let result_len = unsafe {{ ipc_call(self.0, {method_id}, data.as_ptr(), data.len(), buf.as_mut_ptr(), buf.len()) }};").unwrap();
             writeln!(
                 &mut output,
                 "        serde_json::from_slice(&buf[..result_len]).unwrap()"
@@ -92,7 +103,7 @@ fn main() {
         writeln!(&mut output, "}}").unwrap();
         writeln!(
             &mut output,
-            "pub fn ipc_serve_{name}(mut server: impl {name}Server) -> ! {{"
+            "pub fn ipc_serve_{name_snake}(mut server: impl {name_camel}Server) -> ! {{"
         )
         .unwrap();
         writeln!(&mut output, "    loop {{").unwrap();
@@ -155,7 +166,7 @@ fn rust_arg_type(type_: &str) -> Cow<'static, str> {
     match type_ {
         "text" => "&str".into(),
         "bytes" => "&[u8]".into(),
-        _ => format!("CallableCapability<{type_}>").into(),
+        _ => format!("Capability<{}>", camel_case(type_)).into(),
     }
 }
 
@@ -163,7 +174,7 @@ fn rust_ret_type(type_: &str) -> Cow<'static, str> {
     match type_ {
         "text" => "String".into(),
         "bytes" => "Vec<u8>".into(),
-        _ => format!("CallableCapability<{type_}>").into(),
+        _ => format!("Capability<{}>", camel_case(type_)).into(),
     }
 }
 
@@ -182,22 +193,7 @@ fn parse_interfaces(text: &str) -> Vec<Entity> {
         if let Some(line) = line.strip_prefix("app ") {
             let name_len = line.find(['(', ' ']).unwrap_or(line.len());
             let name = &line[..name_len];
-            let line = &line[name_len..];
-            let (args, _) = if let Some(line) = line.strip_prefix("(") {
-                let (args, line) = line.split_once(')').unwrap();
-                let args = args
-                    .split(", ")
-                    .filter(|arg| !arg.is_empty())
-                    .map(|arg| {
-                        let (name, type_) = arg.split_once(' ').unwrap();
-                        (name.to_owned(), type_.to_owned())
-                    })
-                    .collect();
-                (args, line)
-            } else {
-                (Vec::new(), line)
-            };
-            let entity = parse_entity(name, EntityDetails::App { args }, &mut lines);
+            let entity = parse_entity(name, EntityDetails::App, &mut lines);
             parsed.push(entity);
         } else if let Some(name) = line.strip_prefix("interface ") {
             let entity = parse_entity(name, EntityDetails::Interface, &mut lines);
@@ -235,4 +231,13 @@ fn parse_entity(name: &str, details: EntityDetails, lines: &mut Lines) -> Entity
         methods,
         details,
     }
+}
+
+fn camel_case(name: &str) -> String {
+    let mut camel = String::new();
+    for segment in name.split('_') {
+        camel.push(segment.as_bytes()[0].to_ascii_uppercase() as char);
+        camel += &segment[1..];
+    }
+    camel
 }

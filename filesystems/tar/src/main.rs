@@ -14,10 +14,11 @@ use alloc::borrow::{Cow, ToOwned};
 use alloc::string::String;
 use alloc::vec::Vec;
 use alloc::{format, vec};
-use deravel_kernel_api::deravel_types::ProcessId;
-use deravel_kernel_api::deravel_types::drvli::filesystem;
-use deravel_kernel_api::drvli::{filesystemServer, ipc_serve_filesystem};
+use deravel_kernel_api::deravel_types::capability::Capability;
+use deravel_kernel_api::drvli::{FilesystemServer, ipc_serve_filesystem};
 use deravel_kernel_api::*;
+use deravel_types::ProcessId;
+use deravel_types::drvli::Filesystem;
 use log::error;
 
 #[derive(Debug)]
@@ -65,8 +66,8 @@ union TarHeaderBuf {
 
 const SECTOR_SIZE: usize = 512;
 
-impl filesystemServer for Server {
-    fn read(&mut self, cap: Capability, _: ProcessId, path_suffix: &str) -> Vec<u8> {
+impl FilesystemServer for Server {
+    fn read(&mut self, cap: RawCapability, _: ProcessId, path_suffix: &str) -> Vec<u8> {
         let cap = &self.capabilities[cap.local_index()];
         let path_prefix = &cap.path;
         let path = concat_path(path_prefix, path_suffix);
@@ -77,7 +78,7 @@ impl filesystemServer for Server {
         file.data[..file.size].to_owned()
     }
 
-    fn write(&mut self, cap: Capability, _: ProcessId, path_suffix: &str, data: &[u8]) {
+    fn write(&mut self, cap: RawCapability, _: ProcessId, path_suffix: &str, data: &[u8]) {
         let cap = &self.capabilities[cap.local_index()];
         let path_prefix = &cap.path;
         let path = concat_path(path_prefix, path_suffix);
@@ -98,10 +99,10 @@ impl filesystemServer for Server {
 
     fn subcapability(
         &mut self,
-        cap: Capability,
+        cap: RawCapability,
         sender: ProcessId,
         path_suffix: &str,
-    ) -> CallableCapability<filesystem> {
+    ) -> Capability<Filesystem> {
         let cap = &self.capabilities[cap.local_index()];
         let path_prefix = &cap.path;
         let path = concat_path(path_prefix, path_suffix).into_owned();
@@ -129,4 +130,4 @@ fn concat_path<'a>(prefix: &'a str, suffix: &'a str) -> Cow<'a, str> {
     }
 }
 
-app! { main tar_fs }
+app! { main TarFs }

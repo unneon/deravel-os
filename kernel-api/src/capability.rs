@@ -4,71 +4,30 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use deravel_types::ProcessId;
 use deravel_types::capability::{
     CAPABILITIES_START, Capability, CapabilityCertificate, CapabilityCertificateUnpacked,
+    RawCapability,
 };
 use log::trace;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-#[derive(Clone, Copy)]
-pub struct CallableCapability<T>(pub *const CapabilityCertificate, pub PhantomData<T>);
 
 static CAPABILITIES_ALLOCATED: AtomicUsize = AtomicUsize::new(0);
 
-impl<T> From<CallableCapability<T>> for Capability {
-    fn from(capability: CallableCapability<T>) -> Self {
-        unsafe { core::mem::transmute(capability) }
-    }
-}
-
-impl<T> core::ops::Deref for CallableCapability<T> {
-    type Target = Capability;
-
-    fn deref(&self) -> &Self::Target {
-        unsafe { core::mem::transmute::<&CallableCapability<_>, &Capability>(self) }
-    }
-}
-
-impl<T> core::fmt::Debug for CallableCapability<T> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{:#x}", self.0 as usize)
-    }
-}
-
-impl<'de, T> Deserialize<'de> for CallableCapability<T> {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(CallableCapability(
-            usize::deserialize(deserializer)? as *const CapabilityCertificate,
-            PhantomData,
-        ))
-    }
-}
-
-impl<T> Serialize for CallableCapability<T> {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        (self.0 as usize).serialize(serializer)
-    }
-}
-
-pub fn grant_capability<T>(grantee: ProcessId) -> CallableCapability<T> {
+pub fn grant_capability<T>(grantee: ProcessId) -> Capability<T> {
     let certificate = allocate_certificate();
     *certificate = CapabilityCertificate::granted(grantee);
-    let cap = CallableCapability(certificate, PhantomData);
+    let cap = Capability(RawCapability(certificate), PhantomData);
     trace!("granted {cap:?} to {grantee:?}");
     cap
 }
 
-pub fn forward_capability<T>(
-    cap: CallableCapability<T>,
-    forwardee: Capability,
-) -> CallableCapability<T> {
-    let cap = unsafe { core::mem::transmute::<CallableCapability<T>, Capability>(cap) };
+pub fn forward_capability<T, U>(cap: Capability<T>, forwardee: Capability<U>) -> Capability<T> {
+    let cap = unsafe { core::mem::transmute::<Capability<T>, RawCapability>(cap) };
     let certificate = allocate_certificate();
     *certificate = CapabilityCertificate::forwarded(forwardee.certifier(), cap);
-    let forwarded = CallableCapability(certificate, PhantomData);
+    let forwarded = Capability(RawCapability(certificate), PhantomData);
     trace!("forwarded {cap:?} as {forwarded:?} to {forwardee:?}");
     forwarded
 }
 
-pub fn validate_capability(cap: Capability, claimer: ProcessId) -> Capability {
+pub fn validate_capability(cap: RawCapability, claimer: ProcessId) -> RawCapability {
     trace!("validating capability {cap:?} from process {claimer:?}");
     let mut capability = cap;
     let mut sender = claimer;
@@ -93,7 +52,7 @@ pub fn validate_capability(cap: Capability, claimer: ProcessId) -> Capability {
     original
 }
 
-fn read_certificate(cap: Capability) -> CapabilityCertificate {
+fn read_certificate(cap: RawCapability) -> CapabilityCertificate {
     assert!(cap.is_pointer_valid());
     unsafe { *cap.0 }
 }

@@ -35,7 +35,10 @@ use alloc::borrow::ToOwned;
 use alloc::vec;
 use core::panic::PanicInfo;
 use deravel_types::ProcessId;
-use deravel_types::capability::{Capability, CapabilityCertificate, CapabilityCertificateUnpacked};
+use deravel_types::capability::{
+    CapabilityCertificate, CapabilityCertificateUnpacked, RawCapability,
+};
+use deravel_types::drvli::*;
 use fdt::Fdt;
 use riscv::interrupt::Trap;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
@@ -52,21 +55,21 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     log_sbi_metadata();
     initialize_all_virtio_mmio(&device_tree);
 
-    let fs_tar = reserve_process!(tar_fs, "CARGO_BIN_FILE_DERAVEL_FILESYSTEM_TAR");
-    // let hello = reserve_process!(hello, "CARGO_BIN_FILE_DERAVEL_APPS_hello");
-    let ipc_a = reserve_process!(ipc_a, "CARGO_BIN_FILE_DERAVEL_APPS_ipc-a");
-    let ipc_b = reserve_process!(ipc_b, "CARGO_BIN_FILE_DERAVEL_APPS_ipc-b");
-    let ipc_c = reserve_process!(ipc_c, "CARGO_BIN_FILE_DERAVEL_APPS_ipc-c");
-    // let shell = reserve_process!(shell, "CARGO_BIN_FILE_DERAVEL_APPS_shell");
-    // hello.spawn(deravel_types::interfaces::hello_prelude::Capabilities {});
-    // shell.spawn(deravel_types::interfaces::shell_prelude::Capabilities {});
-    ipc_a.spawn(deravel_types::drvli::ipc_aArgsRaw {
+    let fs_tar = reserve_process!(TarFs, "CARGO_BIN_FILE_DERAVEL_FILESYSTEM_TAR");
+    let hello = reserve_process!(Hello, "CARGO_BIN_FILE_DERAVEL_APPS_hello");
+    let ipc_a = reserve_process!(IpcA, "CARGO_BIN_FILE_DERAVEL_APPS_ipc-a");
+    let ipc_b = reserve_process!(IpcB, "CARGO_BIN_FILE_DERAVEL_APPS_ipc-b");
+    let ipc_c = reserve_process!(IpcC, "CARGO_BIN_FILE_DERAVEL_APPS_ipc-c");
+    let shell = reserve_process!(Shell, "CARGO_BIN_FILE_DERAVEL_APPS_shell");
+    hello.spawn(HelloArgs {});
+    shell.spawn(ShellArgs {});
+    ipc_a.spawn(IpcAArgs {
         fs: fs_tar.export,
         b: ipc_b.export,
     });
-    ipc_b.spawn(deravel_types::drvli::ipc_bArgsRaw { c: ipc_c.export });
-    ipc_c.spawn(deravel_types::drvli::ipc_cArgsRaw {});
-    fs_tar.spawn(deravel_types::drvli::tar_fsArgsRaw {});
+    ipc_b.spawn(IpcBArgs { c: ipc_c.export });
+    ipc_c.spawn(IpcCArgs {});
+    fs_tar.spawn(TarFsArgs {});
 
     schedule_and_switch_to_userspace();
 }
@@ -247,7 +250,7 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters) -> ! {
                 registers.a0 = result.len();
                 unsafe { PROCESSES[CURRENT_PROC.unwrap()].state = ProcessState::Runnable };
             } else {
-                let farthest_cap = Capability(registers.a0 as *const CapabilityCertificate);
+                let farthest_cap = RawCapability(registers.a0 as *const CapabilityCertificate);
                 let method = registers.a1;
                 let args_ptr = registers.a2 as *const u8;
                 let args_len = registers.a3;

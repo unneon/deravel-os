@@ -8,4 +8,4 @@ fn main(_: Args) {
     println!("Coming from process {:?}.", current_pid());
 }
 
-app! { main hello }
+app! { main Hello }

@@ -1,10 +1,13 @@
 use crate::ProcessId;
+use core::marker::PhantomData;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Clone, Copy)]
-pub struct Capability(pub *const CapabilityCertificate);
+#[repr(transparent)]
+pub struct Capability<T>(pub RawCapability, pub PhantomData<T>);
 
 #[derive(Clone, Copy)]
+#[repr(transparent)]
 pub struct CapabilityCertificate(pub usize);
 
 #[derive(Debug)]
@@ -14,18 +17,22 @@ pub enum CapabilityCertificateUnpacked {
     },
     Forwarded {
         forwardee: ProcessId,
-        inner: Capability,
+        inner: RawCapability,
     },
 }
+
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+pub struct RawCapability(pub *const CapabilityCertificate);
 
 pub const CAPABILITIES_START: usize = 0x2000000;
 pub const CAPABILITIES_END: usize = 0x3000000;
 
-impl Capability {
-    pub fn new(certifier: ProcessId, local_index: usize) -> Capability {
+impl RawCapability {
+    pub fn new(certifier: ProcessId, local_index: usize) -> RawCapability {
         assert!(certifier.0 < (CAPABILITIES_END - CAPABILITIES_START) / 4096);
         assert!(local_index < 4096 / size_of::<CapabilityCertificate>());
-        Capability(
+        RawCapability(
             (CAPABILITIES_START
                 + certifier.0 * 4096
                 + local_index * size_of::<CapabilityCertificate>()) as *const _,
@@ -55,7 +62,7 @@ impl CapabilityCertificate {
         CapabilityCertificate(grantee.0)
     }
 
-    pub fn forwarded(forwardee: ProcessId, capability: Capability) -> CapabilityCertificate {
+    pub fn forwarded(forwardee: ProcessId, capability: RawCapability) -> CapabilityCertificate {
         assert!(forwardee.0 < 8);
         assert!(capability.0.is_aligned_to(8));
         CapabilityCertificate(forwardee.0 | capability.0 as usize)
@@ -69,27 +76,59 @@ impl CapabilityCertificate {
         } else {
             CapabilityCertificateUnpacked::Forwarded {
                 forwardee: certified,
-                inner: Capability(raw_inner as *const CapabilityCertificate),
+                inner: RawCapability(raw_inner as *const CapabilityCertificate),
             }
         }
     }
 }
 
-impl core::fmt::Debug for Capability {
+impl<T> From<Capability<T>> for RawCapability {
+    fn from(cap: Capability<T>) -> Self {
+        cap.0
+    }
+}
+
+impl<T> core::ops::Deref for Capability<T> {
+    type Target = RawCapability;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> core::fmt::Debug for Capability<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::fmt::Debug::fmt(&self.0, f)
+    }
+}
+
+impl core::fmt::Debug for RawCapability {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{:#x}", self.0 as usize)
     }
 }
 
-impl<'de> Deserialize<'de> for Capability {
+impl<'de, T> Deserialize<'de> for Capability<T> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(Capability(
+        Deserialize::deserialize(deserializer).map(|cap| Self(cap, PhantomData))
+    }
+}
+
+impl<'de> Deserialize<'de> for RawCapability {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(RawCapability(
             usize::deserialize(deserializer)? as *const CapabilityCertificate
         ))
     }
 }
 
-impl Serialize for Capability {
+impl<T> Serialize for Capability<T> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        Serialize::serialize(&self.0, serializer)
+    }
+}
+
+impl Serialize for RawCapability {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         (self.0 as usize).serialize(serializer)
     }

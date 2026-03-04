@@ -39,4 +39,4 @@ fn getline(buf: &mut [u8]) -> Option<&str> {
     }
 }
 
-app! { main shell }
+app! { main Shell }
