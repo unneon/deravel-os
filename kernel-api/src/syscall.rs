@@ -1,5 +1,6 @@
+#![allow(clippy::missing_safety_doc)]
+
 use core::arch::asm;
-use core::hint::unreachable_unchecked;
 use core::mem::transmute_copy;
 use deravel_types::ProcessId;
 use deravel_types::capability::Capability;
@@ -15,7 +16,7 @@ macro syscalls(
         )?)?)?)?)?)?
     ) $(-> $return_type:ty)?;)*
 ) {
-    $(pub fn $name(
+    $(pub unsafe fn $name(
         $($a0name: $a0type
         $(, $a1name: $a1type
         $(, $a2name: $a2type

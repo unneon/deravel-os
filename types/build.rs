@@ -3,14 +3,7 @@ use std::str::Lines;
 
 struct Entity {
     name: String,
-    methods: Vec<Method>,
     details: EntityDetails,
-}
-
-struct Method {
-    name: String,
-    args: Vec<(String, String)>,
-    return_type: Option<String>,
 }
 
 enum EntityDetails {
@@ -30,7 +23,24 @@ fn main() {
         let name = &interface.name;
         writeln!(&mut output, "#[derive(Clone, Copy)]").unwrap();
         writeln!(&mut output, "pub struct {name};").unwrap();
-        if let EntityDetails::App { implements, .. } = &interface.details {
+        if let EntityDetails::App { args, implements } = &interface.details {
+            writeln!(&mut output, "#[repr(C)]").unwrap();
+            writeln!(&mut output, "pub struct {name}ArgsRaw {{").unwrap();
+            for (arg_name, _) in args {
+                writeln!(&mut output, "    pub {arg_name}: Capability,").unwrap();
+            }
+            writeln!(&mut output, "}}").unwrap();
+            writeln!(&mut output, "impl CapabilityContainer for {name}ArgsRaw {{").unwrap();
+            writeln!(
+                &mut output,
+                "    fn for_all(&self, mut _f: impl FnMut(Capability)) {{"
+            )
+            .unwrap();
+            for (arg_name, _) in args {
+                writeln!(&mut output, "        _f(self.{arg_name});").unwrap();
+            }
+            writeln!(&mut output, "    }}").unwrap();
+            writeln!(&mut output, "}}").unwrap();
             writeln!(&mut output, "impl ProcessTag for {name} {{").unwrap();
             writeln!(&mut output, "    type Capabilities = {name}ArgsRaw;").unwrap();
             if let Some(implements) = implements {
@@ -41,28 +51,12 @@ fn main() {
             writeln!(&mut output, "    const NAME: &'static str = \"{name}\";").unwrap();
             writeln!(&mut output, "}}").unwrap();
         }
-        if let EntityDetails::App { args, .. } = &interface.details {
-            writeln!(&mut output, "#[repr(C)]").unwrap();
-            writeln!(&mut output, "pub struct {name}ArgsRaw {{").unwrap();
-            for (arg_name, _) in args {
-                writeln!(&mut output, "    pub {arg_name}: Capability,").unwrap();
-            }
-            writeln!(&mut output, "}}").unwrap();
-        }
     }
     std::fs::write(
         format!("{}/drvli.rs", std::env::var("OUT_DIR").unwrap()),
         output,
     )
     .unwrap();
-}
-
-fn rust_type(type_: &str) -> &str {
-    match type_ {
-        "text" => "&str",
-        "bytes" => "&[u8]",
-        _ => "Capability",
-    }
 }
 
 fn parse_interfaces(text: &str) -> Vec<Entity> {
@@ -100,31 +94,11 @@ fn parse_interfaces(text: &str) -> Vec<Entity> {
 }
 
 fn parse_entity(name: &str, details: EntityDetails, lines: &mut Lines) -> Entity {
-    let mut methods = Vec::new();
     while let Some(line) = lines.next()
-        && let Some(line) = line.strip_prefix("    ")
-    {
-        if let Some(line) = line.strip_prefix("func ") {
-            let (method_name, line) = line.split_once('(').unwrap();
-            let (method_args, line) = line.split_once(")").unwrap();
-            let method_args: Vec<_> = method_args
-                .split(", ")
-                .map(|arg| {
-                    let (name, type_) = arg.split_once(' ').unwrap();
-                    (name.to_owned(), type_.to_owned())
-                })
-                .collect();
-            let method_return_type = line.strip_prefix(" ").map(str::to_owned);
-            methods.push(Method {
-                name: method_name.to_owned(),
-                args: method_args,
-                return_type: method_return_type,
-            });
-        }
-    }
+        && line.starts_with("    ")
+    {}
     Entity {
         name: name.to_owned(),
-        methods,
         details,
     }
 }

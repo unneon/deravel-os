@@ -1,12 +1,11 @@
 use crate::ProcessId;
-use core::marker::PhantomData;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Clone, Copy)]
 pub struct Capability(pub *const CapabilityCertificate);
 
 #[derive(Clone, Copy)]
-pub struct CapabilityCertificate(usize);
+pub struct CapabilityCertificate(pub usize);
 
 #[derive(Debug)]
 pub enum CapabilityCertificateUnpacked {

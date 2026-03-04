@@ -10,10 +10,13 @@ mod serialize;
 
 use crate::deserialize::deserialize_archive;
 use crate::serialize::serialize_archive;
-use alloc::borrow::Cow;
+use alloc::borrow::{Cow, ToOwned};
 use alloc::string::String;
 use alloc::vec::Vec;
 use alloc::{format, vec};
+use deravel_kernel_api::deravel_types::ProcessId;
+use deravel_kernel_api::deravel_types::drvli::filesystem;
+use deravel_kernel_api::drvli::{filesystemServer, ipc_serve_filesystem};
 use deravel_kernel_api::*;
 use log::error;
 
@@ -26,6 +29,11 @@ struct File {
     name: String,
     data: Vec<u8>,
     size: usize,
+}
+
+struct Server {
+    files: Vec<File>,
+    capabilities: Vec<CapabilityData>,
 }
 
 #[repr(C, packed)]
@@ -57,68 +65,60 @@ union TarHeaderBuf {
 
 const SECTOR_SIZE: usize = 512;
 
-fn main(args: Args) {
-    let mut files = deserialize_archive();
+impl filesystemServer for Server {
+    fn read(&mut self, cap: Capability, _: ProcessId, path_suffix: &str) -> Vec<u8> {
+        let cap = &self.capabilities[cap.local_index()];
+        let path_prefix = &cap.path;
+        let path = concat_path(path_prefix, path_suffix);
+        let file = self.files.iter().find(|file| file.name == path);
+        let Some(file) = file else {
+            panic!("file {path:?} not found");
+        };
+        file.data[..file.size].to_owned()
+    }
 
-    let mut capabilities = vec![CapabilityData {
+    fn write(&mut self, cap: Capability, _: ProcessId, path_suffix: &str, data: &[u8]) {
+        let cap = &self.capabilities[cap.local_index()];
+        let path_prefix = &cap.path;
+        let path = concat_path(path_prefix, path_suffix);
+        let file = self.files.iter().find(|file| file.name == path);
+        if file.is_some() {
+            error!("file {path:?} already exists");
+        }
+        let size = data.len();
+        let mut data = data.to_owned();
+        data.resize(size.next_multiple_of(SECTOR_SIZE), 0);
+        self.files.push(File {
+            name: path.into_owned(),
+            data,
+            size,
+        });
+        serialize_archive(&self.files);
+    }
+
+    fn subcapability(
+        &mut self,
+        cap: Capability,
+        sender: ProcessId,
+        path_suffix: &str,
+    ) -> CallableCapability<filesystem> {
+        let cap = &self.capabilities[cap.local_index()];
+        let path_prefix = &cap.path;
+        let path = concat_path(path_prefix, path_suffix).into_owned();
+        self.capabilities.push(CapabilityData { path });
+        grant_capability(sender)
+    }
+}
+
+fn main(_: Args) {
+    let files = deserialize_archive();
+    let capabilities = vec![CapabilityData {
         path: String::new(),
     }];
-    // let ipc_a = pid_by_name("ipc-a");
-    // let root_cap = grant_capability(ipc_a);
-    // ipc_send(&root_cap, ipc_a);
-
-    // loop {
-    // let (req, req_sender) = ipc_recv::<FilesystemRequest>();
-    // match req {
-    //     FilesystemRequest::Read {
-    //         cap,
-    //         path: path_suffix,
-    //     } => {
-    //         let cap = &capabilities[validate_capability(cap, req_sender).local_index()];
-    //         let path_prefix = &cap.path;
-    //         let path = concat_path(path_prefix, &path_suffix);
-    //         let file = files.iter().find(|file| file.name == path);
-    //         if let Some(file) = file {
-    //             ipc_send(&file.data[..file.size], req_sender);
-    //         } else {
-    //             error!("file {path:?} not found");
-    //         }
-    //     }
-    //     FilesystemRequest::Write {
-    //         cap,
-    //         path: path_suffix,
-    //         mut data,
-    //     } => {
-    //         let cap = &capabilities[validate_capability(cap, req_sender).local_index()];
-    //         let path_prefix = &cap.path;
-    //         let path = concat_path(path_prefix, &path_suffix);
-    //         let file = files.iter().find(|file| file.name == path);
-    //         if file.is_none() {
-    //             let size = data.len();
-    //             data.resize(size.next_multiple_of(SECTOR_SIZE), 0);
-    //             files.push(File {
-    //                 name: path.into_owned(),
-    //                 data,
-    //                 size,
-    //             });
-    //         } else {
-    //             error!("file {path:?} already exists");
-    //         }
-    //     }
-    //     FilesystemRequest::Subcapability {
-    //         cap,
-    //         path: path_suffix,
-    //     } => {
-    //         let cap = &capabilities[validate_capability(cap, req_sender).local_index()];
-    //         let path_prefix = &cap.path;
-    //         let path = concat_path(path_prefix, &path_suffix).into_owned();
-    //         capabilities.push(CapabilityData { path });
-    //         let sub_cap = grant_capability(req_sender);
-    //         ipc_send(&sub_cap, req_sender);
-    //     }
-    // }
-    // serialize_archive(&files);
-    // }
+    ipc_serve_filesystem(Server {
+        files,
+        capabilities,
+    })
 }
 
 fn concat_path<'a>(prefix: &'a str, suffix: &'a str) -> Cow<'a, str> {

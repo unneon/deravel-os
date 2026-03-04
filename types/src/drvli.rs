@@ -1,7 +1,13 @@
+#![allow(non_camel_case_types, unused)]
+
 use crate::capability::Capability;
 
+pub trait CapabilityContainer {
+    fn for_all(&self, f: impl FnMut(Capability));
+}
+
 pub trait ProcessTag {
-    type Capabilities;
+    type Capabilities: CapabilityContainer;
 
     type Export;
 

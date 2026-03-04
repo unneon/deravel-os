@@ -2,15 +2,24 @@
 #![no_main]
 
 use deravel_kernel_api::CallableCapability;
+use deravel_kernel_api::deravel_types::ProcessId;
+use deravel_kernel_api::drvli::{ipc_cServer, ipc_serve_ipc_c};
 use deravel_kernel_api::*;
 use deravel_types::drvli::filesystem;
-use log::{debug, trace};
+use log::debug;
+
+struct Server;
+
+impl ipc_cServer for Server {
+    fn bar(&mut self, _: Capability, _: ProcessId, fs: CallableCapability<filesystem>) {
+        let data = fs.read("secret.txt");
+        let text = str::from_utf8(&data).unwrap();
+        debug!("read {text:?} from file");
+    }
+}
 
 fn main(_: Args) {
-    let (cap, _) = cap_recv::<CallableCapability<filesystem>>();
-    let data = cap.read("secret.txt");
-    let text = core::str::from_utf8(&data).unwrap();
-    debug!("read {text:?} from file");
+    ipc_serve_ipc_c(Server);
 }
 
 app! { main ipc_c }

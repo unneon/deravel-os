@@ -24,16 +24,18 @@ use crate::arch::{RiscvRegisters, initialize_trap_handler, switch_to_userspace_r
 use crate::log::{initialize_log, log_userspace};
 use crate::page::{PAGE_SIZE, PageFlags, PageTable, map_pages};
 use crate::process::{
-    CURRENT_PROC, PROCESSES, ProcessState, reserve_process, schedule_and_switch_to_userspace,
+    CAPABILITY_PAGES, CURRENT_PROC, PROCESSES, ProcessState, reserve_process,
+    schedule_and_switch_to_userspace,
 };
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use crate::virtio::initialize_all_virtio_mmio;
 use crate::virtio::virtio_blk::VirtioBlk;
-use ::log::{Level, debug, error};
+use ::log::{Level, error};
 use alloc::borrow::ToOwned;
 use alloc::vec;
 use core::panic::PanicInfo;
-use deravel_types::capability::{Capability, CapabilityCertificate};
+use deravel_types::ProcessId;
+use deravel_types::capability::{Capability, CapabilityCertificate, CapabilityCertificateUnpacked};
 use fdt::Fdt;
 use riscv::interrupt::Trap;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
@@ -235,22 +237,97 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters) -> ! {
             registers.a0 = virtual_addr;
         }
         13 => {
-            let capability = Capability(registers.a0 as *const CapabilityCertificate);
-            let method = registers.a1;
-            let args_ptr = registers.a2 as *const u8;
-            let args_len = registers.a3;
-            let args = unsafe { core::slice::from_raw_parts(args_ptr, args_len) };
-            let args = core::str::from_utf8(args).unwrap().to_owned();
-            let proc = unsafe { &mut PROCESSES[CURRENT_PROC.unwrap()] };
-            let caller_name = proc.name.unwrap();
-            debug!("process {caller_name} invoked ipc {capability:?}@{method} {args}");
+            if unsafe { PROCESSES[CURRENT_PROC.unwrap()].state } == ProcessState::WaitingForReply {
+                let result = unsafe { PROCESSES[CURRENT_PROC.unwrap()].reply.take().unwrap() };
+                let buf_ptr = registers.a4 as *mut u8;
+                let buf_len = registers.a5;
+                assert!(result.len() <= buf_len);
+                let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr, result.len()) };
+                buf.copy_from_slice(result.as_bytes());
+                registers.a0 = result.len();
+                unsafe { PROCESSES[CURRENT_PROC.unwrap()].state = ProcessState::Runnable };
+            } else {
+                let farthest_cap = Capability(registers.a0 as *const CapabilityCertificate);
+                let method = registers.a1;
+                let args_ptr = registers.a2 as *const u8;
+                let args_len = registers.a3;
+                let args = unsafe { core::slice::from_raw_parts(args_ptr, args_len) };
+                let args = core::str::from_utf8(args).unwrap().to_owned();
+                let proc = unsafe { &mut PROCESSES[CURRENT_PROC.unwrap()] };
+                proc.state = ProcessState::WaitingForReply;
+                proc.registers = registers.clone();
+                proc.pc = user_pc;
 
-            // TODO: Traverse the capability and add a message to the queue.
+                let mut capability = farthest_cap;
+                let mut sender = unsafe { CURRENT_PROC.unwrap() };
+                let original = loop {
+                    assert!(capability.is_pointer_valid());
+                    let certifier = capability.certifier();
+                    let certificate =
+                        unsafe { CAPABILITY_PAGES[certifier.0].0[capability.local_index()] };
+                    match certificate.unpack() {
+                        CapabilityCertificateUnpacked::Granted { grantee } => {
+                            assert!(grantee.0 == sender);
+                            break capability;
+                        }
+                        CapabilityCertificateUnpacked::Forwarded { forwardee, inner } => {
+                            assert!(forwardee.0 == sender);
+                            capability = inner;
+                            sender = certifier.0;
+                        }
+                    }
+                };
+                let dest = original.certifier();
+                let dest = unsafe { &mut PROCESSES[dest.0] };
+                dest.messages
+                    .get_or_insert_default()
+                    .push_back((original, method, args, unsafe {
+                        ProcessId(CURRENT_PROC.unwrap())
+                    }));
 
-            proc.state = ProcessState::WaitingForReply;
-            proc.registers = registers.clone();
-            proc.pc = user_pc + 4;
-            schedule_and_switch_to_userspace();
+                schedule_and_switch_to_userspace();
+            }
+        }
+        14 => {
+            assert!(unsafe { PROCESSES[CURRENT_PROC.unwrap()].currently_serving.is_none() });
+            if let Some((cap, method, args, sender)) = unsafe {
+                PROCESSES[CURRENT_PROC.unwrap()]
+                    .messages
+                    .as_mut()
+                    .and_then(|q| q.pop_front())
+            } {
+                let buf = registers.a0 as *mut u8;
+                let buf_max_len = registers.a1;
+                assert!(args.len() <= buf_max_len);
+                let buf = unsafe { core::slice::from_raw_parts_mut(buf, args.len()) };
+                buf.copy_from_slice(args.as_bytes());
+                registers.a0 = cap.0 as usize;
+                registers.a1 = method;
+                registers.a2 = args.len();
+                registers.a3 = sender.0;
+                unsafe { PROCESSES[CURRENT_PROC.unwrap()].currently_serving = Some(sender) };
+            } else {
+                let proc = unsafe { &mut PROCESSES[CURRENT_PROC.unwrap()] };
+                proc.state = ProcessState::WaitingForMessage;
+                proc.registers = registers.clone();
+                proc.pc = user_pc;
+
+                schedule_and_switch_to_userspace();
+            }
+        }
+        15 => {
+            let result_ptr = registers.a0;
+            let result_len = registers.a1;
+            let result =
+                unsafe { core::slice::from_raw_parts(result_ptr as *const u8, result_len) };
+            let result = str::from_utf8(result).unwrap().to_owned();
+            let caller = unsafe {
+                PROCESSES[CURRENT_PROC.unwrap()]
+                    .currently_serving
+                    .take()
+                    .unwrap()
+            };
+            unsafe { PROCESSES[caller.0].reply = Some(result.into()) };
         }
         _ => panic!("invalid syscall number {}", registers.a6),
     }

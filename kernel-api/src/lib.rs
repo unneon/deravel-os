@@ -12,14 +12,12 @@ pub mod syscall;
 pub use capability::*;
 pub use deravel_types;
 pub use deravel_types::capability::Capability;
-pub use syscall::{disk_capacity, disk_read, disk_write, exit, getchar, putchar};
+pub use syscall::{disk_capacity, disk_read, disk_write, getchar, putchar};
 
 use core::alloc::{GlobalAlloc, Layout};
 use core::fmt::Write;
 use deravel_types::ProcessId;
 use log::{Level, LevelFilter, Metadata, Record, error};
-use serde::Serialize;
-use serde::de::DeserializeOwned;
 
 #[macro_export]
 macro_rules! app {
@@ -80,7 +78,7 @@ static PAGE_ALLOCATOR: PageAllocator = PageAllocator;
 impl Write for KernelConsole {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         for byte in s.bytes() {
-            syscall::putchar(byte);
+            unsafe { syscall::putchar(byte) }
         }
         Ok(())
     }
@@ -99,7 +97,7 @@ unsafe impl GlobalAlloc for PageAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         assert!(layout.align() <= PAGE_SIZE);
         let page_count = layout.size().div_ceil(PAGE_SIZE);
-        syscall::allocate_pages(page_count)
+        unsafe { syscall::allocate_pages(page_count) }
     }
 
     unsafe fn dealloc(&self, _: *mut u8, _: Layout) {}
@@ -145,14 +143,13 @@ unsafe extern "C" fn __deravel_entry() -> ! {
     )
 }
 
-pub fn cap_recv<T: DeserializeOwned>() -> (T, Capability) {
-    // TODO: Validate received capability?
-    todo!()
-}
-
 fn initialize_log() {
     log::set_logger(&SystemLogger).unwrap();
     log::set_max_level(LevelFilter::Trace);
+}
+
+pub fn exit() -> ! {
+    unsafe { syscall::exit() }
 }
 
 pub fn current_pid() -> ProcessId {
@@ -164,12 +161,8 @@ pub fn current_pid() -> ProcessId {
     }
 }
 
-pub fn pid_by_name(name: &str) -> ProcessId {
-    syscall::pid_by_name(name.as_ptr(), name.len())
-}
-
 pub fn system_log(text: &str, level: usize) {
-    syscall::log(text.as_ptr(), text.len(), level);
+    unsafe { syscall::log(text.as_ptr(), text.len(), level) }
 }
 
 #[panic_handler]

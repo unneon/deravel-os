@@ -6,9 +6,10 @@ use crate::sbi;
 use crate::sbi::{ResetReason, ResetType};
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
+use alloc::string::String;
 use core::marker::PhantomData;
-use deravel_types::capability::{CAPABILITIES_START, Capability};
-use deravel_types::drvli::ProcessTag;
+use deravel_types::capability::{CAPABILITIES_START, Capability, CapabilityCertificate};
+use deravel_types::drvli::{CapabilityContainer, ProcessTag};
 use deravel_types::{INPUTS_ADDRESS, ProcessId, ProcessInputs};
 use riscv::register::satp::{Mode, Satp};
 
@@ -20,7 +21,9 @@ pub macro reserve_process($tag:ident, $env:literal) {{
 
 #[repr(C, align(4096))]
 #[derive(Clone, Copy)]
-pub struct CapabilityPage([Capability; PAGE_SIZE / size_of::<Capability>()]);
+pub struct CapabilityPage(
+    pub [CapabilityCertificate; PAGE_SIZE / size_of::<CapabilityCertificate>()],
+);
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ProcessState {
@@ -39,7 +42,10 @@ pub struct Process {
     pub pc: usize,
     pub page_table: *const PageTable,
     pub heap_pages_allocated: usize,
-    pub messages: Option<Box<VecDeque<(Box<[u8]>, usize)>>>,
+    pub messages: Option<Box<VecDeque<(Capability, usize, String, ProcessId)>>>,
+    #[allow(clippy::box_collection)]
+    pub reply: Option<Box<String>>,
+    pub currently_serving: Option<ProcessId>,
 }
 
 pub struct ProcessReservation<T: ProcessTag> {
@@ -63,7 +69,7 @@ unsafe extern "C" {
 pub static mut PROCESSES: [Process; PROCESS_COUNT] = unsafe { core::mem::zeroed() };
 pub static mut CURRENT_PROC: Option<usize> = None;
 pub static mut CAPABILITY_PAGES: [CapabilityPage; PROCESS_COUNT] =
-    [CapabilityPage([Capability(core::ptr::null()); PAGE_SIZE / size_of::<Capability>()]);
+    [CapabilityPage([CapabilityCertificate(0); PAGE_SIZE / size_of::<Capability>()]);
         PROCESS_COUNT];
 
 impl Process {
@@ -95,6 +101,12 @@ pub fn reserve_process<T: ProcessTag>(elf: &'static [u8]) -> ProcessReservation<
 
 pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: ProcessInputs<T>) {
     let pid = inputs.id.0;
+
+    inputs.args.for_all(|cap: Capability| unsafe {
+        CAPABILITY_PAGES[cap.certifier().0].0[cap.local_index()] =
+            CapabilityCertificate::granted(ProcessId(pid))
+    });
+
     let mut page_table = Box::new(PageTable::new());
     map_kernel_memory(&mut page_table);
     let entry_point = load_elf(elf, &mut page_table);
@@ -198,6 +210,7 @@ pub fn find_runnable_process() -> Option<usize> {
         if process.state == ProcessState::Runnable
             || (process.state == ProcessState::WaitingForMessage
                 && process.messages.as_ref().is_some_and(|q| !q.is_empty()))
+            || (process.state == ProcessState::WaitingForReply && process.reply.as_ref().is_some())
         {
             return Some(scan_index);
         }

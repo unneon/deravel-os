@@ -10,19 +10,19 @@ impl SequentialSectors {
     pub fn new() -> SequentialSectors {
         SequentialSectors {
             current: 0,
-            capacity: disk_capacity(),
+            capacity: unsafe { disk_capacity() },
         }
     }
 
     pub fn read(&mut self, buf: &mut [u8; SECTOR_SIZE]) {
         assert!(self.current < self.capacity);
-        disk_read(self.current, buf);
+        unsafe { disk_read(self.current, buf) }
         self.current += 1;
     }
 
     pub fn write(&mut self, buf: &[u8; SECTOR_SIZE]) {
         assert!(self.current < self.capacity);
-        disk_write(self.current, buf);
+        unsafe { disk_write(self.current, buf) }
         self.current += 1;
     }
 

@@ -10,6 +10,7 @@ pub mod drvli;
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct ProcessId(pub usize);
 
+#[repr(C)]
 pub struct ProcessInputs<T: ProcessTag> {
     pub id: ProcessId,
     pub args: T::Capabilities,

@@ -6,7 +6,7 @@ use deravel_types::capability::{
     CAPABILITIES_START, Capability, CapabilityCertificate, CapabilityCertificateUnpacked,
 };
 use log::trace;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Clone, Copy)]
 pub struct CallableCapability<T>(pub *const CapabilityCertificate, pub PhantomData<T>);
@@ -23,7 +23,7 @@ impl<T> core::ops::Deref for CallableCapability<T> {
     type Target = Capability;
 
     fn deref(&self) -> &Self::Target {
-        unsafe { core::mem::transmute::<&CallableCapability<_>, &Capability>(&self) }
+        unsafe { core::mem::transmute::<&CallableCapability<_>, &Capability>(self) }
     }
 }
 
@@ -42,18 +42,28 @@ impl<'de, T> Deserialize<'de> for CallableCapability<T> {
     }
 }
 
-pub fn grant_capability(grantee: ProcessId) -> Capability {
+impl<T> Serialize for CallableCapability<T> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        (self.0 as usize).serialize(serializer)
+    }
+}
+
+pub fn grant_capability<T>(grantee: ProcessId) -> CallableCapability<T> {
     let certificate = allocate_certificate();
     *certificate = CapabilityCertificate::granted(grantee);
-    let cap = Capability(certificate);
+    let cap = CallableCapability(certificate, PhantomData);
     trace!("granted {cap:?} to {grantee:?}");
     cap
 }
 
-pub fn forward_capability(cap: Capability, forwardee: Capability) -> Capability {
+pub fn forward_capability<T>(
+    cap: CallableCapability<T>,
+    forwardee: Capability,
+) -> CallableCapability<T> {
+    let cap = unsafe { core::mem::transmute::<CallableCapability<T>, Capability>(cap) };
     let certificate = allocate_certificate();
-    *certificate = CapabilityCertificate::forwarded(forwardee.certifier(), cap.into());
-    let forwarded = Capability(certificate);
+    *certificate = CapabilityCertificate::forwarded(forwardee.certifier(), cap);
+    let forwarded = CallableCapability(certificate, PhantomData);
     trace!("forwarded {cap:?} as {forwarded:?} to {forwardee:?}");
     forwarded
 }
