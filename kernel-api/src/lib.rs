@@ -21,7 +21,7 @@ use log::{Level, LevelFilter, Metadata, Record, error};
 #[macro_export]
 macro_rules! app {
     ($main:ident $name:ident) => {
-        type Args = <$name as App>::Args;
+        type Args = <$name as ProcessTag>::Args;
 
         #[unsafe(no_mangle)]
         extern "C" fn __deravel_main() -> ! {

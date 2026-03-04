@@ -11,8 +11,4 @@ use alloc::vec::Vec;
 use core::marker::PhantomData;
 use deravel_types::*;
 
-pub trait App {
-    type Args;
-}
-
 include!(concat!(env!("OUT_DIR"), "/drvli.rs"));

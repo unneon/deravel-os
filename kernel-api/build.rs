@@ -5,18 +5,12 @@ use std::str::Lines;
 struct Entity {
     name: String,
     methods: Vec<Method>,
-    details: EntityDetails,
 }
 
 struct Method {
     name: String,
     args: Vec<(String, String)>,
     return_type: Option<String>,
-}
-
-enum EntityDetails {
-    App,
-    Interface,
 }
 
 fn main() {
@@ -63,11 +57,6 @@ fn main() {
             writeln!(&mut output, ";").unwrap();
         }
         writeln!(&mut output, "}}").unwrap();
-        if matches!(&interface.details, EntityDetails::App) {
-            writeln!(&mut output, "impl App for {name_camel} {{").unwrap();
-            writeln!(&mut output, "    type Args = {name_camel}Args;").unwrap();
-            writeln!(&mut output, "}}").unwrap();
-        }
         writeln!(
             &mut output,
             "impl {name_camel}Client for Capability<{name_camel}> {{"
@@ -198,17 +187,17 @@ fn parse_interfaces(text: &str) -> Vec<Entity> {
         if let Some(line) = line.strip_prefix("app ") {
             let name_len = line.find(['(', ' ']).unwrap_or(line.len());
             let name = &line[..name_len];
-            let entity = parse_entity(name, EntityDetails::App, &mut lines);
+            let entity = parse_entity(name, &mut lines);
             parsed.push(entity);
         } else if let Some(name) = line.strip_prefix("interface ") {
-            let entity = parse_entity(name, EntityDetails::Interface, &mut lines);
+            let entity = parse_entity(name, &mut lines);
             parsed.push(entity);
         }
     }
     parsed
 }
 
-fn parse_entity(name: &str, details: EntityDetails, lines: &mut Lines) -> Entity {
+fn parse_entity(name: &str, lines: &mut Lines) -> Entity {
     let mut methods = Vec::new();
     while let Some(line) = lines.next()
         && let Some(line) = line.strip_prefix("    ")
@@ -234,7 +223,6 @@ fn parse_entity(name: &str, details: EntityDetails, lines: &mut Lines) -> Entity
     Entity {
         name: name.to_owned(),
         methods,
-        details,
     }
 }
 

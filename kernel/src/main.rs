@@ -128,46 +128,6 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters) -> ! {
                 }
             }
         }
-        // 6 => {
-        //     let capability = Capability(registers.a0 as *const CapabilityCertificate);
-        //     let method = registers.a1;
-        //     let args_ptr = registers.a2 as *const u8;
-        //     let args_len = registers.a3;
-        //     let args = unsafe { core::slice::from_raw_parts(args_ptr, args_len) };
-        //     let args = core::str::from_utf8(args).unwrap().to_owned();
-        //     let caller_name = unsafe { PROCESSES[CURRENT_PROC.unwrap()].name.unwrap() };
-        //     debug!("process {caller_name} invoked ipc {capability:?}@{method} {args}");
-        //     // let data = registers.a0 as *const u8;
-        //     // let data_len = registers.a1;
-        //     // let dest_pid = registers.a2;
-        //     // let message = unsafe { core::slice::from_raw_parts(data, data_len) };
-        //     // let dest_proc = unsafe { &mut PROCESSES[dest_pid] };
-        //     // let dest_queue = dest_proc.messages.get_or_insert_default();
-        //     // dest_queue.push_back((message.into(), unsafe { CURRENT_PROC.unwrap() }));
-        // }
-        // 7 => {
-        //     if let Some((message, sender_pid)) = unsafe {
-        //         PROCESSES[CURRENT_PROC.unwrap()]
-        //             .messages
-        //             .as_mut()
-        //             .and_then(|q| q.pop_front())
-        //     } {
-        //         let buf = registers.a0 as *mut u8;
-        //         let buf_max_len = registers.a1;
-        //         assert!(message.len() <= buf_max_len);
-        //         let buf = unsafe { core::slice::from_raw_parts_mut(buf, message.len()) };
-        //         buf.copy_from_slice(&message);
-        //         registers.a0 = message.len();
-        //         registers.a1 = sender_pid;
-        //     } else {
-        //         let proc = unsafe { &mut PROCESSES[CURRENT_PROC.unwrap()] };
-        //         proc.state = ProcessState::WaitingForMessage;
-        //         proc.registers = registers.clone();
-        //         proc.pc = user_pc;
-        //
-        //         schedule_and_switch_to_userspace();
-        //     }
-        // }
         8 => {
             let text = registers.a0 as *const u8;
             let text_len = registers.a1;
