@@ -1,28 +1,22 @@
 use crate::arch::{RiscvRegisters, switch_to_userspace_full};
 use crate::elf::load_elf;
 use crate::heap::log_heap_statistics;
-use crate::page::{PAGE_SIZE, PageAligned, PageFlags, PageTable, map_pages};
+use crate::page::{PAGE_SIZE, PageFlags, PageTable, map_pages};
 use crate::sbi;
 use crate::sbi::{ResetReason, ResetType};
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
-use alloc::vec;
-use alloc::vec::Vec;
 use core::marker::PhantomData;
-use deravel_types::capability::{CAPABILITIES_START, CallableCapability};
-use deravel_types::interfaces::ProcessTag;
+use deravel_types::capability::{CAPABILITIES_START, Capability};
+use deravel_types::drvli::ProcessTag;
 use deravel_types::{INPUTS_ADDRESS, ProcessId, ProcessInputs};
-use log::error;
 use riscv::register::satp::{Mode, Satp};
 
 pub macro reserve_process($tag:ident, $env:literal) {{
-    const ELF: PageAligned<[u8; include_bytes!(env!($env)).len()]> =
-        PageAligned(*include_bytes!(env!($env)));
-    reserve_process::<deravel_types::interfaces::$tag>(&ELF.0)
+    const ELF: crate::page::PageAligned<[u8; include_bytes!(env!($env)).len()]> =
+        crate::page::PageAligned(*include_bytes!(env!($env)));
+    reserve_process::<deravel_types::drvli::$tag>(&ELF.0)
 }}
-
-#[derive(Clone, Copy)]
-pub struct Capability(#[allow(dead_code)] usize);
 
 #[repr(C, align(4096))]
 #[derive(Clone, Copy)]
@@ -50,7 +44,8 @@ pub struct Process {
 pub struct ProcessReservation<T: ProcessTag> {
     pub id: ProcessId,
     pub elf: &'static [u8],
-    pub export: CallableCapability<T::Export>,
+    pub export: Capability,
+    pub _phantom: PhantomData<T>,
 }
 
 const PROCESS_COUNT: usize = 8;
@@ -67,7 +62,8 @@ unsafe extern "C" {
 pub static mut PROCESSES: [Process; PROCESS_COUNT] = unsafe { core::mem::zeroed() };
 pub static mut CURRENT_PROC: Option<usize> = None;
 pub static mut CAPABILITY_PAGES: [CapabilityPage; PROCESS_COUNT] =
-    [CapabilityPage([Capability(0); PAGE_SIZE / size_of::<Capability>()]); PROCESS_COUNT];
+    [CapabilityPage([Capability(core::ptr::null()); PAGE_SIZE / size_of::<Capability>()]);
+        PROCESS_COUNT];
 
 impl Process {
     pub fn satp(&self) -> Satp {
@@ -91,7 +87,8 @@ pub fn reserve_process<T: ProcessTag>(elf: &'static [u8]) -> ProcessReservation<
     ProcessReservation {
         id: ProcessId(pid),
         elf,
-        export: CallableCapability(core::ptr::null(), PhantomData),
+        export: Capability(core::ptr::null()),
+        _phantom: PhantomData,
     }
 }
 

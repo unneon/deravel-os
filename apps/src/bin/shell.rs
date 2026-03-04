@@ -3,7 +3,7 @@
 
 use deravel_kernel_api::*;
 
-fn main(caps: Capabilities) {
+fn main(_: Args) {
     let mut buf = [0; 128];
     'prompt: loop {
         print!("> ");
@@ -39,4 +39,4 @@ fn getline(buf: &mut [u8]) -> Option<&str> {
     }
 }
 
-app! { main shell shell_prelude }
+app! { main shell }

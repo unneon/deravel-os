@@ -28,27 +28,50 @@ fn main() {
     let mut output = String::new();
     for interface in &interfaces {
         let name = &interface.name;
-        writeln!(&mut output, "#[derive(Clone, Copy)]").unwrap();
-        writeln!(&mut output, "pub struct {name};").unwrap();
-        if let EntityDetails::App { implements, .. } = &interface.details {
-            writeln!(&mut output, "impl ProcessTag for {name} {{").unwrap();
-            writeln!(&mut output, "    type Capabilities = {name}ArgsRaw;").unwrap();
-            if let Some(implements) = implements {
-                writeln!(&mut output, "    type Export = {implements};").unwrap();
-            } else {
-                writeln!(&mut output, "    type Export = {name};").unwrap();
-            }
-            writeln!(&mut output, "    const NAME: &'static str = \"{name}\";").unwrap();
-            writeln!(&mut output, "}}").unwrap();
-        }
         if let EntityDetails::App { args, .. } = &interface.details {
+            writeln!(&mut output, "impl App for {name} {{").unwrap();
+            writeln!(&mut output, "    type Args = {name}Args;").unwrap();
+            writeln!(&mut output, "}}").unwrap();
             writeln!(&mut output, "#[repr(C)]").unwrap();
-            writeln!(&mut output, "pub struct {name}ArgsRaw {{").unwrap();
-            for (arg_name, _) in args {
-                writeln!(&mut output, "    pub {arg_name}: Capability,").unwrap();
+            writeln!(&mut output, "pub struct {name}Args {{").unwrap();
+            for (arg_name, arg_type) in args {
+                writeln!(
+                    &mut output,
+                    "    pub {arg_name}: CallableCapability<{arg_type}>,"
+                )
+                .unwrap();
             }
             writeln!(&mut output, "}}").unwrap();
         }
+        writeln!(&mut output, "impl CallableCapability<{name}> {{").unwrap();
+        for (method_id, method) in interface.methods.iter().enumerate() {
+            let name = &method.name;
+            write!(&mut output, "    pub fn {name}(self").unwrap();
+            for (arg_name, arg_type) in &method.args {
+                let arg_type = rust_arg_type(arg_type);
+                write!(&mut output, ", {arg_name}: {arg_type}").unwrap();
+            }
+            write!(&mut output, ")").unwrap();
+            if let Some(return_type) = &method.return_type {
+                let return_type = rust_ret_type(return_type);
+                write!(&mut output, " -> {return_type}").unwrap();
+            }
+            writeln!(&mut output, " {{").unwrap();
+            writeln!(&mut output, "        let data = serde_json::to_vec(&(").unwrap();
+            for (arg_name, _) in &method.args {
+                writeln!(&mut output, "            {arg_name},",).unwrap();
+            }
+            writeln!(&mut output, "        )).unwrap();").unwrap();
+            writeln!(&mut output, "        let mut buf = [0u8; 4096];").unwrap();
+            writeln!(&mut output, "        let result_len = unsafe {{ ipc_call(Capability(self.0), {method_id}, data.as_ptr(), data.len(), buf.as_mut_ptr(), buf.len()) }};").unwrap();
+            writeln!(
+                &mut output,
+                "        serde_json::from_slice(&buf[..result_len]).unwrap()"
+            )
+            .unwrap();
+            writeln!(&mut output, "    }}").unwrap();
+        }
+        writeln!(&mut output, "}}").unwrap();
     }
     std::fs::write(
         format!("{}/drvli.rs", std::env::var("OUT_DIR").unwrap()),
@@ -57,10 +80,18 @@ fn main() {
     .unwrap();
 }
 
-fn rust_type(type_: &str) -> &str {
+fn rust_arg_type(type_: &str) -> &str {
     match type_ {
         "text" => "&str",
         "bytes" => "&[u8]",
+        _ => "Capability",
+    }
+}
+
+fn rust_ret_type(type_: &str) -> &str {
+    match type_ {
+        "text" => "String",
+        "bytes" => "Vec<u8>",
         _ => "Capability",
     }
 }

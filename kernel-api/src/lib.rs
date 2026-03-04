@@ -3,8 +3,11 @@
 #![feature(pointer_is_aligned_to)]
 #![no_std]
 
+extern crate alloc;
+
 mod capability;
-mod syscall;
+pub mod drvli;
+pub mod syscall;
 
 pub use capability::*;
 pub use deravel_types;
@@ -20,16 +23,21 @@ use serde::de::DeserializeOwned;
 
 #[macro_export]
 macro_rules! app {
-    ($main:ident $name:ident $name_prelude:ident) => {
-        use deravel_types::interfaces::$name_prelude::Capabilities;
+    ($main:ident $name:ident) => {
+        type Args = <deravel_types::drvli::$name as deravel_kernel_api::drvli::App>::Args;
 
         #[unsafe(no_mangle)]
         extern "C" fn __deravel_main() -> ! {
             $main(unsafe {
-                (deravel_types::INPUTS_ADDRESS
-                    as *const deravel_types::ProcessInputs<deravel_types::interfaces::$name>)
-                    .read()
-                    .args
+                core::mem::transmute::<
+                    <deravel_types::drvli::$name as deravel_types::drvli::ProcessTag>::Capabilities,
+                    Args,
+                >(
+                    (deravel_types::INPUTS_ADDRESS
+                        as *const deravel_types::ProcessInputs<deravel_types::drvli::$name>)
+                        .read()
+                        .args,
+                )
             });
             deravel_kernel_api::exit()
         }
@@ -147,22 +155,10 @@ fn initialize_log() {
     log::set_max_level(LevelFilter::Trace);
 }
 
-pub fn ipc_send<T: Serialize + ?Sized>(data: &T, dest: ProcessId) {
-    let buf = serde_json::to_vec(data).unwrap();
-    syscall::ipc_send(buf.as_ptr(), buf.len(), dest.0)
-}
-
-pub fn ipc_recv<T: DeserializeOwned>() -> (T, ProcessId) {
-    let mut buf = [0; 1024];
-    let (byte_count, sender_pid) = syscall::ipc_recv(buf.as_mut_ptr(), buf.len());
-    let value = serde_json::from_slice(&buf[..byte_count]).unwrap();
-    (value, sender_pid)
-}
-
 pub fn current_pid() -> ProcessId {
     unsafe {
         (deravel_types::INPUTS_ADDRESS
-            as *const deravel_types::ProcessInputs<deravel_types::interfaces::hello>)
+            as *const deravel_types::ProcessInputs<deravel_types::drvli::hello>)
             .read()
             .id
     }
@@ -181,5 +177,5 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     let location = info.location().unwrap();
     let message = info.message();
     error!("user application panicked at {location}: {message}");
-    syscall::exit()
+    exit()
 }

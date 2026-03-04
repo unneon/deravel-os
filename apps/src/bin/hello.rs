@@ -3,9 +3,9 @@
 
 use deravel_kernel_api::*;
 
-fn main(caps: Capabilities) {
+fn main(_: Args) {
     println!("Hello, world!");
     println!("Coming from process {:?}.", current_pid());
 }
 
-app! { main hello hello_prelude }
+app! { main hello }

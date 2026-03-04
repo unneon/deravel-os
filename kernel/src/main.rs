@@ -24,15 +24,16 @@ use crate::arch::{RiscvRegisters, initialize_trap_handler, switch_to_userspace_r
 use crate::log::{initialize_log, log_userspace};
 use crate::page::{PAGE_SIZE, PageFlags, PageTable, map_pages};
 use crate::process::{
-    CURRENT_PROC, PROCESSES, ProcessState, create_process, reserve_process,
-    schedule_and_switch_to_userspace,
+    CURRENT_PROC, PROCESSES, ProcessState, reserve_process, schedule_and_switch_to_userspace,
 };
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use crate::virtio::initialize_all_virtio_mmio;
 use crate::virtio::virtio_blk::VirtioBlk;
-use ::log::{Level, error};
+use ::log::{Level, debug, error};
+use alloc::borrow::ToOwned;
 use alloc::vec;
 use core::panic::PanicInfo;
+use deravel_types::capability::{Capability, CapabilityCertificate};
 use fdt::Fdt;
 use riscv::interrupt::Trap;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
@@ -54,16 +55,16 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     let ipc_a = reserve_process!(ipc_a, "CARGO_BIN_FILE_DERAVEL_APPS_ipc-a");
     let ipc_b = reserve_process!(ipc_b, "CARGO_BIN_FILE_DERAVEL_APPS_ipc-b");
     let ipc_c = reserve_process!(ipc_c, "CARGO_BIN_FILE_DERAVEL_APPS_ipc-c");
-    let shell = reserve_process!(shell, "CARGO_BIN_FILE_DERAVEL_APPS_shell");
+    // let shell = reserve_process!(shell, "CARGO_BIN_FILE_DERAVEL_APPS_shell");
     // hello.spawn(deravel_types::interfaces::hello_prelude::Capabilities {});
     // shell.spawn(deravel_types::interfaces::shell_prelude::Capabilities {});
-    ipc_a.spawn(deravel_types::interfaces::ipc_a_prelude::Capabilities {
+    ipc_a.spawn(deravel_types::drvli::ipc_aArgsRaw {
         fs: fs_tar.export,
         b: ipc_b.export,
     });
-    ipc_b.spawn(deravel_types::interfaces::ipc_b_prelude::Capabilities { c: ipc_c.export });
-    ipc_c.spawn(deravel_types::interfaces::ipc_c_prelude::Capabilities {});
-    fs_tar.spawn(deravel_types::interfaces::tar_fs_prelude::Capabilities {});
+    ipc_b.spawn(deravel_types::drvli::ipc_bArgsRaw { c: ipc_c.export });
+    ipc_c.spawn(deravel_types::drvli::ipc_cArgsRaw {});
+    fs_tar.spawn(deravel_types::drvli::tar_fsArgsRaw {});
 
     schedule_and_switch_to_userspace();
 }
@@ -92,7 +93,7 @@ fn handle_trap(registers: &mut RiscvRegisters) -> ! {
 }
 
 fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters) -> ! {
-    match registers.a3 {
+    match registers.a6 {
         1 => {
             unsafe { PROCESSES[CURRENT_PROC.unwrap()].state = ProcessState::Finished }
             schedule_and_switch_to_userspace();
@@ -127,13 +128,21 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters) -> ! {
             }
         }
         6 => {
-            let data = registers.a0 as *const u8;
-            let data_len = registers.a1;
-            let dest_pid = registers.a2;
-            let message = unsafe { core::slice::from_raw_parts(data, data_len) };
-            let dest_proc = unsafe { &mut PROCESSES[dest_pid] };
-            let dest_queue = dest_proc.messages.get_or_insert_default();
-            dest_queue.push_back((message.into(), unsafe { CURRENT_PROC.unwrap() }));
+            let capability = Capability(registers.a0 as *const CapabilityCertificate);
+            let method = registers.a1;
+            let args_ptr = registers.a2 as *const u8;
+            let args_len = registers.a3;
+            let args = unsafe { core::slice::from_raw_parts(args_ptr, args_len) };
+            let args = core::str::from_utf8(args).unwrap().to_owned();
+            let caller_name = unsafe { PROCESSES[CURRENT_PROC.unwrap()].name.unwrap() };
+            debug!("process {caller_name} invoked ipc {capability:?}@{method} {args}");
+            // let data = registers.a0 as *const u8;
+            // let data_len = registers.a1;
+            // let dest_pid = registers.a2;
+            // let message = unsafe { core::slice::from_raw_parts(data, data_len) };
+            // let dest_proc = unsafe { &mut PROCESSES[dest_pid] };
+            // let dest_queue = dest_proc.messages.get_or_insert_default();
+            // dest_queue.push_back((message.into(), unsafe { CURRENT_PROC.unwrap() }));
         }
         7 => {
             if let Some((message, sender_pid)) = unsafe {
@@ -225,7 +234,7 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters) -> ! {
             unsafe { PROCESSES[CURRENT_PROC.unwrap()].heap_pages_allocated += page_count }
             registers.a0 = virtual_addr;
         }
-        _ => panic!("invalid syscall number {}", registers.a3),
+        _ => panic!("invalid syscall number {}", registers.a6),
     }
 
     unsafe { riscv::register::sepc::write(user_pc + 4) };

@@ -1,13 +1,46 @@
 use crate::current_pid;
+use core::marker::PhantomData;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use deravel_types::ProcessId;
 use deravel_types::capability::{
-    CAPABILITIES_START, CallableCapability, Capability, CapabilityCertificate,
-    CapabilityCertificateUnpacked,
+    CAPABILITIES_START, Capability, CapabilityCertificate, CapabilityCertificateUnpacked,
 };
 use log::trace;
+use serde::{Deserialize, Deserializer};
+
+#[derive(Clone, Copy)]
+pub struct CallableCapability<T>(pub *const CapabilityCertificate, pub PhantomData<T>);
 
 static CAPABILITIES_ALLOCATED: AtomicUsize = AtomicUsize::new(0);
+
+impl<T> From<CallableCapability<T>> for Capability {
+    fn from(capability: CallableCapability<T>) -> Self {
+        unsafe { core::mem::transmute(capability) }
+    }
+}
+
+impl<T> core::ops::Deref for CallableCapability<T> {
+    type Target = Capability;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute::<&CallableCapability<_>, &Capability>(&self) }
+    }
+}
+
+impl<T> core::fmt::Debug for CallableCapability<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{:#x}", self.0 as usize)
+    }
+}
+
+impl<'de, T> Deserialize<'de> for CallableCapability<T> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(CallableCapability(
+            usize::deserialize(deserializer)? as *const CapabilityCertificate,
+            PhantomData,
+        ))
+    }
+}
 
 pub fn grant_capability(grantee: ProcessId) -> Capability {
     let certificate = allocate_certificate();

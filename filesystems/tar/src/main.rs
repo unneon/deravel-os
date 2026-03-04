@@ -57,7 +57,7 @@ union TarHeaderBuf {
 
 const SECTOR_SIZE: usize = 512;
 
-fn main(caps: Capabilities) {
+fn main(args: Args) {
     let mut files = deserialize_archive();
 
     let mut capabilities = vec![CapabilityData {
@@ -129,4 +129,4 @@ fn concat_path<'a>(prefix: &'a str, suffix: &'a str) -> Cow<'a, str> {
     }
 }
 
-app! { main tar_fs tar_fs_prelude }
+app! { main tar_fs }
