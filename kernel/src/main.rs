@@ -24,7 +24,8 @@ use crate::arch::{RiscvRegisters, initialize_trap_handler, switch_to_userspace_r
 use crate::log::{initialize_log, log_userspace};
 use crate::page::{PAGE_SIZE, PageFlags, PageTable, map_pages};
 use crate::process::{
-    CURRENT_PROC, PROCESSES, ProcessState, create_process, schedule_and_switch_to_userspace,
+    CURRENT_PROC, PROCESSES, ProcessState, create_process, reserve_process,
+    schedule_and_switch_to_userspace,
 };
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use crate::virtio::initialize_all_virtio_mmio;
@@ -48,11 +49,12 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     log_sbi_metadata();
     initialize_all_virtio_mmio(&device_tree);
 
-    create_process!("fs-tar", "CARGO_BIN_FILE_DERAVEL_FILESYSTEM_TAR");
-    // create_process!("hello", "CARGO_BIN_FILE_DERAVEL_APPS_hello");
-    create_process!("ipc-a", "CARGO_BIN_FILE_DERAVEL_APPS_ipc-a");
-    create_process!("ipc-b", "CARGO_BIN_FILE_DERAVEL_APPS_ipc-b");
-    create_process!("ipc-c", "CARGO_BIN_FILE_DERAVEL_APPS_ipc-c");
+    // create_process!("fs-tar", "CARGO_BIN_FILE_DERAVEL_FILESYSTEM_TAR");
+    let hello = reserve_process!(hello, "CARGO_BIN_FILE_DERAVEL_APPS_hello");
+    hello.spawn();
+    // create_process!("ipc-a", "CARGO_BIN_FILE_DERAVEL_APPS_ipc-a");
+    // create_process!("ipc-b", "CARGO_BIN_FILE_DERAVEL_APPS_ipc-b");
+    // create_process!("ipc-c", "CARGO_BIN_FILE_DERAVEL_APPS_ipc-c");
     // create_process!("shell", "CARGO_BIN_FILE_DERAVEL_APPS_shell");
 
     schedule_and_switch_to_userspace();

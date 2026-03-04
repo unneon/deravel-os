@@ -48,6 +48,7 @@ version = "0.0.0"
 dependencies = [
  "deravel-apps",
  "deravel-filesystem-tar",
+ "deravel-types",
  "elf",
  "fdt",
  "log",

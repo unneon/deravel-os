@@ -6,13 +6,19 @@ use crate::sbi;
 use crate::sbi::{ResetReason, ResetType};
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
+use alloc::vec;
+use alloc::vec::Vec;
+use core::marker::PhantomData;
+use deravel_types::capability::CAPABILITIES_START;
+use deravel_types::interfaces::ProcessTag;
+use deravel_types::{INPUTS_ADDRESS, ProcessId, ProcessInputs};
 use log::error;
 use riscv::register::satp::{Mode, Satp};
 
-pub macro create_process($name:literal, $env:literal) {{
+pub macro reserve_process($tag:ident, $env:literal) {{
     const ELF: PageAligned<[u8; include_bytes!(env!($env)).len()]> =
         PageAligned(*include_bytes!(env!($env)));
-    create_process($name, &ELF.0)
+    reserve_process::<deravel_types::interfaces::$tag>(&ELF.0)
 }}
 
 #[derive(Clone, Copy)]
@@ -28,6 +34,7 @@ pub enum ProcessState {
     Runnable,
     Finished,
     WaitingForMessage,
+    Reserved,
 }
 
 pub struct Process {
@@ -40,7 +47,12 @@ pub struct Process {
     pub messages: Option<Box<VecDeque<(Box<[u8]>, usize)>>>,
 }
 
-const CAPABILITY_START: usize = 0x2000000;
+pub struct ProcessReservation<T: ProcessTag> {
+    pub id: ProcessId,
+    pub elf: &'static [u8],
+    pub _phantom: PhantomData<T>,
+}
+
 const PROCESS_COUNT: usize = 8;
 
 unsafe extern "C" {
@@ -66,7 +78,22 @@ impl Process {
     }
 }
 
-pub fn create_process(name: &'static str, elf: &[u8]) {
+impl<T: ProcessTag> ProcessReservation<T> {
+    pub fn spawn(self) {}
+}
+
+pub fn reserve_process<T: ProcessTag>(elf: &'static [u8]) -> ProcessReservation<T> {
+    let pid = find_free_process_slot().expect("exhausted all process slots");
+    let proc = unsafe { &mut PROCESSES[pid] };
+    proc.state = ProcessState::Reserved;
+    ProcessReservation {
+        id: ProcessId(pid),
+        elf,
+        _phantom: PhantomData,
+    }
+}
+
+pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: ProcessInputs<T>) {
     let Some(pid) = find_free_process_slot() else {
         error!("exhausted all process slots");
         return;
@@ -76,11 +103,11 @@ pub fn create_process(name: &'static str, elf: &[u8]) {
     map_kernel_memory(&mut page_table);
     let entry_point = load_elf(elf, &mut page_table);
     map_capability_memory(&mut page_table, pid);
+    map_inputs_memory(&mut page_table, inputs);
 
     let proc = unsafe { &mut PROCESSES[pid] };
     proc.name = Some(name);
     proc.state = ProcessState::Runnable;
-    proc.registers.a0 = pid;
     proc.pc = entry_point;
     proc.page_table = Box::leak(page_table);
 }
@@ -119,7 +146,7 @@ fn map_kernel_memory_section(
 }
 
 fn map_capability_memory(pages: &mut PageTable, pid: usize) {
-    let pre_v = CAPABILITY_START;
+    let pre_v = CAPABILITIES_START;
     let pre_p = &raw const CAPABILITY_PAGES as usize;
     let own_v = pre_v + pid * PAGE_SIZE;
     let own_p = pre_p + pid * PAGE_SIZE;
@@ -129,6 +156,17 @@ fn map_capability_memory(pages: &mut PageTable, pid: usize) {
     map_pages(pages, pre_v, pre_p, PageFlags::readonly().user(), pid);
     map_pages(pages, own_v, own_p, PageFlags::readwrite().user(), 1);
     map_pages(pages, suf_v, suf_p, PageFlags::readonly().user(), suf_l);
+}
+
+fn map_inputs_memory<T: ProcessTag>(pages: &mut PageTable, inputs: ProcessInputs<T>) {
+    let page = Box::leak(Box::new(inputs));
+    map_pages(
+        pages,
+        INPUTS_ADDRESS,
+        page as *mut _ as usize,
+        PageFlags::readonly(),
+        1,
+    );
 }
 
 fn find_free_process_slot() -> Option<usize> {

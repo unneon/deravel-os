@@ -30,6 +30,15 @@ fn main() {
         let name = &interface.name;
         writeln!(&mut output, "#[derive(Clone, Copy)]").unwrap();
         writeln!(&mut output, "pub struct {name};").unwrap();
+        if matches!(&interface.details, EntityDetails::App { .. }) {
+            writeln!(&mut output, "impl ProcessTag for {name} {{").unwrap();
+            writeln!(
+                &mut output,
+                "    type Capabilities = {name}_prelude::Capabilities;"
+            )
+            .unwrap();
+            writeln!(&mut output, "}}").unwrap();
+        }
         if let EntityDetails::App { args, .. } = &interface.details {
             writeln!(&mut output, "pub mod {name}_prelude {{").unwrap();
             writeln!(&mut output, "    pub struct Capabilities {{").unwrap();
