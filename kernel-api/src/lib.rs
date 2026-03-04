@@ -10,28 +10,22 @@ pub mod drvli;
 pub mod syscall;
 
 pub use capability::*;
-pub use deravel_types;
-pub use deravel_types::capability::RawCapability;
+pub use deravel_types::*;
+pub use drvli::*;
 pub use syscall::{disk_capacity, disk_read, disk_write, getchar, putchar};
 
 use core::alloc::{GlobalAlloc, Layout};
 use core::fmt::Write;
-use deravel_types::ProcessId;
 use log::{Level, LevelFilter, Metadata, Record, error};
 
 #[macro_export]
 macro_rules! app {
     ($main:ident $name:ident) => {
-        type Args = <deravel_types::drvli::$name as deravel_kernel_api::drvli::App>::Args;
+        type Args = <$name as App>::Args;
 
         #[unsafe(no_mangle)]
         extern "C" fn __deravel_main() -> ! {
-            $main(unsafe {
-                (deravel_types::INPUTS_ADDRESS
-                    as *const deravel_types::ProcessInputs<deravel_types::drvli::$name>)
-                    .read()
-                    .args
-            });
+            $main(unsafe { (INPUTS_ADDRESS as *const ProcessInputs<$name>).read().args });
             deravel_kernel_api::exit()
         }
     };
@@ -148,12 +142,7 @@ pub fn exit() -> ! {
 }
 
 pub fn current_pid() -> ProcessId {
-    unsafe {
-        (deravel_types::INPUTS_ADDRESS
-            as *const deravel_types::ProcessInputs<deravel_types::drvli::Hello>)
-            .read()
-            .id
-    }
+    unsafe { (INPUTS_ADDRESS as *const ProcessInputs<Hello>).read().id }
 }
 
 pub fn system_log(text: &str, level: usize) {

@@ -48,7 +48,7 @@ fn main() {
             let method_name = &method.name;
             write!(
                 &mut output,
-                "    fn {method_name}(&mut self, cap: RawCapability, sender: ProcessId"
+                "    fn {method_name}(&mut self, cap: Capability<{name_camel}>, sender: ProcessId"
             )
             .unwrap();
             for (arg_name, arg_type) in &method.args {
@@ -109,6 +109,11 @@ fn main() {
         writeln!(&mut output, "    loop {{").unwrap();
         writeln!(&mut output, "        let mut buf = [0u8; 4096];").unwrap();
         writeln!(&mut output, "        let (cap, method, args_len, sender) = unsafe {{ ipc_receive(buf.as_mut_ptr(), buf.len()) }};").unwrap();
+        writeln!(
+            &mut output,
+            "        let cap = Capability::<{name_camel}>(cap, PhantomData);"
+        )
+        .unwrap();
         writeln!(&mut output, "        match method {{").unwrap();
         for (method_id, method) in interface.methods.iter().enumerate() {
             let method_name = &method.name;

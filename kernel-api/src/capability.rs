@@ -1,10 +1,9 @@
 use crate::current_pid;
 use core::marker::PhantomData;
 use core::sync::atomic::{AtomicUsize, Ordering};
-use deravel_types::ProcessId;
-use deravel_types::capability::{
+use deravel_types::{
     CAPABILITIES_START, Capability, CapabilityCertificate, CapabilityCertificateUnpacked,
-    RawCapability,
+    ProcessId, RawCapability,
 };
 use log::trace;
 

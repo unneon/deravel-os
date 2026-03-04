@@ -1,7 +1,6 @@
 #![no_std]
 #![no_main]
 
-use deravel_kernel_api::drvli::{FilesystemClient, IpcBClient};
 use deravel_kernel_api::*;
 
 fn main(Args { fs, b }: Args) {

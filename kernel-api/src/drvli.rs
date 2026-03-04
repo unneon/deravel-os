@@ -8,9 +8,8 @@
 use crate::syscall::{ipc_call, ipc_receive, ipc_reply};
 use alloc::string::String;
 use alloc::vec::Vec;
-use deravel_types::ProcessId;
-use deravel_types::capability::{Capability, RawCapability};
-use deravel_types::drvli::*;
+use core::marker::PhantomData;
+use deravel_types::*;
 
 pub trait App {
     type Args;

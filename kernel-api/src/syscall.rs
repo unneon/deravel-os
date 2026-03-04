@@ -2,8 +2,7 @@
 
 use core::arch::asm;
 use core::mem::transmute_copy;
-use deravel_types::ProcessId;
-use deravel_types::capability::RawCapability;
+use deravel_types::{ProcessId, RawCapability};
 
 macro syscalls(
     $(#[no = $no:literal] pub fn $name:ident(

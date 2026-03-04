@@ -8,17 +8,13 @@ use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::string::String;
 use core::marker::PhantomData;
-use deravel_types::capability::{
-    CAPABILITIES_START, Capability, CapabilityCertificate, RawCapability,
-};
-use deravel_types::drvli::{ProcessArgs, ProcessTag};
-use deravel_types::{INPUTS_ADDRESS, ProcessId, ProcessInputs};
+use deravel_types::*;
 use riscv::register::satp::{Mode, Satp};
 
 pub macro reserve_process($tag:ident, $env:literal) {{
     const ELF: crate::page::PageAligned<[u8; include_bytes!(env!($env)).len()]> =
         crate::page::PageAligned(*include_bytes!(env!($env)));
-    reserve_process::<deravel_types::drvli::$tag>(&ELF.0)
+    reserve_process::<$tag>(&ELF.0)
 }}
 
 #[repr(C, align(4096))]

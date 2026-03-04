@@ -14,11 +14,7 @@ use alloc::borrow::{Cow, ToOwned};
 use alloc::string::String;
 use alloc::vec::Vec;
 use alloc::{format, vec};
-use deravel_kernel_api::deravel_types::capability::Capability;
-use deravel_kernel_api::drvli::{FilesystemServer, ipc_serve_filesystem};
 use deravel_kernel_api::*;
-use deravel_types::ProcessId;
-use deravel_types::drvli::Filesystem;
 use log::error;
 
 #[derive(Debug)]
@@ -67,7 +63,7 @@ union TarHeaderBuf {
 const SECTOR_SIZE: usize = 512;
 
 impl FilesystemServer for Server {
-    fn read(&mut self, cap: RawCapability, _: ProcessId, path_suffix: &str) -> Vec<u8> {
+    fn read(&mut self, cap: Capability<Filesystem>, _: ProcessId, path_suffix: &str) -> Vec<u8> {
         let cap = &self.capabilities[cap.local_index()];
         let path_prefix = &cap.path;
         let path = concat_path(path_prefix, path_suffix);
@@ -78,7 +74,7 @@ impl FilesystemServer for Server {
         file.data[..file.size].to_owned()
     }
 
-    fn write(&mut self, cap: RawCapability, _: ProcessId, path_suffix: &str, data: &[u8]) {
+    fn write(&mut self, cap: Capability<Filesystem>, _: ProcessId, path_suffix: &str, data: &[u8]) {
         let cap = &self.capabilities[cap.local_index()];
         let path_prefix = &cap.path;
         let path = concat_path(path_prefix, path_suffix);
@@ -99,7 +95,7 @@ impl FilesystemServer for Server {
 
     fn subcapability(
         &mut self,
-        cap: RawCapability,
+        cap: Capability<Filesystem>,
         sender: ProcessId,
         path_suffix: &str,
     ) -> Capability<Filesystem> {

@@ -1,10 +1,11 @@
 #![feature(pointer_is_aligned_to)]
 #![no_std]
 
-use crate::drvli::ProcessTag;
+mod capability;
+mod drvli;
 
-pub mod capability;
-pub mod drvli;
+pub use capability::*;
+pub use drvli::*;
 
 #[repr(transparent)]
 #[derive(Clone, Copy, Eq, PartialEq)]

@@ -34,11 +34,7 @@ use ::log::{Level, error};
 use alloc::borrow::ToOwned;
 use alloc::vec;
 use core::panic::PanicInfo;
-use deravel_types::ProcessId;
-use deravel_types::capability::{
-    CapabilityCertificate, CapabilityCertificateUnpacked, RawCapability,
-};
-use deravel_types::drvli::*;
+use deravel_types::*;
 use fdt::Fdt;
 use riscv::interrupt::Trap;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
@@ -56,13 +52,11 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     initialize_all_virtio_mmio(&device_tree);
 
     let fs_tar = reserve_process!(TarFs, "CARGO_BIN_FILE_DERAVEL_FILESYSTEM_TAR");
-    let hello = reserve_process!(Hello, "CARGO_BIN_FILE_DERAVEL_APPS_hello");
     let ipc_a = reserve_process!(IpcA, "CARGO_BIN_FILE_DERAVEL_APPS_ipc-a");
     let ipc_b = reserve_process!(IpcB, "CARGO_BIN_FILE_DERAVEL_APPS_ipc-b");
     let ipc_c = reserve_process!(IpcC, "CARGO_BIN_FILE_DERAVEL_APPS_ipc-c");
-    let shell = reserve_process!(Shell, "CARGO_BIN_FILE_DERAVEL_APPS_shell");
-    hello.spawn(HelloArgs {});
-    shell.spawn(ShellArgs {});
+    // let hello = reserve_process!(Hello, "CARGO_BIN_FILE_DERAVEL_APPS_hello");
+    // let shell = reserve_process!(Shell, "CARGO_BIN_FILE_DERAVEL_APPS_shell");
     ipc_a.spawn(IpcAArgs {
         fs: fs_tar.export,
         b: ipc_b.export,
@@ -70,6 +64,8 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     ipc_b.spawn(IpcBArgs { c: ipc_c.export });
     ipc_c.spawn(IpcCArgs {});
     fs_tar.spawn(TarFsArgs {});
+    // hello.spawn(HelloArgs {});
+    // shell.spawn(ShellArgs {});
 
     schedule_and_switch_to_userspace();
 }
