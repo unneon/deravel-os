@@ -2,13 +2,14 @@ use crate::ProcessId;
 use core::marker::PhantomData;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 #[repr(transparent)]
+#[serde(transparent)]
 pub struct Capability<T>(pub RawCapability, pub PhantomData<T>);
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
-pub struct CapabilityCertificate(pub usize);
+pub struct CapabilityCertificate(usize);
 
 #[derive(Debug)]
 pub enum CapabilityCertificateUnpacked {
@@ -57,6 +58,10 @@ impl RawCapability {
 }
 
 impl CapabilityCertificate {
+    pub const fn empty() -> CapabilityCertificate {
+        CapabilityCertificate(0)
+    }
+
     pub fn granted(grantee: ProcessId) -> CapabilityCertificate {
         assert!(grantee.0 < 8);
         CapabilityCertificate(grantee.0)
@@ -108,23 +113,11 @@ impl core::fmt::Debug for RawCapability {
     }
 }
 
-impl<'de, T> Deserialize<'de> for Capability<T> {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Deserialize::deserialize(deserializer).map(|cap| Self(cap, PhantomData))
-    }
-}
-
 impl<'de> Deserialize<'de> for RawCapability {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         Ok(RawCapability(
             usize::deserialize(deserializer)? as *const CapabilityCertificate
         ))
-    }
-}
-
-impl<T> Serialize for Capability<T> {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        Serialize::serialize(&self.0, serializer)
     }
 }
 

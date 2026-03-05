@@ -59,9 +59,13 @@ unsafe extern "C" {
 
 pub static mut PROCESSES: [Process; PROCESS_COUNT] = unsafe { core::mem::zeroed() };
 pub static mut CURRENT_PROC: Option<usize> = None;
-pub static mut CAPABILITY_PAGES: [CapabilityPage; PROCESS_COUNT] =
-    [CapabilityPage([CapabilityCertificate(0); PAGE_SIZE / size_of::<RawCapability>()]);
-        PROCESS_COUNT];
+pub static mut CAPABILITY_PAGES: [CapabilityPage; PROCESS_COUNT] = [CapabilityPage::empty(); _];
+
+impl CapabilityPage {
+    const fn empty() -> CapabilityPage {
+        CapabilityPage([CapabilityCertificate::empty(); _])
+    }
+}
 
 impl Process {
     pub fn satp(&self) -> Satp {

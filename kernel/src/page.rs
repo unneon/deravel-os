@@ -42,7 +42,7 @@ impl PageFlags {
 
 impl PageTable {
     pub const fn new() -> PageTable {
-        PageTable([PageTableEntry(0); PAGE_SIZE / size_of::<PageTableEntry>()])
+        PageTable([PageTableEntry(0); _])
     }
 
     unsafe fn get_or_create_indirect(&mut self, vpn_segment: usize) -> &'static mut PageTable {
