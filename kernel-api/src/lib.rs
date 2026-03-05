@@ -14,6 +14,7 @@ pub use deravel_types::*;
 pub use drvli::*;
 pub use syscall::{disk_capacity, disk_read, disk_write, getchar, putchar};
 
+use alloc::string::String;
 use core::alloc::{GlobalAlloc, Layout};
 use core::fmt::Write;
 use log::{Level, LevelFilter, Metadata, Record, error};
@@ -48,14 +49,7 @@ pub struct KernelConsole;
 
 struct PageAllocator;
 
-struct StackString {
-    length: usize,
-    buffer: [u8; 1024],
-}
-
-struct SystemLogger;
-
-const PAGE_SIZE: usize = 4096;
+struct KernelLogger;
 
 unsafe extern "C" {
     static mut __deravel_stack_top: u8;
@@ -73,15 +67,6 @@ impl Write for KernelConsole {
     }
 }
 
-impl Write for StackString {
-    fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        assert!(s.len() <= self.buffer.len() - self.length);
-        self.buffer[self.length..self.length + s.len()].copy_from_slice(s.as_bytes());
-        self.length += s.len();
-        Ok(())
-    }
-}
-
 unsafe impl GlobalAlloc for PageAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         assert!(layout.align() <= PAGE_SIZE);
@@ -92,16 +77,13 @@ unsafe impl GlobalAlloc for PageAllocator {
     unsafe fn dealloc(&self, _: *mut u8, _: Layout) {}
 }
 
-impl log::Log for SystemLogger {
+impl log::Log for KernelLogger {
     fn enabled(&self, _: &Metadata) -> bool {
         true
     }
 
     fn log(&self, record: &Record) {
-        let mut text = StackString {
-            length: 0,
-            buffer: [0; _],
-        };
+        let mut text = String::new();
         write!(text, "{}", record.args()).unwrap();
         let level = match record.level() {
             Level::Error => 0,
@@ -110,10 +92,7 @@ impl log::Log for SystemLogger {
             Level::Debug => 3,
             Level::Trace => 4,
         };
-        system_log(
-            core::str::from_utf8(&text.buffer[..text.length]).unwrap(),
-            level,
-        )
+        kernel_log(&text, level)
     }
 
     fn flush(&self) {}
@@ -132,8 +111,12 @@ unsafe extern "C" fn __deravel_entry() -> ! {
     )
 }
 
+fn current_pid() -> ProcessId {
+    unsafe { (INPUTS_ADDRESS as *const ProcessInputs<Hello>).read().id }
+}
+
 fn initialize_log() {
-    log::set_logger(&SystemLogger).unwrap();
+    log::set_logger(&KernelLogger).unwrap();
     log::set_max_level(LevelFilter::Trace);
 }
 
@@ -141,11 +124,7 @@ pub fn exit() -> ! {
     unsafe { syscall::exit() }
 }
 
-pub fn current_pid() -> ProcessId {
-    unsafe { (INPUTS_ADDRESS as *const ProcessInputs<Hello>).read().id }
-}
-
-pub fn system_log(text: &str, level: usize) {
+pub fn kernel_log(text: &str, level: usize) {
     unsafe { syscall::log(text.as_ptr(), text.len(), level) }
 }
 

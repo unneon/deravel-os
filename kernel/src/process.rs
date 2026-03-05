@@ -1,7 +1,7 @@
 use crate::arch::{RiscvRegisters, switch_to_userspace_full};
 use crate::elf::load_elf;
 use crate::heap::log_heap_statistics;
-use crate::page::{PAGE_SIZE, PageFlags, PageTable, map_pages};
+use crate::page::{PageFlags, PageTable, map_pages};
 use crate::sbi;
 use crate::sbi::{ResetReason, ResetType};
 use alloc::boxed::Box;

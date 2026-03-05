@@ -1,9 +1,9 @@
-use crate::page::PAGE_SIZE;
 use crate::virtio::queue::{QUEUE_SIZE, Queue};
 use crate::virtio::registers::{
     Mmio, Registers, STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, features, mmio,
 };
 use core::marker::PhantomData;
+use deravel_types::PAGE_SIZE;
 use log::{debug, error};
 use smoltcp::iface::{Interface, SocketSet, SocketStorage};
 use smoltcp::phy::{DeviceCapabilities, Medium};

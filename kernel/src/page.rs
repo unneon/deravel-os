@@ -1,4 +1,5 @@
 use alloc::boxed::Box;
+use deravel_types::PAGE_SIZE;
 
 #[repr(C, align(4096))]
 pub struct PageAligned<T>(pub T);
@@ -10,8 +11,6 @@ pub struct PageTable(pub [PageTableEntry; PAGE_SIZE / size_of::<PageTableEntry>(
 
 #[derive(Clone, Copy, Default)]
 pub struct PageTableEntry(pub usize);
-
-pub const PAGE_SIZE: usize = 4096;
 
 const PAGE_V: usize = 1 << 0;
 const PAGE_R: usize = 1 << 1;

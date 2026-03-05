@@ -1,8 +1,8 @@
-use crate::page::PAGE_SIZE;
 use crate::page::PageFlags;
 use crate::{PageTable, map_pages};
 use alloc::vec;
 use alloc::vec::Vec;
+use deravel_types::PAGE_SIZE;
 use elf::ElfBytes;
 use elf::abi::{EM_RISCV, ET_EXEC, PF_R, PF_W, PF_X, PT_LOAD};
 use elf::endian::LittleEndian;

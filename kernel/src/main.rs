@@ -22,7 +22,7 @@ mod virtio;
 
 use crate::arch::{RiscvRegisters, initialize_trap_handler, switch_to_userspace_registers_only};
 use crate::log::{initialize_log, log_userspace};
-use crate::page::{PAGE_SIZE, PageFlags, PageTable, map_pages};
+use crate::page::{PageFlags, PageTable, map_pages};
 use crate::process::{
     CAPABILITY_PAGES, CURRENT_PROC, PROCESSES, ProcessState, reserve_process,
     schedule_and_switch_to_userspace,

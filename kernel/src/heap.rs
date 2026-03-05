@@ -1,6 +1,6 @@
-use crate::page::PAGE_SIZE;
 use core::alloc::{GlobalAlloc, Layout};
 use core::sync::atomic::{AtomicUsize, Ordering};
+use deravel_types::PAGE_SIZE;
 use log::info;
 
 pub struct Heap;

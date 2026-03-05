@@ -19,6 +19,8 @@ pub struct ProcessInputs<T: ProcessTag> {
 
 pub const INPUTS_ADDRESS: usize = 0x3000000;
 
+pub const PAGE_SIZE: usize = 4096;
+
 impl core::fmt::Debug for ProcessId {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}", self.0)
