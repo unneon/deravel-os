@@ -1,5 +1,5 @@
 use crate::SECTOR_SIZE;
-use deravel_kernel_api::{disk_capacity, disk_read, disk_write};
+use deravel_kernel_api::*;
 
 pub struct SequentialSectors {
     current: usize,
@@ -10,19 +10,19 @@ impl SequentialSectors {
     pub fn new() -> SequentialSectors {
         SequentialSectors {
             current: 0,
-            capacity: unsafe { disk_capacity() },
+            capacity: disk_capacity(),
         }
     }
 
     pub fn read(&mut self, buf: &mut [u8; SECTOR_SIZE]) {
         assert!(self.current < self.capacity);
-        unsafe { disk_read(self.current, buf) }
+        disk_read(self.current, buf);
         self.current += 1;
     }
 
     pub fn write(&mut self, buf: &[u8; SECTOR_SIZE]) {
         assert!(self.current < self.capacity);
-        unsafe { disk_write(self.current, buf) }
+        disk_write(self.current, buf);
         self.current += 1;
     }
 

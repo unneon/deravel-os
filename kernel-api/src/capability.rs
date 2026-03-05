@@ -18,9 +18,8 @@ pub fn grant_capability<T>(grantee: ProcessId) -> Capability<T> {
 }
 
 pub fn forward_capability<T, U>(cap: Capability<T>, forwardee: Capability<U>) -> Capability<T> {
-    let cap = unsafe { core::mem::transmute::<Capability<T>, RawCapability>(cap) };
     let certificate = allocate_certificate();
-    *certificate = CapabilityCertificate::forwarded(forwardee.certifier(), cap);
+    *certificate = CapabilityCertificate::forwarded(forwardee.certifier(), cap.0);
     let forwarded = Capability(RawCapability(certificate), PhantomData);
     trace!("forwarded {cap:?} as {forwarded:?} to {forwardee:?}");
     forwarded

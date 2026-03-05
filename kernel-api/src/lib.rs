@@ -12,7 +12,6 @@ pub mod syscall;
 pub use capability::*;
 pub use deravel_types::*;
 pub use drvli::*;
-pub use syscall::{disk_capacity, disk_read, disk_write, getchar, putchar};
 
 use alloc::string::String;
 use core::alloc::{GlobalAlloc, Layout};
@@ -61,7 +60,7 @@ static PAGE_ALLOCATOR: PageAllocator = PageAllocator;
 impl Write for KernelConsole {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         for byte in s.bytes() {
-            unsafe { syscall::putchar(byte) }
+            putchar(byte);
         }
         Ok(())
     }
@@ -111,6 +110,34 @@ unsafe extern "C" fn __deravel_entry() -> ! {
     )
 }
 
+pub fn disk_capacity() -> usize {
+    unsafe { syscall::disk_capacity() }
+}
+
+pub fn disk_read(sector: usize, buf: &mut [u8; 512]) {
+    unsafe { syscall::disk_read(sector, buf) }
+}
+
+pub fn disk_write(sector: usize, buf: &[u8; 512]) {
+    unsafe { syscall::disk_write(sector, buf) }
+}
+
+pub fn exit() -> ! {
+    unsafe { syscall::exit() }
+}
+
+pub fn getchar() -> u8 {
+    unsafe { syscall::getchar() }
+}
+
+pub fn kernel_log(text: &str, level: usize) {
+    unsafe { syscall::log(text.as_ptr(), text.len(), level) }
+}
+
+pub fn putchar(ch: u8) {
+    unsafe { syscall::putchar(ch) }
+}
+
 fn current_pid() -> ProcessId {
     unsafe { (INPUTS_ADDRESS as *const ProcessInputs<Hello>).read().id }
 }
@@ -118,14 +145,6 @@ fn current_pid() -> ProcessId {
 fn initialize_log() {
     log::set_logger(&KernelLogger).unwrap();
     log::set_max_level(LevelFilter::Trace);
-}
-
-pub fn exit() -> ! {
-    unsafe { syscall::exit() }
-}
-
-pub fn kernel_log(text: &str, level: usize) {
-    unsafe { syscall::log(text.as_ptr(), text.len(), level) }
 }
 
 #[panic_handler]

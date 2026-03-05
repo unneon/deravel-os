@@ -1,5 +1,4 @@
 use core::marker::PhantomData;
-use core::mem::transmute;
 use core::ops::{BitOr, Deref};
 
 pub macro features($driver:ident $struct:ident $base:literal $($has_name:ident $enable_name:ident $bit:literal)*) {
@@ -28,7 +27,7 @@ pub macro mmio($pub:vis $struct:ident $(<$($param:ident),*>)? $(where $param0:id
 
     impl$(<$($param),*>)? $struct $(<$($param),*>)? $(where $param0: $req0)? {
         $($pub fn $field_name(self: Mmio<Self>) -> Mmio<$field_type, crate::virtio::registers::$access> {
-            unsafe { transmute(self.0.byte_add($offset)) }
+            Mmio(unsafe { self.0.byte_add($offset) } as *mut $field_type, PhantomData)
         })*
     }
 }
@@ -36,7 +35,7 @@ pub macro mmio($pub:vis $struct:ident $(<$($param:ident),*>)? $(where $param0:id
 pub trait Readable {}
 pub trait Writable {}
 
-pub struct Mmio<T, Access = ReadWrite>(*mut T, PhantomData<Access>);
+pub struct Mmio<T, Access = ReadWrite>(pub *mut T, pub PhantomData<Access>);
 
 pub struct Readonly;
 pub struct Writeonly;

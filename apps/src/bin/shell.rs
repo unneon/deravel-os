@@ -25,8 +25,8 @@ fn main(_: Args) {
 fn getline(buf: &mut [u8]) -> Option<&str> {
     let mut i = 0;
     loop {
-        let ch = unsafe { getchar() };
-        unsafe { putchar(ch) };
+        let ch = getchar();
+        putchar(ch);
         if ch == b'\r' {
             print!("\n");
             break Some(core::str::from_utf8(&buf[..i]).unwrap());
