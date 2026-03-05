@@ -9,6 +9,14 @@ use elf::endian::LittleEndian;
 use elf::file::Class;
 use elf::segment::ProgramHeader;
 
+pub macro elf($env:literal) {{
+    {
+        const ELF: crate::page::PageAligned<[u8; include_bytes!(env!($env)).len()]> =
+            crate::page::PageAligned(*include_bytes!(env!($env)));
+        &ELF.0
+    }
+}}
+
 const USER_START: usize = 0x1000000;
 const USER_END: usize = 0x1800000;
 

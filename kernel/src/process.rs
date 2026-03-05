@@ -11,12 +11,6 @@ use core::marker::PhantomData;
 use deravel_types::*;
 use riscv::register::satp::{Mode, Satp};
 
-pub macro reserve_process($tag:ident, $env:literal) {{
-    const ELF: crate::page::PageAligned<[u8; include_bytes!(env!($env)).len()]> =
-        crate::page::PageAligned(*include_bytes!(env!($env)));
-    reserve_process::<$tag>(&ELF.0)
-}}
-
 #[repr(C, align(4096))]
 #[derive(Clone, Copy)]
 pub struct CapabilityPage(

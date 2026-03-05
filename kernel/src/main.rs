@@ -21,6 +21,7 @@ mod sbi;
 mod virtio;
 
 use crate::arch::{RiscvRegisters, initialize_trap_handler, switch_to_userspace_registers_only};
+use crate::elf::elf;
 use crate::log::{initialize_log, log_userspace};
 use crate::page::{PageFlags, PageTable, map_pages};
 use crate::process::{
@@ -51,12 +52,12 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     log_sbi_metadata();
     initialize_all_virtio_mmio(&device_tree);
 
-    let fs_tar = reserve_process!(TarFs, "CARGO_BIN_FILE_DERAVEL_FILESYSTEM_TAR");
-    let ipc_a = reserve_process!(IpcA, "CARGO_BIN_FILE_DERAVEL_APPS_ipc-a");
-    let ipc_b = reserve_process!(IpcB, "CARGO_BIN_FILE_DERAVEL_APPS_ipc-b");
-    let ipc_c = reserve_process!(IpcC, "CARGO_BIN_FILE_DERAVEL_APPS_ipc-c");
-    // let hello = reserve_process!(Hello, "CARGO_BIN_FILE_DERAVEL_APPS_hello");
-    // let shell = reserve_process!(Shell, "CARGO_BIN_FILE_DERAVEL_APPS_shell");
+    let fs_tar = reserve_process::<TarFs>(elf!("CARGO_BIN_FILE_DERAVEL_FILESYSTEM_TAR"));
+    let ipc_a = reserve_process::<IpcA>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-a"));
+    let ipc_b = reserve_process::<IpcB>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-b"));
+    let ipc_c = reserve_process::<IpcC>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-c"));
+    // let hello = reserve_process::<Hello>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_hello"));
+    // let shell = reserve_process::<Shell>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_shell"));
     ipc_a.spawn(IpcAArgs {
         fs: fs_tar.export,
         b: ipc_b.export,
