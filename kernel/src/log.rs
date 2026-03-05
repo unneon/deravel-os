@@ -1,4 +1,5 @@
 use crate::sbi;
+use alloc::boxed::Box;
 use fdt::Fdt;
 use log::{Level, LevelFilter, Metadata, Record, info};
 
@@ -11,11 +12,6 @@ struct PrettyLogLevel(Level);
 
 struct PrettyModulePath<'a>(Option<&'a str>);
 
-static mut LOGGER: Logger = Logger {
-    start_time: 0,
-    timebase_frequency: 0,
-};
-
 impl log::Log for Logger {
     fn enabled(&self, _: &Metadata) -> bool {
         true
@@ -26,8 +22,16 @@ impl log::Log for Logger {
             let time = (riscv::register::time::read64() - self.start_time) as f64
                 / self.timebase_frequency as f64;
             let level = PrettyLogLevel(record.level());
-            let module = PrettyModulePath(record.module_path());
-            sbi::console_writeln!("[{time:>13.7}] {level} {module}{}", record.args());
+            let message = record.args();
+            if record.module_path().is_some() {
+                let module = PrettyModulePath(record.module_path());
+                sbi::console_writeln!("[{time:>13.7}] {level} {module}{message}");
+            } else {
+                let process_name = record.target();
+                sbi::console_writeln!(
+                    "[\x1B[36m{time:>13.7}] {level}\x1B[36m \x1B[1m{process_name}:\x1B[0;36m {message}\x1B[0m"
+                );
+            }
         }
     }
 
@@ -61,23 +65,23 @@ impl core::fmt::Display for PrettyModulePath<'_> {
 
 pub fn initialize_log(device_tree: &Fdt) {
     let timebase_frequency = find_timebase_frequency(device_tree).unwrap();
-    unsafe {
-        LOGGER.start_time = riscv::register::time::read64();
-        LOGGER.timebase_frequency = timebase_frequency;
-        log::set_logger(&LOGGER).unwrap();
+    let logger = Logger {
+        start_time: riscv::register::time::read64(),
+        timebase_frequency,
     };
+    log::set_logger(Box::leak(Box::new(logger))).unwrap();
     log::set_max_level(LevelFilter::Trace);
     info!("timebase frequency is {timebase_frequency}");
 }
 
 pub fn log_userspace(level: Level, process_name: &str, message: &str) {
-    let time = (riscv::register::time::read64() - unsafe { LOGGER.start_time }) as f64
-        / unsafe { LOGGER.timebase_frequency } as f64;
-    let level = PrettyLogLevel(level);
-    sbi::console_writeln!(
-        "[\x1B[36m{time:>13.7}] {level}\x1B[36m \x1B[1m{process_name}:\x1B[0;36m {}\x1B[0m",
-        message
-    );
+    let args = format_args!("{message}");
+    let record = Record::builder()
+        .args(args)
+        .level(level)
+        .target(process_name)
+        .build();
+    log::logger().log(&record);
 }
 
 fn find_timebase_frequency(device_tree: &Fdt) -> Option<usize> {
