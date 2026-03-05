@@ -121,12 +121,6 @@ syscalls! {
     #[no = 3]
     pub fn getchar() -> u8;
 
-    #[no = 4]
-    pub fn yield_();
-
-    #[no = 5]
-    pub fn pid_by_name(name: *const u8, name_len: usize) -> ProcessId;
-
     #[no = 8]
     pub fn log(text: *const u8, text_len: usize, level: usize);
 

@@ -109,26 +109,6 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters) -> ! {
             while sbi::debug_console_read(&mut c).unwrap() == 0 {}
             registers.a0 = c[0] as usize;
         }
-        4 => {
-            let process = unsafe { &mut PROCESSES[CURRENT_PROC.unwrap()] };
-            process.registers = registers.clone();
-            process.pc = user_pc + 4;
-            schedule_and_switch_to_userspace();
-        }
-        5 => {
-            // TODO: Handle user pointers safely.
-            let name =
-                unsafe { core::slice::from_raw_parts(registers.a0 as *const u8, registers.a1) };
-            let name = core::str::from_utf8(name).unwrap();
-            for (pid, haystack) in unsafe { PROCESSES.iter().enumerate() } {
-                if let Some(haystack_name) = haystack.name
-                    && name == haystack_name
-                {
-                    registers.a0 = pid;
-                    break;
-                }
-            }
-        }
         8 => {
             let text = registers.a0 as *const u8;
             let text_len = registers.a1;
