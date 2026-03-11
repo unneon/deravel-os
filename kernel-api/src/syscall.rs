@@ -1,7 +1,6 @@
 #![allow(clippy::missing_safety_doc)]
 
 use core::arch::asm;
-use core::mem::transmute_copy;
 use deravel_types::{ProcessId, RawCapability};
 
 macro syscalls(
@@ -48,9 +47,9 @@ macro syscalls(
     })*
 }
 
-unsafe trait FromRet: Sized {
-    unsafe fn from_ret(a0: usize, _a1: usize, _a2: usize, _a3: usize) -> Self {
-        unsafe { transmute_copy(&a0) }
+unsafe trait FromRet: Copy + Sized {
+    unsafe fn from_ret(register: usize, _: usize, _: usize, _: usize) -> Self {
+        unsafe { Register { register }.rust }
     }
 }
 
