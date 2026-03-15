@@ -155,6 +155,20 @@ pub fn probe_extension(extension_id: usize) -> bool {
     ffi::sbi_probe_extension(extension_id) != 0
 }
 
+/// Programs the clock for next event after a given time.
+///
+/// `stime_value` is in absolute time.
+///
+/// If the supervisor wishes to clear the timer interrupt without scheduling the next timer event, it may request
+/// a timer interrupt infinitely far into the future (i.e., `(uint64_t)-1`). Alternatively, to not receive timer
+/// interrupts, it may mask timer interrupts by clearing the sie.STIE CSR bit.
+///
+/// This function must clear the pending timer interrupt bit when `stime_value` is set to some time in the
+/// future, regardless of whether timer interrupts are masked or not.
+pub fn set_timer(stime_value: u64) {
+    ffi::sbi_set_timer(stime_value)
+}
+
 /// Write bytes to the debug console from input memory.
 ///
 /// This is a non-blocking SBI call and it may do partial/no writes if the debug console is not able to accept

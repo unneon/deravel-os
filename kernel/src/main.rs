@@ -68,6 +68,8 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     // hello.spawn(HelloArgs {});
     // shell.spawn(ShellArgs {});
 
+    unsafe { riscv::register::sie::set_stimer() }
+
     schedule_and_switch_to_userspace();
 }
 
@@ -89,6 +91,9 @@ fn handle_trap(registers: &mut RiscvRegisters) -> ! {
     let user_pc = riscv::register::sepc::read();
     if scause == Trap::Exception(Exception::UserEnvCall) {
         handle_syscall(user_pc, registers);
+    } else if scause == Trap::Interrupt(Interrupt::SupervisorTimer) {
+        sbi::set_timer(u64::MAX);
+        switch_to_userspace_registers_only(registers)
     } else {
         panic!("unexpected trap scause={scause:?} stval={stval:#x} user_pc={user_pc:#x}");
     }

@@ -33,6 +33,10 @@ impl FromSbiret for usize {
     }
 }
 
+impl FromSbiret for () {
+    fn from_sbiret(_: isize, _: usize) {}
+}
+
 impl FromSbiret for Result<usize, Error> {
     fn from_sbiret(error: isize, value: usize) -> Self {
         if error == 0 {
@@ -67,6 +71,9 @@ functions! {
 
     #[eid = 0x10, fid = 3]
     pub fn sbi_probe_extension(extension_id: usize) -> usize;
+
+    #[eid = 0x54494D45, fid = 0]
+    pub fn sbi_set_timer(stime_value: u64) -> ();
 
     #[eid = 0x4442434E, fid = 0]
     pub fn sbi_debug_console_write(num_bytes: usize, base_addr_lo: usize, base_addr_hi: usize) -> Result<usize, Error>;
