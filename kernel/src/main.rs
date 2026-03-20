@@ -16,6 +16,7 @@ mod elf;
 mod heap;
 mod log;
 mod page;
+mod pci;
 mod process;
 mod sbi;
 mod virtio;
@@ -24,6 +25,7 @@ use crate::arch::{RiscvRegisters, initialize_trap_handler, switch_to_userspace_r
 use crate::elf::elf;
 use crate::log::{initialize_log, log_userspace};
 use crate::page::{PageFlags, PageTable, map_pages};
+use crate::pci::initialize_all_pci;
 use crate::process::{
     CAPABILITY_PAGES, CURRENT_PROC, PROCESSES, ProcessState, reserve_process,
     schedule_and_switch_to_userspace,
@@ -51,6 +53,7 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     initialize_trap_handler();
     log_sbi_metadata();
     initialize_all_virtio_mmio(&device_tree);
+    initialize_all_pci(&device_tree);
 
     let fs_tar = reserve_process::<TarFs>(elf!("CARGO_BIN_FILE_DERAVEL_FILESYSTEM_TAR"));
     let ipc_a = reserve_process::<IpcA>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-a"));

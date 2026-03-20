@@ -26,7 +26,8 @@ pub macro mmio($pub:vis $struct:ident $(<$($param:ident),*>)? $(where $param0:id
     $pub struct $struct $(<$($param),*> ($(PhantomData<$param>),*))?;
 
     impl$(<$($param),*>)? $struct $(<$($param),*>)? $(where $param0: $req0)? {
-        $($pub fn $field_name(self: Mmio<Self>) -> Mmio<$field_type, crate::virtio::registers::$access> {
+        $(#[allow(dead_code)]
+        $pub fn $field_name(self: Mmio<Self>) -> Mmio<$field_type, crate::virtio::registers::$access> {
             Mmio(unsafe { self.0.byte_add($offset) } as *mut $field_type, PhantomData)
         })*
     }

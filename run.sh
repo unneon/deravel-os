@@ -7,6 +7,8 @@ qemu-system-riscv64 \
     -bios default \
     -nographic \
     -serial mon:stdio \
+    -device pci-serial,chardev=pciuart \
+    -chardev file,id=pciuart,path=uart.txt \
     -drive id=drive0,file=disk.tar,format=raw,if=none \
     -device virtio-blk-device,drive=drive0,bus=virtio-mmio-bus.0 \
     --no-reboot \

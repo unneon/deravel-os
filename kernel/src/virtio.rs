@@ -12,10 +12,8 @@ pub mod virtio_net;
 
 pub fn initialize_all_virtio_mmio(device_tree: &Fdt) {
     for mmio in device_tree.find_all_nodes("/soc/virtio_mmio") {
-        let region = mmio.property("reg").unwrap().value;
-        let base_address =
-            usize::from_be_bytes(region.iter().copied().array_chunks().next().unwrap());
-        let device = unsafe { Registers::new(base_address as *mut Registers<()>) };
+        let region = mmio.reg().unwrap().next().unwrap();
+        let device = unsafe { Registers::new(region.starting_address as *mut Registers<()>) };
         if device.magic_value().read() != 0x74726976 {
             error!("{device} magic value is not 0x74726976");
             continue;
