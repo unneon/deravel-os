@@ -1,11 +1,20 @@
 use crate::allocators::TrivialAllocator;
 use crate::util::volatile::{Volatile, volatile_struct};
-use core::ops::Deref;
+use crate::virtio;
 use fdt::Fdt;
 use fdt::node::FdtNode;
-use log::{debug, info};
+use log::info;
 
-volatile_struct! { CommonConfig
+pub unsafe trait VendorPciCapability {}
+
+#[derive(Default)]
+pub struct AllocatedRange {
+    pub soc_offset: usize,
+    #[allow(dead_code)]
+    pub length: usize,
+}
+
+volatile_struct! { pub CommonConfig
     vendor_id: Readonly u16,
     device_id: Readonly u16,
     command: ReadWrite u16,
@@ -20,7 +29,7 @@ volatile_struct! { CommonConfig
     bist: Readonly u8,
 }
 
-volatile_struct! { GeneralDeviceConfig
+volatile_struct! { pub GeneralDeviceConfig
     common: ReadWrite CommonConfig,
     bars: ReadWrite [u32; 6],
     cardbus_cis_pointer: Readonly u32,
@@ -34,6 +43,26 @@ volatile_struct! { GeneralDeviceConfig
     interrupt_pin: Readonly u8,
     min_grant: Readonly u8,
     max_latency: Readonly u8,
+}
+
+#[repr(C)]
+#[derive(Debug)]
+pub struct PciCapability {
+    vndr: u8,
+    next: u8,
+    len: u8,
+}
+
+struct PciRange {
+    soc_base: usize,
+    pci_base: usize,
+    length: usize,
+}
+
+struct PciRanges {
+    io: PciRange,
+    mem32: PciRange,
+    mem64: PciRange,
 }
 
 volatile_struct! { Uart16550
@@ -57,11 +86,13 @@ impl CommonConfig {
     }
 }
 
-impl Deref for GeneralDeviceConfig {
-    type Target = CommonConfig;
-
-    fn deref(&self) -> &CommonConfig {
-        &self.common
+impl PciCapability {
+    pub unsafe fn get_vendor<T: VendorPciCapability>(&self) -> Option<&T> {
+        if self.vndr == 0x09 {
+            Some(unsafe { &*(self as *const Self as *const T) })
+        } else {
+            None
+        }
     }
 }
 
@@ -117,101 +148,9 @@ pub fn initialize_all_pci(device_tree: &Fdt) {
             let bars = allocate_all_bars(config, &pci_ranges, &mut io, &mut mem32, &mut mem64);
             config.common().command().write_bitor(0b111);
 
-            for cap in walk_capabilities(config) {
-                if let Some(cap) = unsafe { cap.get_vendor::<VirtioCap>() } {
-                    if cap.cfg_type == VIRTIO_PCI_CAP_COMMON_CFG {
-                        debug!("cap = {cap:?}");
-                        let bar = unsafe {
-                            Volatile::new(
-                                (bars[cap.bar as usize].soc_offset + cap.offset as usize)
-                                    as *mut VirtioPciCommonCfg,
-                            )
-                        };
-                        bar.device_status().write(0);
-                        bar.device_feature_select().write(0);
-                        debug!("device features {:#b}", bar.device_feature().read());
-                        debug!("number of queues is {}", bar.num_queues().read());
-                    } else if cap.cfg_type == VIRTIO_PCI_CAP_NOTIFY_CFG {
-                    } else if cap.cfg_type == VIRTIO_PCI_CAP_ISR_CFG {
-                    } else if cap.cfg_type == VIRTIO_PCI_CAP_DEVICE_CFG {
-                    } else if cap.cfg_type == VIRTIO_PCI_CAP_PCI_CFG {
-                    }
-                }
-            }
+            virtio::initialize_blk(config, &bars);
         }
     }
-}
-
-volatile_struct! { pub VirtioPciCommonCfg
-    device_feature_select: ReadWrite u32,
-    device_feature: Readonly u32,
-    driver_feature_select: ReadWrite u32,
-    driver_feature: ReadWrite u32,
-    config_msix_vector: ReadWrite u16,
-    num_queues: ReadWrite u16,
-    device_status: ReadWrite u8,
-    config_generation: ReadWrite u8,
-
-    queue_select: ReadWrite u16,
-    queue_size: ReadWrite u16,
-    queue_msix_vector: ReadWrite u16,
-    queue_enable: ReadWrite u16,
-    queue_notify_off: Readonly u16,
-    queue_desc: ReadWrite u64,
-    queue_driver: ReadWrite u64,
-    queue_device: ReadWrite u64,
-    queue_notif_config_data: Readonly u16,
-    queue_reset: ReadWrite u16,
-
-    admin_queue_index: Readonly u16,
-    admin_queue_num: Readonly u16,
-}
-
-const VIRTIO_PCI_CAP_COMMON_CFG: u8 = 1;
-const VIRTIO_PCI_CAP_NOTIFY_CFG: u8 = 2;
-const VIRTIO_PCI_CAP_ISR_CFG: u8 = 3;
-const VIRTIO_PCI_CAP_DEVICE_CFG: u8 = 4;
-const VIRTIO_PCI_CAP_PCI_CFG: u8 = 5;
-
-unsafe trait VendorPciCapability {}
-
-#[repr(C)]
-#[derive(Debug)]
-struct PciCapability {
-    vndr: u8,
-    next: u8,
-    len: u8,
-}
-
-#[repr(C)]
-#[derive(Debug)]
-struct VirtioCap {
-    cap: PciCapability,
-    cfg_type: u8,
-    bar: u8,
-    id: u8,
-    padding: [u8; 2],
-    offset: u32,
-    length: u32,
-}
-
-unsafe impl VendorPciCapability for VirtioCap {}
-
-impl PciCapability {
-    unsafe fn get_vendor<T: VendorPciCapability>(&self) -> Option<&T> {
-        if self.vndr == 0x09 {
-            Some(unsafe { &*(self as *const Self as *const T) })
-        } else {
-            None
-        }
-    }
-}
-
-#[derive(Default)]
-struct AllocatedRange {
-    soc_offset: usize,
-    #[allow(dead_code)]
-    length: usize,
 }
 
 fn allocate_all_bars(
@@ -271,7 +210,7 @@ fn allocate_all_bars(
     allocated
 }
 
-fn walk_capabilities(
+pub fn walk_capabilities(
     config: Volatile<GeneralDeviceConfig>,
 ) -> impl Iterator<Item = &'static PciCapability> {
     assert_ne!(config.common().status().read() & (1 << 4), 0);
@@ -285,18 +224,6 @@ fn walk_capabilities(
         pointer = cap.next;
         Some(cap)
     })
-}
-
-struct PciRange {
-    soc_base: usize,
-    pci_base: usize,
-    length: usize,
-}
-
-struct PciRanges {
-    io: PciRange,
-    mem32: PciRange,
-    mem64: PciRange,
 }
 
 fn find_pci_ranges(soc: &FdtNode, pci: &FdtNode) -> PciRanges {

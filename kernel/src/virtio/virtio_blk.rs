@@ -1,10 +1,10 @@
 use crate::util::volatile::{Volatile, volatile_struct};
+use crate::virtio::VirtioCommonConfig;
 use crate::virtio::queue::Queue;
-use crate::virtio::registers::{Registers, STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK};
-use deravel_types::PAGE_SIZE;
+use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK};
 use log::info;
 
-volatile_struct! { pub Config
+volatile_struct! { pub VirtioBlkConfig
     capacity: Readonly u64,
 }
 
@@ -16,7 +16,8 @@ struct Header {
 }
 
 pub struct VirtioBlk {
-    regs: Volatile<Registers<Config>>,
+    common: Volatile<VirtioCommonConfig>,
+    device: Volatile<VirtioBlkConfig>,
 }
 
 #[derive(Debug)]
@@ -28,9 +29,16 @@ pub const VIRTIO_BLK_T_OUT: u32 = 1;
 static mut VIRTQ: Queue = unsafe { core::mem::zeroed() };
 
 impl VirtioBlk {
-    pub fn new(regs: Volatile<Registers<Config>>) -> VirtioBlk {
-        initialize_device(regs);
-        VirtioBlk { regs }
+    pub fn new(
+        common: Volatile<VirtioCommonConfig>,
+        device: Volatile<VirtioBlkConfig>,
+    ) -> VirtioBlk {
+        initialize_device(common);
+
+        let capacity = device.capacity().read();
+        info!("disk has a capacity of {capacity} sectors");
+
+        VirtioBlk { common, device }
     }
 
     #[allow(dead_code)]
@@ -45,7 +53,7 @@ impl VirtioBlk {
         queue.descriptor_readonly(0, &header, Some(1));
         queue.descriptor_writeonly(1, buf, Some(2));
         queue.descriptor_writeonly(2, &mut status, None);
-        queue.send_and_recv(0, 0, self.regs);
+        // queue.send_and_recv(0, 0, self.common);
         result_from_status(status)
     }
 
@@ -61,30 +69,23 @@ impl VirtioBlk {
         queue.descriptor_readonly(0, &header, Some(1));
         queue.descriptor_readonly(1, buf, Some(2));
         queue.descriptor_writeonly(2, &mut status, None);
-        queue.send_and_recv(0, 0, self.regs);
+        // queue.send_and_recv(0, 0, self.common);
         result_from_status(status)
     }
 
     pub fn capacity(&self) -> usize {
-        self.regs.config().capacity().read() as usize
+        self.device.capacity().read() as usize
     }
 }
 
-fn initialize_device(regs: Volatile<Registers<Config>>) {
-    regs.status().write(0);
-    regs.status().write_bitor(STATUS_ACKNOWLEDGE);
-    regs.status().write_bitor(STATUS_DRIVER);
+fn initialize_device(common: Volatile<VirtioCommonConfig>) {
+    common.device_status().write(0);
+    common.device_status().write_bitor(STATUS_ACKNOWLEDGE as u8);
+    common.device_status().write_bitor(STATUS_DRIVER as u8);
 
-    regs.guest_page_size().write(PAGE_SIZE as u32);
+    // unsafe { &VIRTQ }.initialize(0, common);
 
-    unsafe { &VIRTQ }.initialize(0, regs);
-
-    regs.status().write_bitor(STATUS_DRIVER_OK);
-
-    info!(
-        "disk has a capacity of {} sectors",
-        regs.config().capacity().read()
-    );
+    common.device_status().write_bitor(STATUS_DRIVER_OK as u8);
 }
 
 fn result_from_status(status: u8) -> Result<(), VirtioBlkError> {
