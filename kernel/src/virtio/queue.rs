@@ -1,4 +1,5 @@
 use crate::util::volatile::Volatile;
+use crate::virtio::VirtioCommonConfig;
 use crate::virtio::registers::Registers;
 use deravel_types::PAGE_SIZE;
 
@@ -43,7 +44,17 @@ const VIRTQ_DESC_F_NEXT: u16 = 1;
 const VIRTQ_DESC_F_WRITE: u16 = 2;
 
 impl Queue {
-    pub fn initialize<T>(&self, queue_index: u32, regs: Volatile<Registers<T>>) {
+    pub fn initialize(&self, queue_index: u16, regs: Volatile<VirtioCommonConfig>) {
+        regs.queue_select().write(queue_index);
+        assert!(QUEUE_SIZE <= regs.queue_size().read() as usize);
+        regs.queue_size().write(QUEUE_SIZE as u16);
+        regs.queue_desc().write(&raw const self.descriptors as u64);
+        regs.queue_driver().write(&raw const self.available as u64);
+        regs.queue_device().write(&raw const self.used as u64);
+        regs.queue_enable().write(1);
+    }
+
+    pub fn initialize_legacy<T>(&self, queue_index: u32, regs: Volatile<Registers<T>>) {
         regs.queue_sel().write(queue_index);
         assert_eq!(regs.queue_pfn().read(), 0);
         assert!(QUEUE_SIZE <= regs.queue_size_max().read() as usize);
@@ -69,17 +80,14 @@ impl Queue {
         descriptor.next = next.unwrap_or(0);
     }
 
-    pub fn send_and_recv<T>(
-        &mut self,
-        descriptor: u16,
-        queue_index: u32,
-        regs: Volatile<Registers<T>>,
-    ) {
+    pub fn send(&mut self, descriptor: u16) {
         self.available.ring[self.available.index as usize % QUEUE_SIZE] = descriptor;
         riscv::asm::fence();
         self.available.index += 1;
         riscv::asm::fence();
-        regs.queue_notify().write(queue_index);
+    }
+
+    pub fn recv(&mut self) {
         while unsafe { (&raw const self.used.index).read_volatile() } < self.available.index {}
     }
 }

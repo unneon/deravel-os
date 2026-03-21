@@ -198,8 +198,8 @@ fn initialize_device(regs: Volatile<Registers<Config>>) {
 
     regs.guest_page_size().write(PAGE_SIZE as u32);
 
-    unsafe { &RECEIVE_QUEUE }.initialize(0, regs);
-    unsafe { &TRANSMIT_QUEUE }.initialize(1, regs);
+    unsafe { &RECEIVE_QUEUE }.initialize_legacy(0, regs);
+    unsafe { &TRANSMIT_QUEUE }.initialize_legacy(1, regs);
 
     initialize_receive_buffers(regs);
     initialize_transmit_buffers();
