@@ -1,10 +1,8 @@
 use crate::util::volatile::{Volatile, volatile_struct};
 use crate::virtio::queue::{QUEUE_SIZE, Queue};
-use crate::virtio::registers::{
-    Registers, STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, features,
-};
+use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, features};
+use crate::virtio::{NotifySlot, VirtioCommonConfig};
 use core::marker::PhantomData;
-use deravel_types::PAGE_SIZE;
 use log::{debug, error};
 use smoltcp::iface::{Interface, SocketSet, SocketStorage};
 use smoltcp::phy::{DeviceCapabilities, Medium};
@@ -41,12 +39,14 @@ struct Packet<T> {
     payload: T,
 }
 
-pub struct PacketReceiveToken<'a>(Volatile<Registers<Config>>, PhantomData<&'a mut ()>);
+pub struct PacketReceiveToken<'a>(Volatile<u16>, PhantomData<&'a mut ()>);
 
-pub struct PacketTransmitToken<'a>(Volatile<Registers<Config>>, PhantomData<&'a ()>);
+pub struct PacketTransmitToken<'a>(Volatile<u16>, PhantomData<&'a ()>);
 
 pub struct VirtioNet {
-    regs: Volatile<Registers<Config>>,
+    device: Volatile<Config>,
+    rx_notify: Volatile<u16>,
+    tx_notify: Volatile<u16>,
 }
 
 static mut RECEIVE_QUEUE: Queue = unsafe { core::mem::zeroed() };
@@ -55,14 +55,22 @@ static mut TRANSMIT_QUEUE: Queue = unsafe { core::mem::zeroed() };
 static mut TRANSMIT_BUFFERS: [Packet<[u8; 1514]>; QUEUE_SIZE] = unsafe { core::mem::zeroed() };
 
 impl VirtioNet {
-    pub fn new(regs: Volatile<Registers<Config>>) -> VirtioNet {
-        initialize_device(regs);
-        VirtioNet { regs }
+    pub fn new(
+        common: Volatile<VirtioCommonConfig>,
+        notify: NotifySlot,
+        device: Volatile<Config>,
+    ) -> VirtioNet {
+        let (rx_notify, tx_notify) = initialize_device(common, notify);
+        VirtioNet {
+            device,
+            rx_notify,
+            tx_notify,
+        }
     }
 
     pub fn demo(&mut self) {
         let mut iface = Interface::new(
-            smoltcp::iface::Config::new(HardwareAddress::Ethernet(self.regs.config().mac().read())),
+            smoltcp::iface::Config::new(HardwareAddress::Ethernet(self.device.mac().read())),
             self,
             Instant::from_secs(0),
         );
@@ -124,8 +132,8 @@ impl smoltcp::phy::Device for VirtioNet {
         }
 
         Some((
-            PacketReceiveToken(self.regs, PhantomData),
-            PacketTransmitToken(self.regs, PhantomData),
+            PacketReceiveToken(self.rx_notify, PhantomData),
+            PacketTransmitToken(self.tx_notify, PhantomData),
         ))
     }
 
@@ -136,7 +144,7 @@ impl smoltcp::phy::Device for VirtioNet {
             return None;
         }
 
-        Some(PacketTransmitToken(self.regs, PhantomData))
+        Some(PacketTransmitToken(self.tx_notify, PhantomData))
     }
 
     fn capabilities(&self) -> DeviceCapabilities {
@@ -160,7 +168,7 @@ impl smoltcp::phy::RxToken for PacketReceiveToken<'_> {
 
         receive_queue.available.index += 1;
         riscv::asm::fence();
-        self.0.queue_notify().write(0);
+        self.0.write(0);
 
         result
     }
@@ -176,38 +184,41 @@ impl smoltcp::phy::TxToken for PacketTransmitToken<'_> {
         transmit_queue.descriptors[index].length = (size_of::<Header>() + len) as u32;
         transmit_queue.available.index += 1;
         riscv::asm::fence();
-        self.0.queue_notify().write(1);
+        self.0.write(1);
 
         result
     }
 }
 
-fn initialize_device(regs: Volatile<Registers<Config>>) {
-    regs.status().write(0);
-    regs.status().write_bitor(STATUS_ACKNOWLEDGE);
-    regs.status().write_bitor(STATUS_DRIVER);
+fn initialize_device(
+    common: Volatile<VirtioCommonConfig>,
+    notify: NotifySlot,
+) -> (Volatile<u16>, Volatile<u16>) {
+    common.device_status().write(0);
+    common.device_status().write_bitor(STATUS_ACKNOWLEDGE as u8);
+    common.device_status().write_bitor(STATUS_DRIVER as u8);
 
-    regs.host_features_sel().write(0);
-    let host_features = Features(regs.host_features().read());
+    common.device_feature_select().write(0);
+    let host_features = Features(common.device_feature().read());
     assert!(host_features.has_mac());
 
     let mut driver_features = Features::default();
     driver_features.enable_mac();
-    regs.driver_features_sel().write(0);
-    regs.driver_features().write(driver_features.into());
+    common.driver_feature_select().write(0);
+    common.driver_feature().write(driver_features.into());
 
-    regs.guest_page_size().write(PAGE_SIZE as u32);
+    let rx_notify = unsafe { &RECEIVE_QUEUE }.initialize(0, common, &notify);
+    let tx_notify = unsafe { &TRANSMIT_QUEUE }.initialize(1, common, &notify);
 
-    unsafe { &RECEIVE_QUEUE }.initialize_legacy(0, regs);
-    unsafe { &TRANSMIT_QUEUE }.initialize_legacy(1, regs);
-
-    initialize_receive_buffers(regs);
+    initialize_receive_buffers(rx_notify);
     initialize_transmit_buffers();
 
-    regs.status().write_bitor(STATUS_DRIVER_OK);
+    common.device_status().write_bitor(STATUS_DRIVER_OK as u8);
+
+    (rx_notify, tx_notify)
 }
 
-fn initialize_receive_buffers(regs: Volatile<Registers<Config>>) {
+fn initialize_receive_buffers(rx_notify: Volatile<u16>) {
     let queue = unsafe { &mut RECEIVE_QUEUE };
     for (i, buffer) in unsafe { RECEIVE_BUFFERS.iter_mut() }.enumerate() {
         queue.available.ring[i] = i as u16;
@@ -216,7 +227,7 @@ fn initialize_receive_buffers(regs: Volatile<Registers<Config>>) {
     riscv::asm::fence();
     queue.available.index = QUEUE_SIZE as u16;
     riscv::asm::fence();
-    regs.queue_notify().write(0);
+    rx_notify.write(0);
 }
 
 fn initialize_transmit_buffers() {

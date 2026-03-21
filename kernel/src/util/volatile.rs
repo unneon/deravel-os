@@ -15,17 +15,6 @@ pub macro volatile_struct($pub:vis $struct:ident $(<$($param:ident),*>)? $(where
     }
 }
 
-pub macro volatile_struct_as_offsets($pub:vis $struct:ident $(<$($param:ident),*>)? $(where $param0:ident: $req0:ident)? $($offset:literal $field_name:ident: $access:ident $field_type:ty,)*) {
-    $pub struct $struct $(<$($param),*> ($(PhantomData<$param>),*))?;
-
-    impl$(<$($param),*>)? $struct $(<$($param),*>)? $(where $param0: $req0)? {
-        $(#[allow(dead_code)]
-        $pub fn $field_name(self: Volatile<Self>) -> Volatile<$field_type, crate::util::volatile::$access> {
-            unsafe { Volatile::new(self.0.byte_add($offset) as *mut $field_type) }
-        })*
-    }
-}
-
 pub trait Readable {}
 pub trait Writable {}
 
@@ -33,7 +22,6 @@ pub struct Volatile<T, Access = ReadWrite>(*mut T, PhantomData<Access>);
 
 pub struct Readonly;
 pub struct ReadWrite;
-pub struct Writeonly;
 
 impl<T, Access> Volatile<T, Access> {
     pub unsafe fn new(pointer: *mut T) -> Volatile<T, Access> {
@@ -66,8 +54,6 @@ impl<T, Access, const N: usize> Volatile<[T; N], Access> {
 }
 
 impl Readable for Readonly {}
-
-impl Writable for Writeonly {}
 
 impl Readable for ReadWrite {}
 

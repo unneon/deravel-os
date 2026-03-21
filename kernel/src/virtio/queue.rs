@@ -1,7 +1,5 @@
 use crate::util::volatile::Volatile;
-use crate::virtio::VirtioCommonConfig;
-use crate::virtio::registers::Registers;
-use deravel_types::PAGE_SIZE;
+use crate::virtio::{NotifySlot, VirtioCommonConfig};
 
 pub const QUEUE_SIZE: usize = 16;
 
@@ -44,24 +42,24 @@ const VIRTQ_DESC_F_NEXT: u16 = 1;
 const VIRTQ_DESC_F_WRITE: u16 = 2;
 
 impl Queue {
-    pub fn initialize(&self, queue_index: u16, regs: Volatile<VirtioCommonConfig>) {
-        regs.queue_select().write(queue_index);
-        assert!(QUEUE_SIZE <= regs.queue_size().read() as usize);
-        regs.queue_size().write(QUEUE_SIZE as u16);
-        regs.queue_desc().write(&raw const self.descriptors as u64);
-        regs.queue_driver().write(&raw const self.available as u64);
-        regs.queue_device().write(&raw const self.used as u64);
-        regs.queue_enable().write(1);
-    }
-
-    pub fn initialize_legacy<T>(&self, queue_index: u32, regs: Volatile<Registers<T>>) {
-        regs.queue_sel().write(queue_index);
-        assert_eq!(regs.queue_pfn().read(), 0);
-        assert!(QUEUE_SIZE <= regs.queue_size_max().read() as usize);
-        regs.queue_size().write(QUEUE_SIZE as u32);
-        regs.queue_align().write(PAGE_SIZE as u32);
-        regs.queue_pfn()
-            .write(((self as *const _ as usize) / PAGE_SIZE) as u32);
+    pub fn initialize(
+        &self,
+        queue_index: u16,
+        common: Volatile<VirtioCommonConfig>,
+        notify: &NotifySlot,
+    ) -> Volatile<u16> {
+        common.queue_select().write(queue_index);
+        assert!(QUEUE_SIZE <= common.queue_size().read() as usize);
+        common.queue_size().write(QUEUE_SIZE as u16);
+        common
+            .queue_desc()
+            .write(&raw const self.descriptors as u64);
+        common
+            .queue_driver()
+            .write(&raw const self.available as u64);
+        common.queue_device().write(&raw const self.used as u64);
+        common.queue_enable().write(1);
+        unsafe { notify.select(common) }
     }
 
     pub fn descriptor_readonly<T>(&mut self, index: u16, data: &T, next: Option<u16>) {

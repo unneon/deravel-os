@@ -3,16 +3,24 @@ use crate::pci::{
     AllocatedRange, GeneralDeviceConfig, PciCapability, VendorPciCapability, walk_capabilities,
 };
 use crate::util::volatile::{Volatile, volatile_struct};
-use crate::virtio::registers::Registers;
-use crate::virtio::virtio_blk::{VirtioBlk, VirtioBlkConfig};
+use crate::virtio::virtio_blk::VirtioBlk;
 use crate::virtio::virtio_net::VirtioNet;
-use fdt::Fdt;
-use log::{debug, error, info};
 
 pub mod queue;
 pub mod registers;
 pub mod virtio_blk;
 pub mod virtio_net;
+
+struct Configs<T> {
+    common: Volatile<VirtioCommonConfig>,
+    notify: NotifySlot,
+    device: Volatile<T>,
+}
+
+pub struct NotifySlot {
+    base: *mut u16,
+    off_multiplier: u32,
+}
 
 volatile_struct! { pub VirtioCommonConfig
     device_feature_select: ReadWrite u32,
@@ -56,39 +64,34 @@ const VIRTIO_PCI_CAP_COMMON_CFG: u8 = 1;
 const VIRTIO_PCI_CAP_NOTIFY_CFG: u8 = 2;
 const VIRTIO_PCI_CAP_DEVICE_CFG: u8 = 4;
 
-unsafe impl VendorPciCapability for VirtioPciCapability {}
-
-pub fn initialize_all_virtio_mmio(device_tree: &Fdt) {
-    for mmio in device_tree.find_all_nodes("/soc/virtio_mmio") {
-        let region = mmio.reg().unwrap().next().unwrap();
-        let device = unsafe { Registers::new(region.starting_address as *mut Registers<()>) };
-        if device.magic_value().read() != 0x74726976 {
-            error!("{device} magic value is not 0x74726976");
-            continue;
-        }
-        if device.version().read() != 0x1 {
-            error!("{device} version is not 0x1");
-            continue;
-        }
-
-        let device_id = device.device_id().read();
-        if device_id == 0x0 {
-            continue;
-        }
-
-        let vendor = device.vendor_id().read();
-        if device_id == 0x1 {
-            info!("found virtio-net device {device} from vendor {vendor:#x}");
-            let device = unsafe { device.with_configuration() };
-            let mut virtio_net = VirtioNet::new(device);
-            virtio_net.demo();
-        } else {
-            debug!("ignoring {device} with unknown device id {device_id:#x}");
-        }
+impl NotifySlot {
+    unsafe fn select(&self, common: Volatile<VirtioCommonConfig>) -> Volatile<u16> {
+        let offset = common.queue_notify_off().read() as usize * self.off_multiplier as usize;
+        unsafe { Volatile::new(self.base.byte_add(offset)) }
     }
 }
 
+unsafe impl VendorPciCapability for VirtioPciCapability {}
+
 pub fn initialize_blk(config: Volatile<GeneralDeviceConfig>, bars: &[AllocatedRange; 6]) {
+    let configs = extract_configs(config, bars);
+    let device = VirtioBlk::new(configs.common, configs.notify, configs.device);
+    unsafe {
+        assert!(DISK.is_none());
+        DISK = Some(device);
+    }
+}
+
+pub fn initialize_net(config: Volatile<GeneralDeviceConfig>, bars: &[AllocatedRange; 6]) {
+    let configs = extract_configs(config, bars);
+    let mut virtio_net = VirtioNet::new(configs.common, configs.notify, configs.device);
+    virtio_net.demo();
+}
+
+fn extract_configs<T>(
+    config: Volatile<GeneralDeviceConfig>,
+    bars: &[AllocatedRange; 6],
+) -> Configs<T> {
     let mut common = None;
     let mut notify = None;
     let mut device = None;
@@ -103,22 +106,19 @@ pub fn initialize_blk(config: Volatile<GeneralDeviceConfig>, bars: &[AllocatedRa
                 let cap = unsafe {
                     &*(cap as *const VirtioPciCapability as *const VirtioPciNotifyCapability)
                 };
-                notify = Some((address, cap.notify_off_multiplier));
+                notify = Some(NotifySlot {
+                    base: address as *mut u16,
+                    off_multiplier: cap.notify_off_multiplier,
+                });
             } else if cap.cfg_type == VIRTIO_PCI_CAP_DEVICE_CFG {
                 assert!(device.is_none());
-                device = Some(unsafe { Volatile::new(address as *mut VirtioBlkConfig) });
+                device = Some(unsafe { Volatile::new(address as *mut T) });
             }
         }
     }
-    let (notify, notify_off_multiplier) = notify.unwrap();
-    let device = VirtioBlk::new(
-        common.unwrap(),
-        device.unwrap(),
-        notify,
-        notify_off_multiplier,
-    );
-    unsafe {
-        assert!(DISK.is_none());
-        DISK = Some(device);
+    Configs {
+        common: common.unwrap(),
+        notify: notify.unwrap(),
+        device: device.unwrap(),
     }
 }

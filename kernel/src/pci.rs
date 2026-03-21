@@ -141,6 +141,14 @@ pub fn initialize_all_pci(device_tree: &Fdt) {
             for c in "Hello, world!\n".bytes() {
                 uart_putc(c);
             }
+        } else if config.vendor_id().read() == 0x1AF4 && config.device_id().read() == 0x1041 {
+            info!("found virtio-net over PCI");
+            let config = config.as_general_device().unwrap();
+
+            let bars = allocate_all_bars(config, &pci_ranges, &mut io, &mut mem32, &mut mem64);
+            config.common().command().write_bitor(0b111);
+
+            virtio::initialize_net(config, &bars);
         } else if config.vendor_id().read() == 0x1AF4 && config.device_id().read() == 0x1042 {
             info!("found virtio-blk over PCI");
             let config = config.as_general_device().unwrap();

@@ -1,7 +1,7 @@
-use crate::util::volatile::{ReadWrite, Volatile, volatile_struct};
-use crate::virtio::VirtioCommonConfig;
+use crate::util::volatile::{Volatile, volatile_struct};
 use crate::virtio::queue::Queue;
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK};
+use crate::virtio::{NotifySlot, VirtioCommonConfig};
 use log::info;
 
 volatile_struct! { pub VirtioBlkConfig
@@ -16,10 +16,8 @@ struct Header {
 }
 
 pub struct VirtioBlk {
-    common: Volatile<VirtioCommonConfig>,
     device: Volatile<VirtioBlkConfig>,
-    notify: usize,
-    notify_off_multiplier: u32,
+    notify: Volatile<u16>,
 }
 
 #[derive(Debug)]
@@ -33,21 +31,19 @@ static mut VIRTQ: Queue = unsafe { core::mem::zeroed() };
 impl VirtioBlk {
     pub fn new(
         common: Volatile<VirtioCommonConfig>,
+        notify: NotifySlot,
         device: Volatile<VirtioBlkConfig>,
-        notify: usize,
-        notify_off_multiplier: u32,
     ) -> VirtioBlk {
-        initialize_device(common);
+        common.device_status().write(0);
+        common.device_status().write_bitor(STATUS_ACKNOWLEDGE as u8);
+        common.device_status().write_bitor(STATUS_DRIVER as u8);
+        let notify = unsafe { &VIRTQ }.initialize(0, common, &notify);
+        common.device_status().write_bitor(STATUS_DRIVER_OK as u8);
 
         let capacity = device.capacity().read();
         info!("disk has a capacity of {capacity} sectors");
 
-        VirtioBlk {
-            common,
-            device,
-            notify,
-            notify_off_multiplier,
-        }
+        VirtioBlk { device, notify }
     }
 
     #[allow(dead_code)]
@@ -63,7 +59,7 @@ impl VirtioBlk {
         queue.descriptor_writeonly(1, buf, Some(2));
         queue.descriptor_writeonly(2, &mut status, None);
         queue.send(0);
-        self.notify_available();
+        self.notify.write(0);
         queue.recv();
         result_from_status(status)
     }
@@ -81,7 +77,7 @@ impl VirtioBlk {
         queue.descriptor_readonly(1, buf, Some(2));
         queue.descriptor_writeonly(2, &mut status, None);
         queue.send(0);
-        self.notify_available();
+        self.notify.write(0);
         queue.recv();
         result_from_status(status)
     }
@@ -89,23 +85,6 @@ impl VirtioBlk {
     pub fn capacity(&self) -> usize {
         self.device.capacity().read() as usize
     }
-
-    fn notify_available(&mut self) {
-        let address = self.notify
-            + self.common.queue_notify_off().read() as usize * self.notify_off_multiplier as usize;
-        let pointer = unsafe { Volatile::<_, ReadWrite>::new(address as *mut u16) };
-        pointer.write(0);
-    }
-}
-
-fn initialize_device(common: Volatile<VirtioCommonConfig>) {
-    common.device_status().write(0);
-    common.device_status().write_bitor(STATUS_ACKNOWLEDGE as u8);
-    common.device_status().write_bitor(STATUS_DRIVER as u8);
-
-    unsafe { &VIRTQ }.initialize(0, common);
-
-    common.device_status().write_bitor(STATUS_DRIVER_OK as u8);
 }
 
 fn result_from_status(status: u8) -> Result<(), VirtioBlkError> {

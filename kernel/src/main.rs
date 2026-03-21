@@ -34,7 +34,6 @@ use crate::process::{
     schedule_and_switch_to_userspace,
 };
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
-use crate::virtio::initialize_all_virtio_mmio;
 use crate::virtio::virtio_blk::VirtioBlk;
 use ::log::{Level, error};
 use alloc::borrow::ToOwned;
@@ -55,7 +54,6 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     initialize_log(&device_tree);
     initialize_trap_handler();
     log_sbi_metadata();
-    initialize_all_virtio_mmio(&device_tree);
     initialize_all_pci(&device_tree);
 
     let fs_tar = reserve_process::<TarFs>(elf!("CARGO_BIN_FILE_DERAVEL_FILESYSTEM_TAR"));
