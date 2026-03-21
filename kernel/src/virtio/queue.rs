@@ -1,4 +1,5 @@
-use crate::virtio::registers::{Mmio, Registers};
+use crate::util::volatile::Volatile;
+use crate::virtio::registers::Registers;
 use deravel_types::PAGE_SIZE;
 
 pub const QUEUE_SIZE: usize = 16;
@@ -42,7 +43,7 @@ const VIRTQ_DESC_F_NEXT: u16 = 1;
 const VIRTQ_DESC_F_WRITE: u16 = 2;
 
 impl Queue {
-    pub fn initialize<T>(&self, queue_index: u32, regs: Mmio<Registers<T>>) {
+    pub fn initialize<T>(&self, queue_index: u32, regs: Volatile<Registers<T>>) {
         regs.queue_sel().write(queue_index);
         assert_eq!(regs.queue_pfn().read(), 0);
         assert!(QUEUE_SIZE <= regs.queue_size_max().read() as usize);
@@ -72,7 +73,7 @@ impl Queue {
         &mut self,
         descriptor: u16,
         queue_index: u32,
-        regs: Mmio<Registers<T>>,
+        regs: Volatile<Registers<T>>,
     ) {
         self.available.ring[self.available.index as usize % QUEUE_SIZE] = descriptor;
         riscv::asm::fence();

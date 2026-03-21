@@ -1,5 +1,4 @@
-use core::marker::PhantomData;
-use core::ops::{BitOr, Deref};
+use crate::util::volatile::{Volatile, volatile_struct_as_offsets};
 
 pub macro features($driver:ident $struct:ident $base:literal $($has_name:ident $enable_name:ident $bit:literal)*) {
     #[derive(Default)]
@@ -22,27 +21,7 @@ pub macro features($driver:ident $struct:ident $base:literal $($has_name:ident $
     }
 }
 
-pub macro mmio($pub:vis $struct:ident $(<$($param:ident),*>)? $(where $param0:ident: $req0:ident)? $($offset:literal $field_name:ident: $access:ident $field_type:ty,)*) {
-    $pub struct $struct $(<$($param),*> ($(PhantomData<$param>),*))?;
-
-    impl$(<$($param),*>)? $struct $(<$($param),*>)? $(where $param0: $req0)? {
-        $(#[allow(dead_code)]
-        $pub fn $field_name(self: Mmio<Self>) -> Mmio<$field_type, crate::virtio::registers::$access> {
-            Mmio(unsafe { self.0.byte_add($offset) } as *mut $field_type, PhantomData)
-        })*
-    }
-}
-
-pub trait Readable {}
-pub trait Writable {}
-
-pub struct Mmio<T, Access = ReadWrite>(pub *mut T, pub PhantomData<Access>);
-
-pub struct Readonly;
-pub struct Writeonly;
-pub struct ReadWrite;
-
-mmio! { pub Registers<T>
+volatile_struct_as_offsets! { pub Registers<T>
     0x000 magic_value: Readonly u32,
     0x004 version: Readonly u32,
     0x008 device_id: Readonly u32,
@@ -66,57 +45,13 @@ pub const STATUS_ACKNOWLEDGE: u32 = 1;
 pub const STATUS_DRIVER: u32 = 2;
 pub const STATUS_DRIVER_OK: u32 = 4;
 
-impl<T: Copy, Access: Readable> Mmio<T, Access> {
-    pub fn read(&self) -> T {
-        unsafe { self.0.read_volatile() }
-    }
-}
-
-impl<T, Access: Writable> Mmio<T, Access> {
-    pub fn write(&self, value: T) {
-        unsafe { self.0.write_volatile(value) }
-    }
-}
-
-impl<T: BitOr<Output = T>, Access: Readable + Writable> Mmio<T, Access> {
-    pub fn or(&self, value: T) {
-        unsafe { self.0.write_volatile(self.0.read_volatile() | value) }
-    }
-}
-
 impl Registers<()> {
-    pub unsafe fn new(base_address: *mut Self) -> Mmio<Self> {
-        Mmio(base_address, PhantomData)
+    pub unsafe fn new(base_address: *mut Self) -> Volatile<Self> {
+        unsafe { Volatile::new(base_address) }
     }
 
-    pub unsafe fn with_configuration<T>(self: Mmio<Registers<()>>) -> Mmio<Registers<T>> {
-        Mmio(self.0 as *mut Registers<T>, PhantomData)
-    }
-}
-
-impl Readable for Readonly {}
-impl Writable for Writeonly {}
-impl Readable for ReadWrite {}
-impl Writable for ReadWrite {}
-
-impl<T, Access> Deref for Mmio<T, Access> {
-    type Target = T;
-
-    fn deref(&self) -> &T {
-        unreachable!()
-    }
-}
-
-impl<T, Access> Clone for Mmio<T, Access> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T, Access> Copy for Mmio<T, Access> {}
-
-impl<T, Access> core::fmt::Display for Mmio<T, Access> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{:#x}", self.0 as usize)
+    pub unsafe fn with_configuration<T>(self: Volatile<Registers<()>>) -> Volatile<Registers<T>> {
+        let pointer: *mut Registers<()> = From::from(self);
+        unsafe { Volatile::new(pointer as *mut Registers<T>) }
     }
 }

@@ -1,12 +1,11 @@
+use crate::util::volatile::{Volatile, volatile_struct};
 use crate::virtio::queue::Queue;
-use crate::virtio::registers::{
-    Mmio, Registers, STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, mmio,
-};
+use crate::virtio::registers::{Registers, STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK};
 use deravel_types::PAGE_SIZE;
 use log::info;
 
-mmio! { pub Config
-    0x000 capacity: Readonly u64,
+volatile_struct! { pub Config
+    capacity: Readonly u64,
 }
 
 #[repr(C, packed)]
@@ -17,7 +16,7 @@ struct Header {
 }
 
 pub struct VirtioBlk {
-    regs: Mmio<Registers<Config>>,
+    regs: Volatile<Registers<Config>>,
 }
 
 #[derive(Debug)]
@@ -29,7 +28,7 @@ pub const VIRTIO_BLK_T_OUT: u32 = 1;
 static mut VIRTQ: Queue = unsafe { core::mem::zeroed() };
 
 impl VirtioBlk {
-    pub fn new(regs: Mmio<Registers<Config>>) -> VirtioBlk {
+    pub fn new(regs: Volatile<Registers<Config>>) -> VirtioBlk {
         initialize_device(regs);
         VirtioBlk { regs }
     }
@@ -71,16 +70,16 @@ impl VirtioBlk {
     }
 }
 
-fn initialize_device(regs: Mmio<Registers<Config>>) {
+fn initialize_device(regs: Volatile<Registers<Config>>) {
     regs.status().write(0);
-    regs.status().or(STATUS_ACKNOWLEDGE);
-    regs.status().or(STATUS_DRIVER);
+    regs.status().write_bitor(STATUS_ACKNOWLEDGE);
+    regs.status().write_bitor(STATUS_DRIVER);
 
     regs.guest_page_size().write(PAGE_SIZE as u32);
 
     unsafe { &VIRTQ }.initialize(0, regs);
 
-    regs.status().or(STATUS_DRIVER_OK);
+    regs.status().write_bitor(STATUS_DRIVER_OK);
 
     info!(
         "disk has a capacity of {} sectors",

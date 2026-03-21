@@ -5,6 +5,7 @@
 #![feature(never_type)]
 #![feature(slice_from_ptr_range)]
 #![allow(static_mut_refs)]
+#![allow(clippy::missing_safety_doc)]
 #![allow(clippy::type_complexity)]
 #![no_std]
 #![no_main]
@@ -20,6 +21,7 @@ mod page;
 mod pci;
 mod process;
 mod sbi;
+mod util;
 mod virtio;
 
 use crate::arch::{RiscvRegisters, initialize_trap_handler, switch_to_userspace_registers_only};

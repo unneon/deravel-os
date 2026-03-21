@@ -1,6 +1,7 @@
+use crate::util::volatile::{Volatile, volatile_struct};
 use crate::virtio::queue::{QUEUE_SIZE, Queue};
 use crate::virtio::registers::{
-    Mmio, Registers, STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, features, mmio,
+    Registers, STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, features,
 };
 use core::marker::PhantomData;
 use deravel_types::PAGE_SIZE;
@@ -14,8 +15,8 @@ use smoltcp::wire::{
     DnsQueryType, EthernetAddress, HardwareAddress, IpAddress, IpCidr, Ipv4Address,
 };
 
-mmio! { pub Config
-    0x000 mac: Readonly EthernetAddress,
+volatile_struct! { pub Config
+    mac: Readonly EthernetAddress,
 }
 
 features! { VirtioNet Features 0
@@ -40,12 +41,12 @@ struct Packet<T> {
     payload: T,
 }
 
-pub struct PacketReceiveToken<'a>(Mmio<Registers<Config>>, PhantomData<&'a mut ()>);
+pub struct PacketReceiveToken<'a>(Volatile<Registers<Config>>, PhantomData<&'a mut ()>);
 
-pub struct PacketTransmitToken<'a>(Mmio<Registers<Config>>, PhantomData<&'a ()>);
+pub struct PacketTransmitToken<'a>(Volatile<Registers<Config>>, PhantomData<&'a ()>);
 
 pub struct VirtioNet {
-    regs: Mmio<Registers<Config>>,
+    regs: Volatile<Registers<Config>>,
 }
 
 static mut RECEIVE_QUEUE: Queue = unsafe { core::mem::zeroed() };
@@ -54,7 +55,7 @@ static mut TRANSMIT_QUEUE: Queue = unsafe { core::mem::zeroed() };
 static mut TRANSMIT_BUFFERS: [Packet<[u8; 1514]>; QUEUE_SIZE] = unsafe { core::mem::zeroed() };
 
 impl VirtioNet {
-    pub fn new(regs: Mmio<Registers<Config>>) -> VirtioNet {
+    pub fn new(regs: Volatile<Registers<Config>>) -> VirtioNet {
         initialize_device(regs);
         VirtioNet { regs }
     }
@@ -181,10 +182,10 @@ impl smoltcp::phy::TxToken for PacketTransmitToken<'_> {
     }
 }
 
-fn initialize_device(regs: Mmio<Registers<Config>>) {
+fn initialize_device(regs: Volatile<Registers<Config>>) {
     regs.status().write(0);
-    regs.status().or(STATUS_ACKNOWLEDGE);
-    regs.status().or(STATUS_DRIVER);
+    regs.status().write_bitor(STATUS_ACKNOWLEDGE);
+    regs.status().write_bitor(STATUS_DRIVER);
 
     regs.host_features_sel().write(0);
     let host_features = Features(regs.host_features().read());
@@ -203,10 +204,10 @@ fn initialize_device(regs: Mmio<Registers<Config>>) {
     initialize_receive_buffers(regs);
     initialize_transmit_buffers();
 
-    regs.status().or(STATUS_DRIVER_OK);
+    regs.status().write_bitor(STATUS_DRIVER_OK);
 }
 
-fn initialize_receive_buffers(regs: Mmio<Registers<Config>>) {
+fn initialize_receive_buffers(regs: Volatile<Registers<Config>>) {
     let queue = unsafe { &mut RECEIVE_QUEUE };
     for (i, buffer) in unsafe { RECEIVE_BUFFERS.iter_mut() }.enumerate() {
         queue.available.ring[i] = i as u16;
