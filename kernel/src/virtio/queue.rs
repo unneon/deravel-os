@@ -1,9 +1,15 @@
 use crate::util::volatile::Volatile;
 use crate::virtio::{NotifySlot, VirtioCommonConfig};
+use alloc::alloc::{alloc_zeroed, handle_alloc_error};
+use alloc::boxed::Box;
+use alloc::vec;
+use alloc::vec::Vec;
+use core::alloc::Layout;
 
 pub const QUEUE_SIZE: usize = 16;
 
-#[repr(C, packed)]
+#[repr(C, align(16))]
+#[derive(Clone, Default)]
 pub struct Descriptor {
     pub address: u64,
     pub length: u32,
@@ -11,55 +17,94 @@ pub struct Descriptor {
     pub next: u16,
 }
 
-#[repr(C, packed)]
-pub struct Available {
+#[repr(C, align(2))]
+pub struct AvailableRing {
     pub flags: u16,
     pub index: u16,
-    pub ring: [u16; QUEUE_SIZE],
+    pub ring: [u16],
 }
 
-#[repr(C, packed)]
+#[repr(C)]
 pub struct UsedElement {
     pub id: u32,
     pub len: u32,
 }
 
-#[repr(C, align(4096))]
-pub struct Used {
+#[repr(C, align(4))]
+pub struct UsedRing {
     pub flags: u16,
     pub index: u16,
-    pub ring: [UsedElement; QUEUE_SIZE],
+    pub ring: [UsedElement],
 }
 
-#[repr(C, align(4096))]
 pub struct Queue {
-    pub descriptors: [Descriptor; QUEUE_SIZE],
-    pub available: Available,
-    pub used: Used,
+    pub descriptors: Vec<Descriptor>,
+    pub available: Box<AvailableRing>,
+    pub used: Box<UsedRing>,
+    pub notify: Volatile<u16>,
+    pub index: u16,
 }
 
 const VIRTQ_DESC_F_NEXT: u16 = 1;
 const VIRTQ_DESC_F_WRITE: u16 = 2;
 
+impl AvailableRing {
+    fn new(size: usize) -> Box<AvailableRing> {
+        let layout = Layout::from_size_align(4 + 2 * size, 2).unwrap();
+        let thin = unsafe { alloc_zeroed(layout) };
+        if thin.is_null() {
+            handle_alloc_error(layout);
+        }
+        let fat = core::ptr::from_raw_parts_mut(thin, size);
+        unsafe { Box::from_raw(fat) }
+    }
+}
+
+impl UsedRing {
+    fn new(size: usize) -> Box<UsedRing> {
+        let layout = Layout::from_size_align(4 + 8 * size, 4).unwrap();
+        let thin = unsafe { alloc_zeroed(layout) };
+        if thin.is_null() {
+            handle_alloc_error(layout);
+        }
+        let fat = core::ptr::from_raw_parts_mut(thin, size);
+        unsafe { Box::from_raw(fat) }
+    }
+}
+
 impl Queue {
-    pub fn initialize(
-        &self,
-        queue_index: u16,
+    pub fn new(
+        index: u16,
         common: Volatile<VirtioCommonConfig>,
         notify: &NotifySlot,
-    ) -> Volatile<u16> {
-        common.queue_select().write(queue_index);
-        assert!(QUEUE_SIZE <= common.queue_size().read() as usize);
-        common.queue_size().write(QUEUE_SIZE as u16);
-        common
-            .queue_desc()
-            .write(&raw const self.descriptors as u64);
+        size: usize,
+    ) -> Queue {
+        common.queue_select().write(index);
+
+        assert!(size <= common.queue_size().read() as usize);
+        common.queue_size().write(size as u16);
+
+        let descriptors = vec![Descriptor::default(); size];
+        let available = AvailableRing::new(size);
+        let used = UsedRing::new(size);
+        common.queue_desc().write(descriptors.as_ptr() as u64);
         common
             .queue_driver()
-            .write(&raw const self.available as u64);
-        common.queue_device().write(&raw const self.used as u64);
+            .write(&*available as *const _ as *const u8 as u64);
+        common
+            .queue_device()
+            .write(&*used as *const _ as *const u8 as u64);
+
         common.queue_enable().write(1);
-        unsafe { notify.select(common) }
+
+        let notify = unsafe { notify.select(common) };
+        Queue {
+            descriptors,
+            available,
+            used,
+            notify,
+            index,
+        }
     }
 
     pub fn descriptor_readonly<T>(&mut self, index: u16, data: &T, next: Option<u16>) {
@@ -78,14 +123,12 @@ impl Queue {
         descriptor.next = next.unwrap_or(0);
     }
 
-    pub fn send(&mut self, descriptor: u16) {
+    pub fn send_and_recv(&mut self, descriptor: u16) {
         self.available.ring[self.available.index as usize % QUEUE_SIZE] = descriptor;
         riscv::asm::fence();
         self.available.index += 1;
         riscv::asm::fence();
-    }
-
-    pub fn recv(&mut self) {
+        self.notify.write(self.index);
         while unsafe { (&raw const self.used.index).read_volatile() } < self.available.index {}
     }
 }

@@ -1,5 +1,5 @@
 use crate::util::volatile::{Volatile, volatile_struct};
-use crate::virtio::queue::Queue;
+use crate::virtio::queue::{QUEUE_SIZE, Queue};
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK};
 use crate::virtio::{NotifySlot, VirtioCommonConfig};
 use log::info;
@@ -17,7 +17,7 @@ struct Header {
 
 pub struct VirtioBlk {
     device: Volatile<VirtioBlkConfig>,
-    notify: Volatile<u16>,
+    queue: Queue,
 }
 
 #[derive(Debug)]
@@ -25,8 +25,6 @@ pub struct VirtioBlkError;
 
 pub const VIRTIO_BLK_T_IN: u32 = 0;
 pub const VIRTIO_BLK_T_OUT: u32 = 1;
-
-static mut VIRTQ: Queue = unsafe { core::mem::zeroed() };
 
 impl VirtioBlk {
     pub fn new(
@@ -37,13 +35,13 @@ impl VirtioBlk {
         common.device_status().write(0);
         common.device_status().write_bitor(STATUS_ACKNOWLEDGE as u8);
         common.device_status().write_bitor(STATUS_DRIVER as u8);
-        let notify = unsafe { &VIRTQ }.initialize(0, common, &notify);
+        let queue = Queue::new(0, common, &notify, QUEUE_SIZE);
         common.device_status().write_bitor(STATUS_DRIVER_OK as u8);
 
         let capacity = device.capacity().read();
         info!("disk has a capacity of {capacity} sectors");
 
-        VirtioBlk { device, notify }
+        VirtioBlk { device, queue }
     }
 
     #[allow(dead_code)]
@@ -54,13 +52,10 @@ impl VirtioBlk {
             sector,
         };
         let mut status: u8 = 0;
-        let queue = unsafe { &mut VIRTQ };
-        queue.descriptor_readonly(0, &header, Some(1));
-        queue.descriptor_writeonly(1, buf, Some(2));
-        queue.descriptor_writeonly(2, &mut status, None);
-        queue.send(0);
-        self.notify.write(0);
-        queue.recv();
+        self.queue.descriptor_readonly(0, &header, Some(1));
+        self.queue.descriptor_writeonly(1, buf, Some(2));
+        self.queue.descriptor_writeonly(2, &mut status, None);
+        self.queue.send_and_recv(0);
         result_from_status(status)
     }
 
@@ -72,13 +67,10 @@ impl VirtioBlk {
             sector,
         };
         let mut status: u8 = 0;
-        let queue = unsafe { &mut VIRTQ };
-        queue.descriptor_readonly(0, &header, Some(1));
-        queue.descriptor_readonly(1, buf, Some(2));
-        queue.descriptor_writeonly(2, &mut status, None);
-        queue.send(0);
-        self.notify.write(0);
-        queue.recv();
+        self.queue.descriptor_readonly(0, &header, Some(1));
+        self.queue.descriptor_readonly(1, buf, Some(2));
+        self.queue.descriptor_writeonly(2, &mut status, None);
+        self.queue.send_and_recv(0);
         result_from_status(status)
     }
 

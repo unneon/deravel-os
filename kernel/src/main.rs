@@ -3,6 +3,7 @@
 #![feature(decl_macro)]
 #![feature(iter_array_chunks)]
 #![feature(never_type)]
+#![feature(ptr_metadata)]
 #![feature(slice_from_ptr_range)]
 #![allow(static_mut_refs)]
 #![allow(clippy::missing_safety_doc)]
