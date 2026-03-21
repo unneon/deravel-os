@@ -38,14 +38,14 @@ struct Packet<T> {
     payload: T,
 }
 
-pub struct PacketReceiveToken<'a>(&'a mut Queue);
+pub struct PacketReceiveToken<'a>(&'a mut Queue<0>);
 
-pub struct PacketTransmitToken<'a>(&'a mut Queue);
+pub struct PacketTransmitToken<'a>(&'a mut Queue<1>);
 
 pub struct VirtioNet {
     device: Volatile<Config>,
-    rx_queue: Queue,
-    tx_queue: Queue,
+    rx_queue: Queue<0>,
+    tx_queue: Queue<1>,
 }
 
 static mut RECEIVE_BUFFERS: [Packet<[u8; 1514]>; QUEUE_SIZE] = unsafe { core::mem::zeroed() };
@@ -57,7 +57,27 @@ impl VirtioNet {
         notify: NotifySlot,
         device: Volatile<Config>,
     ) -> VirtioNet {
-        let (rx_queue, tx_queue) = initialize_device(common, notify);
+        common.device_status().write(0);
+        common.device_status().write_bitor(STATUS_ACKNOWLEDGE as u8);
+        common.device_status().write_bitor(STATUS_DRIVER as u8);
+
+        common.device_feature_select().write(0);
+        let host_features = Features(common.device_feature().read());
+        assert!(host_features.has_mac());
+
+        let mut driver_features = Features::default();
+        driver_features.enable_mac();
+        common.driver_feature_select().write(0);
+        common.driver_feature().write(driver_features.into());
+
+        let mut rx_queue = Queue::new(common, &notify, QUEUE_SIZE);
+        let mut tx_queue = Queue::new(common, &notify, QUEUE_SIZE);
+
+        initialize_receive_buffers(&mut rx_queue);
+        initialize_transmit_buffers(&mut tx_queue);
+
+        common.device_status().write_bitor(STATUS_DRIVER_OK as u8);
+
         VirtioNet {
             device,
             rx_queue,
@@ -161,7 +181,7 @@ impl smoltcp::phy::RxToken for PacketReceiveToken<'_> {
 
         self.0.available.index += 1;
         riscv::asm::fence();
-        self.0.notify.write(0);
+        self.0.notify();
 
         result
     }
@@ -176,38 +196,13 @@ impl smoltcp::phy::TxToken for PacketTransmitToken<'_> {
         self.0.descriptors[index].length = (size_of::<Header>() + len) as u32;
         self.0.available.index += 1;
         riscv::asm::fence();
-        self.0.notify.write(1);
+        self.0.notify();
 
         result
     }
 }
 
-fn initialize_device(common: Volatile<VirtioCommonConfig>, notify: NotifySlot) -> (Queue, Queue) {
-    common.device_status().write(0);
-    common.device_status().write_bitor(STATUS_ACKNOWLEDGE as u8);
-    common.device_status().write_bitor(STATUS_DRIVER as u8);
-
-    common.device_feature_select().write(0);
-    let host_features = Features(common.device_feature().read());
-    assert!(host_features.has_mac());
-
-    let mut driver_features = Features::default();
-    driver_features.enable_mac();
-    common.driver_feature_select().write(0);
-    common.driver_feature().write(driver_features.into());
-
-    let mut rx_queue = Queue::new(0, common, &notify, QUEUE_SIZE);
-    let mut tx_queue = Queue::new(1, common, &notify, QUEUE_SIZE);
-
-    initialize_receive_buffers(&mut rx_queue);
-    initialize_transmit_buffers(&mut tx_queue);
-
-    common.device_status().write_bitor(STATUS_DRIVER_OK as u8);
-
-    (rx_queue, tx_queue)
-}
-
-fn initialize_receive_buffers(rx_queue: &mut Queue) {
+fn initialize_receive_buffers(rx_queue: &mut Queue<0>) {
     for (i, buffer) in unsafe { RECEIVE_BUFFERS.iter_mut() }.enumerate() {
         rx_queue.available.ring[i] = i as u16;
         rx_queue.descriptor_writeonly(i as u16, buffer, None);
@@ -215,10 +210,10 @@ fn initialize_receive_buffers(rx_queue: &mut Queue) {
     riscv::asm::fence();
     rx_queue.available.index = QUEUE_SIZE as u16;
     riscv::asm::fence();
-    rx_queue.notify.write(rx_queue.index);
+    rx_queue.notify();
 }
 
-fn initialize_transmit_buffers(tx_queue: &mut Queue) {
+fn initialize_transmit_buffers(tx_queue: &mut Queue<1>) {
     for (i, buffer) in unsafe { TRANSMIT_BUFFERS.iter() }.enumerate() {
         tx_queue.available.ring[i] = i as u16;
         tx_queue.descriptor_readonly(i as u16, buffer, None);

@@ -17,7 +17,7 @@ struct Header {
 
 pub struct VirtioBlk {
     device: Volatile<VirtioBlkConfig>,
-    queue: Queue,
+    queue: Queue<0>,
 }
 
 #[derive(Debug)]
@@ -35,7 +35,7 @@ impl VirtioBlk {
         common.device_status().write(0);
         common.device_status().write_bitor(STATUS_ACKNOWLEDGE as u8);
         common.device_status().write_bitor(STATUS_DRIVER as u8);
-        let queue = Queue::new(0, common, &notify, QUEUE_SIZE);
+        let queue = Queue::new(common, &notify, QUEUE_SIZE);
         common.device_status().write_bitor(STATUS_DRIVER_OK as u8);
 
         let capacity = device.capacity().read();

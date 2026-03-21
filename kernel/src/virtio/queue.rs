@@ -37,12 +37,11 @@ pub struct UsedRing {
     pub ring: [UsedElement],
 }
 
-pub struct Queue {
+pub struct Queue<const INDEX: u16> {
     pub descriptors: Vec<Descriptor>,
     pub available: Box<AvailableRing>,
     pub used: Box<UsedRing>,
-    pub notify: Volatile<u16>,
-    pub index: u16,
+    notify: Volatile<u16>,
 }
 
 const VIRTQ_DESC_F_NEXT: u16 = 1;
@@ -72,14 +71,13 @@ impl UsedRing {
     }
 }
 
-impl Queue {
+impl<const INDEX: u16> Queue<INDEX> {
     pub fn new(
-        index: u16,
         common: Volatile<VirtioCommonConfig>,
         notify: &NotifySlot,
         size: usize,
-    ) -> Queue {
-        common.queue_select().write(index);
+    ) -> Queue<INDEX> {
+        common.queue_select().write(INDEX);
 
         assert!(size <= common.queue_size().read() as usize);
         common.queue_size().write(size as u16);
@@ -103,7 +101,6 @@ impl Queue {
             available,
             used,
             notify,
-            index,
         }
     }
 
@@ -128,7 +125,11 @@ impl Queue {
         riscv::asm::fence();
         self.available.index += 1;
         riscv::asm::fence();
-        self.notify.write(self.index);
+        self.notify();
         while unsafe { (&raw const self.used.index).read_volatile() } < self.available.index {}
+    }
+
+    pub fn notify(&mut self) {
+        self.notify.write(INDEX);
     }
 }
