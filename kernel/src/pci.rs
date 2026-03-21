@@ -169,6 +169,11 @@ fn allocate_all_bars(
         bar.write(0xFFFF_FFFF);
         let readback = bar.read();
 
+        if readback == 0 {
+            i += 1;
+            continue;
+        }
+
         // TODO: Figure out the correct alignment here.
         if flags & 1 == 1 {
             let length = (!(readback & !1) + 1) as usize;
