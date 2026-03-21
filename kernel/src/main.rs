@@ -11,6 +11,7 @@
 
 extern crate alloc;
 
+mod allocators;
 mod arch;
 mod elf;
 mod heap;
@@ -164,7 +165,7 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters) -> ! {
         11 => {
             let satp = riscv::register::satp::read();
             unsafe { riscv::register::satp::set(Mode::Bare, 0, 0) }
-            registers.a0 = unsafe { DISK.as_mut().unwrap().capacity() };
+            registers.a0 = unsafe { DISK.as_mut().expect("disk not present").capacity() };
             unsafe { riscv::register::satp::write(satp) }
         }
         12 => {
