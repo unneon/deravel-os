@@ -16,3 +16,8 @@ interface filesystem
     func read(path text) bytes
     func write(path text, data bytes)
     func subcapability(path text) filesystem
+
+interface drive
+    func read(sector u64) bytes
+    func write(sector u64, data bytes)
+    func capacity() u64

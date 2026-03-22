@@ -64,6 +64,7 @@ fn main() {
         output,
     )
     .unwrap();
+    println!("cargo::rerun-if-changed=../interfaces.drvli");
 }
 
 fn parse_interfaces(text: &str) -> Vec<Entity> {

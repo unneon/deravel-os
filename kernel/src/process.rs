@@ -46,7 +46,7 @@ pub struct ProcessReservation<T: ProcessTag> {
     pub export: Capability<T::Export>,
 }
 
-const PROCESS_COUNT: usize = 8;
+pub const PROCESS_COUNT: usize = 8;
 
 unsafe extern "C" {
     static text_start: u8;
@@ -59,7 +59,7 @@ unsafe extern "C" {
 
 pub static mut PROCESSES: [Process; PROCESS_COUNT] = unsafe { core::mem::zeroed() };
 pub static mut CURRENT_PROC: Option<usize> = None;
-pub static mut CAPABILITY_PAGES: [CapabilityPage; PROCESS_COUNT] = [CapabilityPage::empty(); _];
+pub static mut CAPABILITY_PAGES: [CapabilityPage; PROCESS_COUNT + 1] = [CapabilityPage::empty(); _];
 
 impl CapabilityPage {
     const fn empty() -> CapabilityPage {
@@ -87,18 +87,21 @@ pub fn reserve_process<T: ProcessTag>(elf: &'static [u8]) -> ProcessReservation<
     let proc = unsafe { &mut PROCESSES[pid] };
     proc.state = ProcessState::Reserved;
     ProcessReservation {
-        id: ProcessId(pid),
+        id: ProcessId::new(pid),
         elf,
-        export: Capability(RawCapability::new(ProcessId(pid), 0), PhantomData),
+        export: Capability(RawCapability::new(ProcessId::new(pid), 0), PhantomData),
     }
 }
 
 pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: ProcessInputs<T>) {
-    let pid = inputs.id.0;
+    let pid = inputs.id.as_usize();
 
     inputs.args.for_all(|cap: RawCapability| unsafe {
-        CAPABILITY_PAGES[cap.certifier().0].0[cap.local_index()] =
-            CapabilityCertificate::granted(ProcessId(pid))
+        CAPABILITY_PAGES[match cap.certifier() {
+            Actor::Userspace(pid) => pid.as_usize(),
+            Actor::Kernel => PROCESS_COUNT,
+        }]
+        .0[cap.local_index()] = CapabilityCertificate::granted(ProcessId::new(pid))
     });
 
     let mut page_table = Box::new(PageTable::new());

@@ -158,6 +158,7 @@ fn main() {
 
 fn rust_arg_type(type_: &str) -> Cow<'static, str> {
     match type_ {
+        "u64" => "u64".into(),
         "text" => "&str".into(),
         "bytes" => "&[u8]".into(),
         _ => format!("Capability<{}>", camel_case(type_)).into(),
@@ -166,6 +167,7 @@ fn rust_arg_type(type_: &str) -> Cow<'static, str> {
 
 fn rust_ret_type(type_: &str) -> Cow<'static, str> {
     match type_ {
+        "u64" => "u64".into(),
         "text" => "String".into(),
         "bytes" => "Vec<u8>".into(),
         _ => format!("Capability<{}>", camel_case(type_)).into(),
@@ -207,6 +209,7 @@ fn parse_entity(name: &str, lines: &mut Lines) -> Entity {
             let (method_args, line) = line.split_once(")").unwrap();
             let method_args: Vec<_> = method_args
                 .split(", ")
+                .filter(|s| !s.is_empty())
                 .map(|arg| {
                     let (name, type_) = arg.split_once(' ').unwrap();
                     (name.to_owned(), type_.to_owned())

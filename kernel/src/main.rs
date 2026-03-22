@@ -32,7 +32,7 @@ use crate::log::{initialize_log, log_userspace};
 use crate::page::{PageFlags, PageTable, map_pages};
 use crate::pci::initialize_all_pci;
 use crate::process::{
-    CAPABILITY_PAGES, CURRENT_PROC, PROCESSES, ProcessState, reserve_process,
+    CAPABILITY_PAGES, CURRENT_PROC, PROCESS_COUNT, PROCESSES, ProcessState, reserve_process,
     schedule_and_switch_to_userspace,
 };
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
@@ -198,7 +198,8 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters) -> ! {
                 registers.a0 = result.len();
                 unsafe { PROCESSES[CURRENT_PROC.unwrap()].state = ProcessState::Runnable };
             } else {
-                let farthest_cap = RawCapability(registers.a0 as *const CapabilityCertificate);
+                let farthest_cap =
+                    RawCapability::from_pointer(registers.a0 as *mut CapabilityCertificate);
                 let method = registers.a1;
                 let args_ptr = registers.a2 as *const u8;
                 let args_len = registers.a3;
@@ -210,33 +211,45 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters) -> ! {
                 proc.pc = user_pc;
 
                 let mut capability = farthest_cap;
-                let mut sender = unsafe { CURRENT_PROC.unwrap() };
+                let mut sender = Actor::Userspace(ProcessId::new(unsafe { CURRENT_PROC.unwrap() }));
                 let original = loop {
-                    assert!(capability.is_pointer_valid());
                     let certifier = capability.certifier();
-                    let certificate =
-                        unsafe { CAPABILITY_PAGES[certifier.0].0[capability.local_index()] };
+                    let certificate = unsafe {
+                        CAPABILITY_PAGES[match certifier {
+                            Actor::Userspace(pid) => pid.as_usize(),
+                            Actor::Kernel => PROCESS_COUNT,
+                        }]
+                        .0[capability.local_index()]
+                    };
                     match certificate.unpack() {
                         CapabilityCertificateUnpacked::Granted { grantee } => {
-                            assert!(grantee.0 == sender);
+                            assert!(grantee == sender);
                             break capability;
                         }
                         CapabilityCertificateUnpacked::Forwarded { forwardee, inner } => {
-                            assert!(forwardee.0 == sender);
+                            assert!(forwardee == sender);
                             capability = inner;
-                            sender = certifier.0;
+                            sender = certifier;
                         }
                     }
                 };
-                let dest = original.certifier();
-                let dest = unsafe { &mut PROCESSES[dest.0] };
-                dest.messages
-                    .get_or_insert_default()
-                    .push_back((original, method, args, unsafe {
-                        ProcessId(CURRENT_PROC.unwrap())
-                    }));
 
-                schedule_and_switch_to_userspace();
+                match original.certifier() {
+                    Actor::Userspace(dest) => {
+                        let dest = unsafe { &mut PROCESSES[dest.as_usize()] };
+                        dest.messages.get_or_insert_default().push_back((
+                            original,
+                            method,
+                            args,
+                            unsafe { ProcessId::new(CURRENT_PROC.unwrap()) },
+                        ));
+
+                        schedule_and_switch_to_userspace();
+                    }
+                    Actor::Kernel => {
+                        unimplemented!()
+                    }
+                }
             }
         }
         14 => {
@@ -252,10 +265,10 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters) -> ! {
                 assert!(args.len() <= buf_max_len);
                 let buf = unsafe { core::slice::from_raw_parts_mut(buf, args.len()) };
                 buf.copy_from_slice(args.as_bytes());
-                registers.a0 = cap.0 as usize;
+                registers.a0 = cap.as_usize();
                 registers.a1 = method;
                 registers.a2 = args.len();
-                registers.a3 = sender.0;
+                registers.a3 = sender.as_usize();
                 unsafe { PROCESSES[CURRENT_PROC.unwrap()].currently_serving = Some(sender) };
             } else {
                 let proc = unsafe { &mut PROCESSES[CURRENT_PROC.unwrap()] };
@@ -278,7 +291,7 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters) -> ! {
                     .take()
                     .unwrap()
             };
-            unsafe { PROCESSES[caller.0].reply = Some(result.into()) };
+            unsafe { PROCESSES[caller.as_usize()].reply = Some(result.into()) };
         }
         _ => panic!("invalid syscall number {}", registers.a6),
     }

@@ -2,17 +2,18 @@ use crate::current_pid;
 use core::marker::PhantomData;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use deravel_types::{
-    CAPABILITIES_START, Capability, CapabilityCertificate, CapabilityCertificateUnpacked,
-    ProcessId, RawCapability,
+    Actor, Capability, CapabilityCertificate, CapabilityCertificateUnpacked, RawCapability,
+    get_capability_certificate_page,
 };
 use log::trace;
 
 static CAPABILITIES_ALLOCATED: AtomicUsize = AtomicUsize::new(0);
 
-pub fn grant_capability<T>(grantee: ProcessId) -> Capability<T> {
+pub fn grant_capability<T>(grantee: impl Into<Actor>) -> Capability<T> {
+    let grantee = grantee.into();
     let certificate = allocate_certificate();
     *certificate = CapabilityCertificate::granted(grantee);
-    let cap = Capability(RawCapability(certificate), PhantomData);
+    let cap = Capability(RawCapability::from_pointer(certificate), PhantomData);
     trace!("granted {cap:?} to {grantee:?}");
     cap
 }
@@ -20,17 +21,16 @@ pub fn grant_capability<T>(grantee: ProcessId) -> Capability<T> {
 pub fn forward_capability<T, U>(cap: Capability<T>, forwardee: Capability<U>) -> Capability<T> {
     let certificate = allocate_certificate();
     *certificate = CapabilityCertificate::forwarded(forwardee.certifier(), cap.0);
-    let forwarded = Capability(RawCapability(certificate), PhantomData);
+    let forwarded = Capability(RawCapability::from_pointer(certificate), PhantomData);
     trace!("forwarded {cap:?} as {forwarded:?} to {forwardee:?}");
     forwarded
 }
 
-pub fn validate_capability(cap: RawCapability, claimer: ProcessId) -> RawCapability {
+pub fn validate_capability(cap: RawCapability, claimer: Actor) -> RawCapability {
     trace!("validating capability {cap:?} from process {claimer:?}");
     let mut capability = cap;
     let mut sender = claimer;
     let original = loop {
-        assert!(capability.is_pointer_valid());
         let certifier = capability.certifier();
         match read_certificate(capability).unpack() {
             CapabilityCertificateUnpacked::Granted { grantee } => {
@@ -46,13 +46,16 @@ pub fn validate_capability(cap: RawCapability, claimer: ProcessId) -> RawCapabil
             }
         }
     };
-    assert!(original.certifier() == current_pid());
+    assert!(original.certifier() == current_pid().into());
     original
 }
 
 fn read_certificate(cap: RawCapability) -> CapabilityCertificate {
-    assert!(cap.is_pointer_valid());
-    unsafe { *cap.0 }
+    unsafe {
+        get_capability_certificate_page(cap.certifier())
+            .add(cap.local_index())
+            .read()
+    }
 }
 
 fn allocate_certificate() -> &'static mut CapabilityCertificate {
@@ -61,8 +64,7 @@ fn allocate_certificate() -> &'static mut CapabilityCertificate {
         index < 4096 / size_of::<CapabilityCertificate>(),
         "out of capability certificate slots"
     );
-    let all_certificates = CAPABILITIES_START as *mut CapabilityCertificate;
-    let our_certificates = unsafe { all_certificates.byte_add(4096 * current_pid().0) };
+    let our_certificates = get_capability_certificate_page(current_pid().into());
     let certificate = unsafe { our_certificates.add(index) };
     unsafe { &mut *certificate }
 }
