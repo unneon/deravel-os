@@ -12,4 +12,8 @@ elf = { version = "0.8", default-features = false }
 fdt = { version = "0.1", features = ["pretty-printing"] }
 log = "0.4"
 riscv = "0.16"
+serde_json = { version = "1.0", features = ["alloc"], default-features = false }
 smoltcp = { version = "0.12", features = ["log", "medium-ethernet", "proto-ipv4", "socket-dns", "socket-udp"], default-features = false }
+
+[build-dependencies]
+deravel-codegen = { path = "../codegen" }

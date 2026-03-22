@@ -1,8 +1,9 @@
 use crate::sectors::SequentialSectors;
 use crate::{File, SECTOR_SIZE, TarHeaderBuf};
+use deravel_kernel_api::{Capability, Drive};
 
-pub fn serialize_archive(files: &[File]) {
-    let mut sectors = SequentialSectors::new();
+pub fn serialize_archive(files: &[File], drive: Capability<Drive>) {
+    let mut sectors = SequentialSectors::new(drive);
     for file in files {
         let mut buf = TarHeaderBuf {
             bytes: [0; SECTOR_SIZE],

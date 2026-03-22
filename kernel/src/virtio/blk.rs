@@ -2,7 +2,8 @@ use crate::util::volatile::{Volatile, volatile_struct};
 use crate::virtio::queue::{QUEUE_SIZE, Queue};
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK};
 use crate::virtio::{NotifySlot, VirtioCommonConfig};
-use log::info;
+use log::{info, trace};
+use riscv::register::satp::Mode;
 
 volatile_struct! { pub VirtioBlkConfig
     capacity: Readonly u64,
@@ -75,7 +76,11 @@ impl VirtioBlk {
     }
 
     pub fn capacity(&self) -> usize {
-        self.device.capacity().read() as usize
+        let old_satp = riscv::register::satp::read();
+        unsafe { riscv::register::satp::set(Mode::Bare, 0, 0) }
+        let capacity = self.device.capacity().read() as usize;
+        unsafe { riscv::register::satp::write(old_satp) }
+        capacity
     }
 }
 

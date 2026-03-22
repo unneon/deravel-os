@@ -4,13 +4,14 @@ use alloc::borrow::ToOwned;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::ffi::CStr;
+use deravel_kernel_api::{Capability, Drive};
 
-pub fn deserialize_archive() -> Vec<File> {
+pub fn deserialize_archive(drive: Capability<Drive>) -> Vec<File> {
     let mut buf = TarHeaderBuf {
         bytes: [0; SECTOR_SIZE],
     };
     let mut files = Vec::new();
-    let mut sectors = SequentialSectors::new();
+    let mut sectors = SequentialSectors::new(drive);
     while !sectors.is_finished() {
         // Hopefully one day Rust will get safe transmute and something this simple will
         // become nice and safe. The alternative is error-prone indexing with prefix

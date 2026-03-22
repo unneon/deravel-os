@@ -110,18 +110,6 @@ unsafe extern "C" fn __deravel_entry() -> ! {
     )
 }
 
-pub fn disk_capacity() -> usize {
-    unsafe { syscall::disk_capacity() }
-}
-
-pub fn disk_read(sector: usize, buf: &mut [u8; 512]) {
-    unsafe { syscall::disk_read(sector, buf) }
-}
-
-pub fn disk_write(sector: usize, buf: &[u8; 512]) {
-    unsafe { syscall::disk_write(sector, buf) }
-}
-
 pub fn exit() -> ! {
     unsafe { syscall::exit() }
 }

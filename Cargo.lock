@@ -35,6 +35,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "deravel-codegen"
+version = "0.0.0"
+
+[[package]]
 name = "deravel-filesystem-tar"
 version = "0.0.0"
 dependencies = [
@@ -47,12 +51,14 @@ name = "deravel-kernel"
 version = "0.0.0"
 dependencies = [
  "deravel-apps",
+ "deravel-codegen",
  "deravel-filesystem-tar",
  "deravel-types",
  "elf",
  "fdt",
  "log",
  "riscv",
+ "serde_json",
  "smoltcp",
 ]
 
@@ -60,6 +66,7 @@ dependencies = [
 name = "deravel-kernel-api"
 version = "0.0.0"
 dependencies = [
+ "deravel-codegen",
  "deravel-types",
  "log",
  "serde",
@@ -70,6 +77,7 @@ dependencies = [
 name = "deravel-types"
 version = "0.0.0"
 dependencies = [
+ "deravel-codegen",
  "serde",
 ]
 

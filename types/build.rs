@@ -1,18 +1,5 @@
+use deravel_codegen::{EntityDetails, camel_case, parse_interfaces};
 use std::fmt::Write;
-use std::str::Lines;
-
-struct Entity {
-    name: String,
-    details: EntityDetails,
-}
-
-enum EntityDetails {
-    App {
-        args: Vec<(String, String)>,
-        implements: Option<String>,
-    },
-    Interface,
-}
 
 fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -65,57 +52,4 @@ fn main() {
     )
     .unwrap();
     println!("cargo::rerun-if-changed=../interfaces.drvli");
-}
-
-fn parse_interfaces(text: &str) -> Vec<Entity> {
-    let mut lines = text.lines();
-    let mut parsed = Vec::new();
-    while let Some(line) = lines.next() {
-        if let Some(line) = line.strip_prefix("app ") {
-            let name_len = line.find(['(', ' ']).unwrap_or(line.len());
-            let name = &line[..name_len];
-            let line = &line[name_len..];
-            let (args, line) = if let Some(line) = line.strip_prefix("(") {
-                let (args, line) = line.split_once(')').unwrap();
-                let args = args
-                    .split(", ")
-                    .filter(|arg| !arg.is_empty())
-                    .map(|arg| {
-                        let (name, type_) = arg.split_once(' ').unwrap();
-                        (name.to_owned(), type_.to_owned())
-                    })
-                    .collect();
-                (args, line)
-            } else {
-                (Vec::new(), line)
-            };
-            let line = line.trim();
-            let implements = line.strip_prefix("implements ").map(str::to_owned);
-            let entity = parse_entity(name, EntityDetails::App { args, implements }, &mut lines);
-            parsed.push(entity);
-        } else if let Some(name) = line.strip_prefix("interface ") {
-            let entity = parse_entity(name, EntityDetails::Interface, &mut lines);
-            parsed.push(entity);
-        }
-    }
-    parsed
-}
-
-fn parse_entity(name: &str, details: EntityDetails, lines: &mut Lines) -> Entity {
-    while let Some(line) = lines.next()
-        && line.starts_with("    ")
-    {}
-    Entity {
-        name: name.to_owned(),
-        details,
-    }
-}
-
-fn camel_case(name: &str) -> String {
-    let mut camel = String::new();
-    for segment in name.split('_') {
-        camel.push(segment.as_bytes()[0].to_ascii_uppercase() as char);
-        camel += &segment[1..];
-    }
-    camel
 }

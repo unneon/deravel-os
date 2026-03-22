@@ -16,6 +16,8 @@ extern crate alloc;
 
 mod allocators;
 mod arch;
+mod capability;
+mod drvli;
 mod elf;
 mod heap;
 mod log;
@@ -27,6 +29,8 @@ mod util;
 mod virtio;
 
 use crate::arch::{RiscvRegisters, initialize_trap_handler, switch_to_userspace_registers_only};
+use crate::capability::HANDLERS;
+use crate::drvli::DriveServer;
 use crate::elf::elf;
 use crate::log::{initialize_log, log_userspace};
 use crate::page::{PageFlags, PageTable, map_pages};
@@ -37,17 +41,42 @@ use crate::process::{
 };
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use crate::virtio::blk::VirtioBlk;
-use ::log::{Level, error};
+use ::log::{Level, error, trace};
 use alloc::borrow::ToOwned;
+use alloc::boxed::Box;
 use alloc::vec;
+use alloc::vec::Vec;
+use core::marker::PhantomData;
 use core::panic::PanicInfo;
 use deravel_types::*;
 use fdt::Fdt;
 use riscv::interrupt::Trap;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
-use riscv::register::satp::Mode;
+
+struct DriveHandler {}
 
 static mut DISK: Option<VirtioBlk> = None;
+
+impl DriveServer for DriveHandler {
+    fn read(&self, sector: u64) -> Vec<u8> {
+        let mut buf = Box::new([0; 512]);
+        unsafe { DISK.as_mut().unwrap().read(sector, &mut buf).unwrap() }
+        Vec::from(buf as Box<[u8]>)
+    }
+
+    fn write(&self, sector: u64, data: &[u8]) {
+        unsafe {
+            DISK.as_mut()
+                .unwrap()
+                .write(sector, data.try_into().unwrap())
+                .unwrap()
+        }
+    }
+
+    fn capacity(&self) -> u64 {
+        unsafe { DISK.as_mut().unwrap().capacity() as u64 }
+    }
+}
 
 fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     clear_bss();
@@ -64,13 +93,19 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     let ipc_c = reserve_process::<IpcC>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-c"));
     // let hello = reserve_process::<Hello>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_hello"));
     // let shell = reserve_process::<Shell>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_shell"));
+
+    unsafe { CAPABILITY_PAGES[PROCESS_COUNT].0[0] = CapabilityCertificate::granted(fs_tar.id) }
+    unsafe { HANDLERS[0] = Some(Box::new(Box::new(DriveHandler {}) as Box<dyn DriveServer>)) }
+
     ipc_a.spawn(IpcAArgs {
         fs: fs_tar.export,
         b: ipc_b.export,
     });
     ipc_b.spawn(IpcBArgs { c: ipc_c.export });
     ipc_c.spawn(IpcCArgs {});
-    fs_tar.spawn(TarFsArgs {});
+    fs_tar.spawn(TarFsArgs {
+        drive: Capability(RawCapability::new(Actor::Kernel, 0), PhantomData),
+    });
     // hello.spawn(HelloArgs {});
     // shell.spawn(ShellArgs {});
 
@@ -142,33 +177,6 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters) -> ! {
                 unsafe { PROCESSES[CURRENT_PROC.unwrap()].name.unwrap() },
                 text,
             );
-        }
-        9 => {
-            let sector = registers.a0 as u64;
-            let mut buf = [0; 512];
-
-            let satp = riscv::register::satp::read();
-            unsafe { riscv::register::satp::set(Mode::Bare, 0, 0) }
-            unsafe { DISK.as_mut().unwrap().read(sector, &mut buf).unwrap() }
-            unsafe { riscv::register::satp::write(satp) }
-
-            let user_buf_ptr = unsafe { &mut *(registers.a1 as *mut [u8; 512]) };
-            user_buf_ptr.copy_from_slice(&buf);
-        }
-        10 => {
-            let sector = registers.a0 as u64;
-            let buf = unsafe { *(registers.a1 as *const [u8; 512]) };
-
-            let satp = riscv::register::satp::read();
-            unsafe { riscv::register::satp::set(Mode::Bare, 0, 0) }
-            unsafe { DISK.as_mut().unwrap().write(sector, &buf).unwrap() }
-            unsafe { riscv::register::satp::write(satp) }
-        }
-        11 => {
-            let satp = riscv::register::satp::read();
-            unsafe { riscv::register::satp::set(Mode::Bare, 0, 0) }
-            registers.a0 = unsafe { DISK.as_mut().expect("disk not present").capacity() };
-            unsafe { riscv::register::satp::write(satp) }
         }
         12 => {
             let page_count = registers.a0;
@@ -247,7 +255,16 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters) -> ! {
                         schedule_and_switch_to_userspace();
                     }
                     Actor::Kernel => {
-                        unimplemented!()
+                        let local_index = original.local_index();
+                        let handler = unsafe { HANDLERS[local_index].as_ref().unwrap() };
+                        let result = handler.handle(method, args.as_bytes());
+                        let buf_ptr = registers.a4 as *mut u8;
+                        let buf_len = registers.a5;
+                        assert!(result.len() <= buf_len);
+                        let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr, result.len()) };
+                        buf.copy_from_slice(&result);
+                        registers.a0 = result.len();
+                        unsafe { PROCESSES[CURRENT_PROC.unwrap()].state = ProcessState::Runnable };
                     }
                 }
             }

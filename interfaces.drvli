@@ -10,7 +10,7 @@ app ipc_c
 
 app shell
 
-app tar_fs implements filesystem
+app tar_fs(drive drive) implements filesystem
 
 interface filesystem
     func read(path text) bytes

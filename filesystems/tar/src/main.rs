@@ -29,6 +29,7 @@ struct File {
 }
 
 struct Server {
+    drive: Capability<Drive>,
     files: Vec<File>,
     capabilities: Vec<CapabilityData>,
 }
@@ -90,7 +91,7 @@ impl FilesystemServer for Server {
             data,
             size,
         });
-        serialize_archive(&self.files);
+        serialize_archive(&self.files, self.drive);
     }
 
     fn subcapability(
@@ -107,12 +108,13 @@ impl FilesystemServer for Server {
     }
 }
 
-fn main(_: Args) {
-    let files = deserialize_archive();
+fn main(args: Args) {
+    let files = deserialize_archive(args.drive);
     let capabilities = vec![CapabilityData {
         path: String::new(),
     }];
     ipc_serve_filesystem(Server {
+        drive: args.drive,
         files,
         capabilities,
     })

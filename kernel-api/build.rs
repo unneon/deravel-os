@@ -1,17 +1,7 @@
-use std::borrow::Cow;
+use deravel_codegen::{
+    camel_case, parse_interfaces, rust_arg_type, rust_borrow_or_copy, rust_ret_type,
+};
 use std::fmt::Write;
-use std::str::Lines;
-
-struct Entity {
-    name: String,
-    methods: Vec<Method>,
-}
-
-struct Method {
-    name: String,
-    args: Vec<(String, String)>,
-    return_type: Option<String>,
-}
 
 fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -154,86 +144,5 @@ fn main() {
         output,
     )
     .unwrap();
-}
-
-fn rust_arg_type(type_: &str) -> Cow<'static, str> {
-    match type_ {
-        "u64" => "u64".into(),
-        "text" => "&str".into(),
-        "bytes" => "&[u8]".into(),
-        _ => format!("Capability<{}>", camel_case(type_)).into(),
-    }
-}
-
-fn rust_ret_type(type_: &str) -> Cow<'static, str> {
-    match type_ {
-        "u64" => "u64".into(),
-        "text" => "String".into(),
-        "bytes" => "Vec<u8>".into(),
-        _ => format!("Capability<{}>", camel_case(type_)).into(),
-    }
-}
-
-fn rust_borrow_or_copy(type_: &str) -> &'static str {
-    match type_ {
-        "text" => "&",
-        "bytes" => "&",
-        _ => "",
-    }
-}
-
-fn parse_interfaces(text: &str) -> Vec<Entity> {
-    let mut lines = text.lines();
-    let mut parsed = Vec::new();
-    while let Some(line) = lines.next() {
-        if let Some(line) = line.strip_prefix("app ") {
-            let name_len = line.find(['(', ' ']).unwrap_or(line.len());
-            let name = &line[..name_len];
-            let entity = parse_entity(name, &mut lines);
-            parsed.push(entity);
-        } else if let Some(name) = line.strip_prefix("interface ") {
-            let entity = parse_entity(name, &mut lines);
-            parsed.push(entity);
-        }
-    }
-    parsed
-}
-
-fn parse_entity(name: &str, lines: &mut Lines) -> Entity {
-    let mut methods = Vec::new();
-    while let Some(line) = lines.next()
-        && let Some(line) = line.strip_prefix("    ")
-    {
-        if let Some(line) = line.strip_prefix("func ") {
-            let (method_name, line) = line.split_once('(').unwrap();
-            let (method_args, line) = line.split_once(")").unwrap();
-            let method_args: Vec<_> = method_args
-                .split(", ")
-                .filter(|s| !s.is_empty())
-                .map(|arg| {
-                    let (name, type_) = arg.split_once(' ').unwrap();
-                    (name.to_owned(), type_.to_owned())
-                })
-                .collect();
-            let method_return_type = line.strip_prefix(" ").map(str::to_owned);
-            methods.push(Method {
-                name: method_name.to_owned(),
-                args: method_args,
-                return_type: method_return_type,
-            });
-        }
-    }
-    Entity {
-        name: name.to_owned(),
-        methods,
-    }
-}
-
-fn camel_case(name: &str) -> String {
-    let mut camel = String::new();
-    for segment in name.split('_') {
-        camel.push(segment.as_bytes()[0].to_ascii_uppercase() as char);
-        camel += &segment[1..];
-    }
-    camel
+    println!("cargo::rerun-if-changed=../interfaces.drvli");
 }

@@ -1,9 +1,11 @@
 [workspace]
 members = [
     "apps",
+    "codegen",
     "filesystems/tar",
     "kernel",
     "kernel-api",
     "types",
 ]
+default-members = ["kernel"]
 resolver = "3"
