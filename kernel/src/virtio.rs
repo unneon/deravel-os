@@ -3,13 +3,13 @@ use crate::pci::{
     AllocatedRange, GeneralDeviceConfig, PciCapability, VendorPciCapability, walk_capabilities,
 };
 use crate::util::volatile::{Volatile, volatile_struct};
-use crate::virtio::virtio_blk::VirtioBlk;
-use crate::virtio::virtio_net::VirtioNet;
+use crate::virtio::blk::VirtioBlk;
+use crate::virtio::net::VirtioNet;
 
+pub mod blk;
+pub mod net;
 pub mod queue;
 pub mod registers;
-pub mod virtio_blk;
-pub mod virtio_net;
 
 struct Configs<T> {
     common: Volatile<VirtioCommonConfig>,

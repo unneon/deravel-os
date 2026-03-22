@@ -13,8 +13,8 @@ struct PrettyLogLevel(Level);
 struct PrettyModulePath<'a>(Option<&'a str>);
 
 impl log::Log for Logger {
-    fn enabled(&self, _: &Metadata) -> bool {
-        true
+    fn enabled(&self, metadata: &Metadata) -> bool {
+        !metadata.target().starts_with("smoltcp")
     }
 
     fn log(&self, record: &Record) {
@@ -58,8 +58,15 @@ impl core::fmt::Display for PrettyModulePath<'_> {
         if path == "deravel_kernel" {
             return Ok(());
         }
-        let last = path.split("::").last().unwrap();
-        write!(f, "\x1B[1m{last}: \x1B[0m")
+        write!(f, "\x1B[1m")?;
+        for segment in path
+            .split("::")
+            .filter(|&seg| seg != "deravel_kernel")
+            .intersperse(".")
+        {
+            write!(f, "{segment}")?;
+        }
+        write!(f, ":\x1B[0m ")
     }
 }
 

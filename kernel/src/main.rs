@@ -2,6 +2,7 @@
 #![feature(arbitrary_self_types)]
 #![feature(decl_macro)]
 #![feature(iter_array_chunks)]
+#![feature(iter_intersperse)]
 #![feature(never_type)]
 #![feature(ptr_metadata)]
 #![feature(slice_from_ptr_range)]
@@ -35,7 +36,7 @@ use crate::process::{
     schedule_and_switch_to_userspace,
 };
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
-use crate::virtio::virtio_blk::VirtioBlk;
+use crate::virtio::blk::VirtioBlk;
 use ::log::{Level, error};
 use alloc::borrow::ToOwned;
 use alloc::vec;
