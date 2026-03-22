@@ -2,7 +2,8 @@
 
 (mkdir -p disk && cd disk && tar cf ../disk.tar --format=ustar *.txt)
 
-timeout -f 5 qemu-system-riscv64 \
+#timeout -f 5 \
+qemu-system-riscv64 \
     -machine virt \
     -bios default \
     -nographic \

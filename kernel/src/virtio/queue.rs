@@ -5,7 +5,6 @@ use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::alloc::Layout;
-use log::trace;
 use riscv::register::satp::Mode;
 
 pub const QUEUE_SIZE: usize = 16;

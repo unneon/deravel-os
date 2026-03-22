@@ -24,7 +24,7 @@ pub enum CapabilityCertificateUnpacked {
     },
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub enum Actor {
     Userspace(ProcessId),
     Kernel,
@@ -143,6 +143,15 @@ impl<T> core::ops::Deref for Capability<T> {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl core::fmt::Debug for Actor {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Actor::Userspace(pid) => write!(f, "{}", pid.as_usize()),
+            Actor::Kernel => write!(f, "kernel"),
+        }
     }
 }
 

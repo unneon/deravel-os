@@ -2,7 +2,7 @@ use crate::util::volatile::{Volatile, volatile_struct};
 use crate::virtio::queue::{QUEUE_SIZE, Queue};
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK};
 use crate::virtio::{NotifySlot, VirtioCommonConfig};
-use log::{info, trace};
+use log::info;
 use riscv::register::satp::Mode;
 
 volatile_struct! { pub VirtioBlkConfig

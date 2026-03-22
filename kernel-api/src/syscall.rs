@@ -111,29 +111,23 @@ unsafe impl<A: FromRet, B: FromRet, C: FromRet, D: FromRet> FromRet for (A, B, C
 }
 
 syscalls! {
-    #[no = 1]
+    #[no = 0]
     pub fn exit() -> !;
 
-    #[no = 2]
-    pub fn putchar(ch: u8);
-
-    #[no = 3]
-    pub fn getchar() -> u8;
-
-    #[no = 8]
-    pub fn log(text: *const u8, text_len: usize, level: usize);
-
-    #[no = 12]
-    pub fn allocate_pages(count: usize) -> *mut u8;
-
-    #[no = 13]
+    #[no = 1]
     pub fn ipc_call(cap: RawCapability, method: usize, args: *const u8, args_len: usize, result: *mut u8, result_max_len: usize) -> usize;
 
-    #[no = 14]
+    #[no = 2]
     pub fn ipc_receive(args: *mut u8, args_max_len: usize) -> (RawCapability, usize, usize, ProcessId);
 
-    #[no = 15]
+    #[no = 3]
     pub fn ipc_reply(result: *const u8, result_len: usize);
+
+    #[no = 4]
+    pub fn allocate_pages(count: usize) -> *mut u8;
+
+    #[no = 5]
+    pub fn log(text: *const u8, text_len: usize, level: usize);
 }
 
 unsafe fn to_arg<T: Copy>(rust: T) -> usize {

@@ -30,7 +30,7 @@ mod virtio;
 
 use crate::arch::{RiscvRegisters, initialize_trap_handler, switch_to_userspace_registers_only};
 use crate::capability::HANDLERS;
-use crate::drvli::DriveServer;
+use crate::drvli::{ConsoleServer, DriveServer};
 use crate::elf::elf;
 use crate::log::{initialize_log, log_userspace};
 use crate::page::{PageFlags, PageTable, map_pages};
@@ -41,7 +41,7 @@ use crate::process::{
 };
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use crate::virtio::blk::VirtioBlk;
-use ::log::{Level, error, trace};
+use ::log::{Level, error};
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::vec;
@@ -53,9 +53,22 @@ use fdt::Fdt;
 use riscv::interrupt::Trap;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
 
+struct ConsoleHandler;
 struct DriveHandler {}
 
 static mut DISK: Option<VirtioBlk> = None;
+
+impl ConsoleServer for ConsoleHandler {
+    fn getchar(&self) -> u8 {
+        let mut c = 0;
+        while sbi::debug_console_read(core::slice::from_mut(&mut c)).unwrap() == 0 {}
+        c
+    }
+
+    fn putchar(&self, c: u8) {
+        sbi::debug_console_write_byte(c).unwrap()
+    }
+}
 
 impl DriveServer for DriveHandler {
     fn read(&self, sector: u64) -> Vec<u8> {
@@ -87,27 +100,43 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     log_sbi_metadata();
     initialize_all_pci(&device_tree);
 
-    let fs_tar = reserve_process::<TarFs>(elf!("CARGO_BIN_FILE_DERAVEL_FILESYSTEM_TAR"));
-    let ipc_a = reserve_process::<IpcA>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-a"));
-    let ipc_b = reserve_process::<IpcB>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-b"));
-    let ipc_c = reserve_process::<IpcC>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-c"));
-    // let hello = reserve_process::<Hello>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_hello"));
-    // let shell = reserve_process::<Shell>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_shell"));
+    // let fs_tar = reserve_process::<TarFs>(elf!("CARGO_BIN_FILE_DERAVEL_FILESYSTEM_TAR"));
+    // let ipc_a = reserve_process::<IpcA>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-a"));
+    // let ipc_b = reserve_process::<IpcB>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-b"));
+    // let ipc_c = reserve_process::<IpcC>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-c"));
+    let hello = reserve_process::<Hello>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_hello"));
+    let shell = reserve_process::<Shell>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_shell"));
 
-    unsafe { CAPABILITY_PAGES[PROCESS_COUNT].0[0] = CapabilityCertificate::granted(fs_tar.id) }
-    unsafe { HANDLERS[0] = Some(Box::new(Box::new(DriveHandler {}) as Box<dyn DriveServer>)) }
+    // unsafe { CAPABILITY_PAGES[PROCESS_COUNT].0[0] = CapabilityCertificate::granted(fs_tar.id) }
+    unsafe { CAPABILITY_PAGES[PROCESS_COUNT].0[1] = CapabilityCertificate::granted(hello.id) }
+    unsafe { CAPABILITY_PAGES[PROCESS_COUNT].0[2] = CapabilityCertificate::granted(shell.id) }
+    // unsafe { HANDLERS[0] = Some(Box::new(Box::new(DriveHandler {}) as Box<dyn DriveServer>)) }
+    unsafe {
+        HANDLERS[1] = Some(Box::new(
+            Box::new(ConsoleHandler {}) as Box<dyn ConsoleServer>
+        ))
+    }
+    unsafe {
+        HANDLERS[2] = Some(Box::new(
+            Box::new(ConsoleHandler {}) as Box<dyn ConsoleServer>
+        ))
+    }
 
-    ipc_a.spawn(IpcAArgs {
-        fs: fs_tar.export,
-        b: ipc_b.export,
+    // ipc_a.spawn(IpcAArgs {
+    //     fs: fs_tar.export,
+    //     b: ipc_b.export,
+    // });
+    // ipc_b.spawn(IpcBArgs { c: ipc_c.export });
+    // ipc_c.spawn(IpcCArgs {});
+    // fs_tar.spawn(TarFsArgs {
+    //     drive: Capability(RawCapability::new(Actor::Kernel, 0), PhantomData),
+    // });
+    hello.spawn(HelloArgs {
+        console: Capability(RawCapability::new(Actor::Kernel, 1), PhantomData),
     });
-    ipc_b.spawn(IpcBArgs { c: ipc_c.export });
-    ipc_c.spawn(IpcCArgs {});
-    fs_tar.spawn(TarFsArgs {
-        drive: Capability(RawCapability::new(Actor::Kernel, 0), PhantomData),
+    shell.spawn(ShellArgs {
+        console: Capability(RawCapability::new(Actor::Kernel, 2), PhantomData),
     });
-    // hello.spawn(HelloArgs {});
-    // shell.spawn(ShellArgs {});
 
     unsafe { riscv::register::sie::set_stimer() }
 
@@ -142,60 +171,11 @@ fn handle_trap(registers: &mut RiscvRegisters) -> ! {
 
 fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters) -> ! {
     match registers.a6 {
-        1 => {
+        0 => {
             unsafe { PROCESSES[CURRENT_PROC.unwrap()].state = ProcessState::Finished }
             schedule_and_switch_to_userspace();
         }
-        2 => {
-            let ch = registers.a0 as u8;
-            sbi::debug_console_write_byte(ch).unwrap();
-        }
-        3 => {
-            let mut c = [0];
-            while sbi::debug_console_read(&mut c).unwrap() == 0 {}
-            registers.a0 = c[0] as usize;
-        }
-        8 => {
-            let text = registers.a0 as *const u8;
-            let text_len = registers.a1;
-            assert!(text_len <= 1024);
-            let level = registers.a2;
-            let text = unsafe { core::slice::from_raw_parts(text, text_len) };
-            let mut text_stack = [0; 1024];
-            text_stack[..text_len].copy_from_slice(text);
-            let text = unsafe { core::str::from_utf8_unchecked(&text_stack[..text_len]) };
-            let level = match level {
-                0 => Level::Error,
-                1 => Level::Warn,
-                2 => Level::Info,
-                3 => Level::Debug,
-                4 => Level::Trace,
-                _ => panic!("invalid log level {level}"),
-            };
-            log_userspace(
-                level,
-                unsafe { PROCESSES[CURRENT_PROC.unwrap()].name.unwrap() },
-                text,
-            );
-        }
-        12 => {
-            let page_count = registers.a0;
-            let pages = vec![[0; PAGE_SIZE]; page_count];
-            let pages_allocated = unsafe { PROCESSES[CURRENT_PROC.unwrap()].heap_pages_allocated };
-            let page_table =
-                unsafe { &mut *(PROCESSES[CURRENT_PROC.unwrap()].page_table as *mut PageTable) };
-            let virtual_addr = 0x1800000 + pages_allocated * PAGE_SIZE;
-            map_pages(
-                page_table,
-                virtual_addr,
-                pages.as_ptr() as usize,
-                PageFlags::readwrite().user(),
-                page_count,
-            );
-            unsafe { PROCESSES[CURRENT_PROC.unwrap()].heap_pages_allocated += page_count }
-            registers.a0 = virtual_addr;
-        }
-        13 => {
+        1 => {
             if unsafe { PROCESSES[CURRENT_PROC.unwrap()].state } == ProcessState::WaitingForReply {
                 let result = unsafe { PROCESSES[CURRENT_PROC.unwrap()].reply.take().unwrap() };
                 let buf_ptr = registers.a4 as *mut u8;
@@ -269,7 +249,7 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters) -> ! {
                 }
             }
         }
-        14 => {
+        2 => {
             assert!(unsafe { PROCESSES[CURRENT_PROC.unwrap()].currently_serving.is_none() });
             if let Some((cap, method, args, sender)) = unsafe {
                 PROCESSES[CURRENT_PROC.unwrap()]
@@ -296,7 +276,7 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters) -> ! {
                 schedule_and_switch_to_userspace();
             }
         }
-        15 => {
+        3 => {
             let result_ptr = registers.a0;
             let result_len = registers.a1;
             let result =
@@ -309,6 +289,46 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters) -> ! {
                     .unwrap()
             };
             unsafe { PROCESSES[caller.as_usize()].reply = Some(result.into()) };
+        }
+        4 => {
+            let page_count = registers.a0;
+            let pages = vec![[0; PAGE_SIZE]; page_count];
+            let pages_allocated = unsafe { PROCESSES[CURRENT_PROC.unwrap()].heap_pages_allocated };
+            let page_table =
+                unsafe { &mut *(PROCESSES[CURRENT_PROC.unwrap()].page_table as *mut PageTable) };
+            let virtual_addr = 0x1800000 + pages_allocated * PAGE_SIZE;
+            map_pages(
+                page_table,
+                virtual_addr,
+                pages.as_ptr() as usize,
+                PageFlags::readwrite().user(),
+                page_count,
+            );
+            unsafe { PROCESSES[CURRENT_PROC.unwrap()].heap_pages_allocated += page_count }
+            registers.a0 = virtual_addr;
+        }
+        5 => {
+            let text = registers.a0 as *const u8;
+            let text_len = registers.a1;
+            assert!(text_len <= 1024);
+            let level = registers.a2;
+            let text = unsafe { core::slice::from_raw_parts(text, text_len) };
+            let mut text_stack = [0; 1024];
+            text_stack[..text_len].copy_from_slice(text);
+            let text = unsafe { core::str::from_utf8_unchecked(&text_stack[..text_len]) };
+            let level = match level {
+                0 => Level::Error,
+                1 => Level::Warn,
+                2 => Level::Info,
+                3 => Level::Debug,
+                4 => Level::Trace,
+                _ => panic!("invalid log level {level}"),
+            };
+            log_userspace(
+                level,
+                unsafe { PROCESSES[CURRENT_PROC.unwrap()].name.unwrap() },
+                text,
+            );
         }
         _ => panic!("invalid syscall number {}", registers.a6),
     }

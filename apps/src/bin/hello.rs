@@ -3,7 +3,8 @@
 
 use deravel_kernel_api::*;
 
-fn main(_: Args) {
+fn main(args: Args) {
+    set_stdio(args.console);
     println!("Hello, world!");
 }
 

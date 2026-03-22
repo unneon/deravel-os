@@ -43,6 +43,7 @@ pub struct Process {
 pub struct ProcessReservation<T: ProcessTag> {
     pub id: ProcessId,
     pub elf: &'static [u8],
+    #[allow(dead_code)]
     pub export: Capability<T::Export>,
 }
 

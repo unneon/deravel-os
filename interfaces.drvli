@@ -1,4 +1,4 @@
-app hello
+app hello(console console)
 
 app ipc_a(fs filesystem, b ipc_b)
 
@@ -8,7 +8,7 @@ app ipc_b(c ipc_c)
 app ipc_c
     func bar(fs filesystem)
 
-app shell
+app shell(console console)
 
 app tar_fs(drive drive) implements filesystem
 
@@ -21,3 +21,7 @@ interface drive
     func read(sector u64) bytes
     func write(sector u64, data bytes)
     func capacity() u64
+
+interface console
+    func getchar() u8
+    func putchar(c u8)

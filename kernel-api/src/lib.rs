@@ -16,6 +16,8 @@ pub use drvli::*;
 use alloc::string::String;
 use core::alloc::{GlobalAlloc, Layout};
 use core::fmt::Write;
+use core::marker::PhantomData;
+use core::sync::atomic::{AtomicUsize, Ordering};
 use log::{Level, LevelFilter, Metadata, Record, error};
 
 #[macro_export]
@@ -32,7 +34,7 @@ macro_rules! app {
 }
 
 pub macro print($($tt:tt)*) {
-    core::fmt::write(&mut KernelConsole, format_args!("{}", format_args!($($tt)*))).unwrap()
+    core::fmt::write(&mut Stdio, format_args!("{}", format_args!($($tt)*))).unwrap()
 }
 
 pub macro println {
@@ -44,7 +46,7 @@ pub macro println {
     },
 }
 
-pub struct KernelConsole;
+pub struct Stdio;
 
 struct PageAllocator;
 
@@ -57,10 +59,17 @@ unsafe extern "C" {
 #[global_allocator]
 static PAGE_ALLOCATOR: PageAllocator = PageAllocator;
 
-impl Write for KernelConsole {
+static STDIO: AtomicUsize = AtomicUsize::new(0);
+
+impl Write for Stdio {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        let stdio = STDIO.load(Ordering::SeqCst);
+        let stdio = Capability::<Console>(
+            RawCapability::from_pointer(stdio as *mut CapabilityCertificate),
+            PhantomData,
+        );
         for byte in s.bytes() {
-            putchar(byte);
+            stdio.putchar(byte);
         }
         Ok(())
     }
@@ -91,7 +100,7 @@ impl log::Log for KernelLogger {
             Level::Debug => 3,
             Level::Trace => 4,
         };
-        kernel_log(&text, level)
+        unsafe { syscall::log(text.as_ptr(), text.len(), level) }
     }
 
     fn flush(&self) {}
@@ -115,15 +124,25 @@ pub fn exit() -> ! {
 }
 
 pub fn getchar() -> u8 {
-    unsafe { syscall::getchar() }
-}
-
-pub fn kernel_log(text: &str, level: usize) {
-    unsafe { syscall::log(text.as_ptr(), text.len(), level) }
+    let stdio = STDIO.load(Ordering::SeqCst);
+    let stdio = Capability::<Console>(
+        RawCapability::from_pointer(stdio as *mut CapabilityCertificate),
+        PhantomData,
+    );
+    stdio.getchar()
 }
 
 pub fn putchar(ch: u8) {
-    unsafe { syscall::putchar(ch) }
+    let stdio = STDIO.load(Ordering::SeqCst);
+    let stdio = Capability::<Console>(
+        RawCapability::from_pointer(stdio as *mut CapabilityCertificate),
+        PhantomData,
+    );
+    stdio.putchar(ch)
+}
+
+pub fn set_stdio(cap: Capability<Console>) {
+    STDIO.store(cap.as_usize(), Ordering::SeqCst);
 }
 
 fn current_pid() -> ProcessId {
