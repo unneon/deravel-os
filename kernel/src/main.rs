@@ -100,17 +100,17 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     log_sbi_metadata();
     initialize_all_pci(&device_tree);
 
-    // let fs_tar = reserve_process::<TarFs>(elf!("CARGO_BIN_FILE_DERAVEL_FILESYSTEM_TAR"));
-    // let ipc_a = reserve_process::<IpcA>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-a"));
-    // let ipc_b = reserve_process::<IpcB>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-b"));
-    // let ipc_c = reserve_process::<IpcC>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-c"));
+    let fs_tar = reserve_process::<TarFs>(elf!("CARGO_BIN_FILE_DERAVEL_FILESYSTEM_TAR"));
+    let ipc_a = reserve_process::<IpcA>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-a"));
+    let ipc_b = reserve_process::<IpcB>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-b"));
+    let ipc_c = reserve_process::<IpcC>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-c"));
     let hello = reserve_process::<Hello>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_hello"));
     let shell = reserve_process::<Shell>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_shell"));
 
-    // unsafe { CAPABILITY_PAGES[PROCESS_COUNT].0[0] = CapabilityCertificate::granted(fs_tar.id) }
+    unsafe { CAPABILITY_PAGES[PROCESS_COUNT].0[0] = CapabilityCertificate::granted(fs_tar.id) }
     unsafe { CAPABILITY_PAGES[PROCESS_COUNT].0[1] = CapabilityCertificate::granted(hello.id) }
     unsafe { CAPABILITY_PAGES[PROCESS_COUNT].0[2] = CapabilityCertificate::granted(shell.id) }
-    // unsafe { HANDLERS[0] = Some(Box::new(Box::new(DriveHandler {}) as Box<dyn DriveServer>)) }
+    unsafe { HANDLERS[0] = Some(Box::new(Box::new(DriveHandler {}) as Box<dyn DriveServer>)) }
     unsafe {
         HANDLERS[1] = Some(Box::new(
             Box::new(ConsoleHandler {}) as Box<dyn ConsoleServer>
@@ -122,15 +122,15 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
         ))
     }
 
-    // ipc_a.spawn(IpcAArgs {
-    //     fs: fs_tar.export,
-    //     b: ipc_b.export,
-    // });
-    // ipc_b.spawn(IpcBArgs { c: ipc_c.export });
-    // ipc_c.spawn(IpcCArgs {});
-    // fs_tar.spawn(TarFsArgs {
-    //     drive: Capability(RawCapability::new(Actor::Kernel, 0), PhantomData),
-    // });
+    ipc_a.spawn(IpcAArgs {
+        fs: fs_tar.export,
+        b: ipc_b.export,
+    });
+    ipc_b.spawn(IpcBArgs { c: ipc_c.export });
+    ipc_c.spawn(IpcCArgs {});
+    fs_tar.spawn(TarFsArgs {
+        drive: Capability(RawCapability::new(Actor::Kernel, 0), PhantomData),
+    });
     hello.spawn(HelloArgs {
         console: Capability(RawCapability::new(Actor::Kernel, 1), PhantomData),
     });
