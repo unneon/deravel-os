@@ -157,6 +157,14 @@ pub fn initialize_all_pci(device_tree: &Fdt) {
             config.common().command().write_bitor(0b111);
 
             virtio::initialize_blk(config, &bars);
+        } else if config.vendor_id().read() == 0x1AF4 && config.device_id().read() == 0x1050 {
+            info!("found virtio-gpu over PCI");
+            let config = config.as_general_device().unwrap();
+
+            let bars = allocate_all_bars(config, &pci_ranges, &mut io, &mut mem32, &mut mem64);
+            config.common().command().write_bitor(0b111);
+
+            virtio::initialize_gpu(config, &bars);
         }
     }
 }

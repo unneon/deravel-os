@@ -4,9 +4,11 @@ use crate::pci::{
 };
 use crate::util::volatile::{Volatile, volatile_struct};
 use crate::virtio::blk::VirtioBlk;
+use crate::virtio::gpu::VirtioGpu;
 use crate::virtio::net::VirtioNet;
 
 pub mod blk;
+pub mod gpu;
 pub mod net;
 pub mod queue;
 pub mod registers;
@@ -80,6 +82,12 @@ pub fn initialize_blk(config: Volatile<GeneralDeviceConfig>, bars: &[AllocatedRa
         assert!(DISK.is_none());
         DISK = Some(device);
     }
+}
+
+pub fn initialize_gpu(config: Volatile<GeneralDeviceConfig>, bars: &[AllocatedRange; 6]) {
+    let configs = extract_configs(config, bars);
+    let mut virtio_gpu = VirtioGpu::new(configs.common, configs.notify, configs.device);
+    virtio_gpu.demo();
 }
 
 pub fn initialize_net(config: Volatile<GeneralDeviceConfig>, bars: &[AllocatedRange; 6]) {

@@ -6,7 +6,6 @@
 qemu-system-riscv64 \
     -machine virt \
     -bios default \
-    -nographic \
     -serial mon:stdio \
     -device pci-serial,chardev=pciuart \
     -chardev file,id=pciuart,path=uart.txt \
@@ -15,6 +14,8 @@ qemu-system-riscv64 \
     -netdev tap,id=net0,ifname=tap0,script=no,downscript=no \
     -device virtio-net-pci,netdev=net0,disable-legacy=on \
     -object filter-dump,id=f1,netdev=net0,file=dump.dat \
+    -device virtio-gpu \
+    -display gtk,full-screen=on \
     --no-reboot \
     -kernel \
     $@
