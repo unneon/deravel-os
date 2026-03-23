@@ -2,7 +2,7 @@ mod types;
 
 use crate::util::volatile::{Volatile, volatile_struct};
 use crate::virtio::gpu::types::*;
-use crate::virtio::queue::{QUEUE_SIZE, Queue};
+use crate::virtio::queue::Queue;
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, features};
 use crate::virtio::{NotifySlot, VirtioCommonConfig};
 use alloc::vec;
@@ -36,49 +36,37 @@ impl VirtioGpu {
         common.device_status().write(0);
         common.device_status().write_bitor(STATUS_ACKNOWLEDGE as u8);
         common.device_status().write_bitor(STATUS_DRIVER as u8);
-        let controlq = Queue::new(common, &notify, QUEUE_SIZE);
+        let controlq = Queue::new(common, &notify, 4);
         common.device_status().write_bitor(STATUS_DRIVER_OK as u8);
         VirtioGpu { controlq }
     }
 
     pub fn demo(&mut self) {
-        let req = CtrlHdr {
-            type_: VIRTIO_GPU_CMD_GET_DISPLAY_INFO,
-            ..Default::default()
-        };
-        let mut resp: ResponseDisplayInfo = Default::default();
+        let req = CtrlType::CmdGetDisplayInfo.header();
         self.controlq.descriptor_readonly(0, &req, Some(1));
-        self.controlq.descriptor_writeonly(1, &mut resp, None);
-        self.controlq.send_and_recv(0);
-        assert_eq!(resp.hdr.type_, VIRTIO_GPU_RESP_OK_DISPLAY_INFO);
+        let resp: ResponseDisplayInfo = self.command(1).unwrap();
         let pmode = &resp.pmodes[0];
         assert_eq!(pmode.enabled, 1);
         assert_eq!(pmode.r.x, 0);
         assert_eq!(pmode.r.y, 0);
-        info!("detected a {}x{} display", pmode.r.width, pmode.r.height);
+        let r = pmode.r;
+        let width = r.width;
+        let height = r.height;
+        info!("detected a {width}x{height} display");
 
         let req = ResourceCreate2D {
-            hdr: CtrlHdr {
-                type_: VIRTIO_GPU_CMD_RESOURCE_CREATE_2D,
-                ..Default::default()
-            },
+            hdr: CtrlType::CmdResourceCreate2D.header(),
             resource_id: 1,
-            format: VIRTIO_GPU_FORMAT_B8G8R8A8_UNORM,
-            width: pmode.r.width,
-            height: pmode.r.height,
+            format: Format::B8G8R8A8Unorm as u32,
+            width,
+            height,
         };
-        let mut resp: CtrlHdr = Default::default();
         self.controlq.descriptor_readonly(0, &req, Some(1));
-        self.controlq.descriptor_writeonly(1, &mut resp, None);
-        self.controlq.send_and_recv(0);
-        assert_eq!(resp.type_, VIRTIO_GPU_RESP_OK_NODATA);
+        self.command::<ResponseNodata>(1).unwrap();
 
-        let mut framebuffer = vec![0u8; pmode.r.width as usize * pmode.r.height as usize * 4];
+        let mut framebuffer = vec![0u8; width as usize * height as usize * 4];
         let req = ResourceAttachBacking {
-            hdr: CtrlHdr {
-                type_: VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING,
-                ..Default::default()
-            },
+            hdr: CtrlType::CmdResourceAttachBacking.header(),
             resouce_id: 1,
             nr_entries: 1,
         };
@@ -87,32 +75,18 @@ impl VirtioGpu {
             length: framebuffer.len() as u32,
             padding: 0,
         };
-        let mut resp: CtrlHdr = Default::default();
         self.controlq.descriptor_readonly(0, &req, Some(1));
         self.controlq.descriptor_readonly(1, &mem_entry, Some(2));
-        self.controlq.descriptor_writeonly(2, &mut resp, None);
-        self.controlq.send_and_recv(0);
-        assert_eq!(resp.type_, VIRTIO_GPU_RESP_OK_NODATA);
+        self.command::<ResponseNodata>(2).unwrap();
 
         let req = SetScanout {
-            hdr: CtrlHdr {
-                type_: VIRTIO_GPU_CMD_SET_SCANOUT,
-                ..Default::default()
-            },
-            r: Rect {
-                x: 0,
-                y: 0,
-                width: pmode.r.width,
-                height: pmode.r.height,
-            },
+            hdr: CtrlType::CmdSetScanout.header(),
+            r,
             scanout_id: 0,
             resource_id: 1,
         };
-        let mut resp = CtrlHdr::default();
         self.controlq.descriptor_readonly(0, &req, Some(1));
-        self.controlq.descriptor_writeonly(1, &mut resp, None);
-        self.controlq.send_and_recv(0);
-        assert_eq!(resp.type_, VIRTIO_GPU_RESP_OK_NODATA);
+        self.command::<ResponseNodata>(1).unwrap();
 
         for [b, g, r, a] in framebuffer.as_chunks_mut().0 {
             *b = 255;
@@ -122,44 +96,35 @@ impl VirtioGpu {
         }
 
         let req = TransferToHost2D {
-            hdr: CtrlHdr {
-                type_: VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D,
-                ..Default::default()
-            },
-            r: Rect {
-                x: 0,
-                y: 0,
-                width: pmode.r.width,
-                height: pmode.r.height,
-            },
+            hdr: CtrlType::CmdTransferToHost2D.header(),
+            r,
             offset: 0,
             resource_id: 1,
             padding: 0,
         };
-        let mut resp = CtrlHdr::default();
         self.controlq.descriptor_readonly(0, &req, Some(1));
-        self.controlq.descriptor_writeonly(1, &mut resp, None);
-        self.controlq.send_and_recv(0);
-        assert_eq!(resp.type_, VIRTIO_GPU_RESP_OK_NODATA);
+        self.command::<ResponseNodata>(1).unwrap();
 
         let req = ResourceFlush {
-            hdr: CtrlHdr {
-                type_: VIRTIO_GPU_CMD_RESOURCE_FLUSH,
-                ..Default::default()
-            },
-            r: Rect {
-                x: 0,
-                y: 0,
-                width: pmode.r.width,
-                height: pmode.r.height,
-            },
+            hdr: CtrlType::CmdResourceFlush.header(),
+            r,
             resource_id: 1,
             padding: 0,
         };
-        let mut resp = CtrlHdr::default();
         self.controlq.descriptor_readonly(0, &req, Some(1));
-        self.controlq.descriptor_writeonly(1, &mut resp, None);
+        self.command::<ResponseNodata>(1).unwrap();
+    }
+
+    fn command<T: Response>(&mut self, input_descriptors: usize) -> Result<T, Error> {
+        let mut response = T::default();
+        self.controlq
+            .descriptor_writeonly(input_descriptors as u16, &mut response, None);
         self.controlq.send_and_recv(0);
-        assert_eq!(resp.type_, VIRTIO_GPU_RESP_OK_NODATA);
+        if response.hdr().type_ & 0xFF00 == 0x1200 {
+            Err(unsafe { core::mem::transmute::<u32, Error>(response.hdr().type_) })
+        } else {
+            assert_eq!(response.hdr().type_, T::TYPE);
+            Ok(response)
+        }
     }
 }

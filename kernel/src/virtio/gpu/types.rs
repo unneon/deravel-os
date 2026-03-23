@@ -1,4 +1,9 @@
-#[derive(Debug, Default)]
+pub unsafe trait Response: Default {
+    const TYPE: CtrlType;
+    fn hdr(&self) -> &CtrlHdr;
+}
+
+#[derive(Default)]
 #[repr(C)]
 pub struct CtrlHdr {
     pub type_: u32,
@@ -9,7 +14,55 @@ pub struct CtrlHdr {
     pub padding: [u8; 3],
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Copy)]
+#[repr(u32)]
+pub enum CtrlType {
+    CmdGetDisplayInfo = 0x0100,
+    CmdResourceCreate2D,
+    CmdResourceUnref,
+    CmdSetScanout,
+    CmdResourceFlush,
+    CmdTransferToHost2D,
+    CmdResourceAttachBacking,
+    CmdResourceDetachBacking,
+    CmdGetCapsetInfo,
+    CmdGetCapset,
+    CmdGetEdid,
+    CmdResourceAssignUuid,
+    CmdResourceCreateBlob,
+    CmdSetScanoutBlob,
+
+    CmdCtxCreate = 0x0200,
+    CmdCtxDestroy,
+    CmdCtxAttachResource,
+    CmdCtxDetachResource,
+    CmdResourceCreate3D,
+    CmdTransferToHost3D,
+    CmdTransferFromHost3D,
+    CmdSubmit3D,
+    CmdResourceMapBlob,
+    CmdResourceUnmapBlob,
+
+    CmdUpdateCursor = 0x0300,
+    CmdMoveCursor,
+
+    RespOkNodata = 0x1100,
+    RespOkDisplayInfo,
+    RespOkCapsetInfo,
+    RespOkCapset,
+    RespOkEdid,
+    RespOkResourceUuid,
+    RespOkMapInfo,
+
+    RespErrUnspec = 0x1200,
+    RespErrOutOfMemory,
+    RespErrInvalidScanoutId,
+    RespErrInvalidResourceId,
+    RespErrInvalidContextId,
+    RespErrInvalidParameter,
+}
+
+#[derive(Default)]
 #[repr(C)]
 pub struct DisplayOne {
     pub r: Rect,
@@ -17,7 +70,31 @@ pub struct DisplayOne {
     pub flags: u32,
 }
 
-#[derive(Debug, Default)]
+#[allow(dead_code)]
+#[derive(Debug)]
+#[repr(u32)]
+pub enum Error {
+    Unspec = 0x1200,
+    OutOfMemory,
+    InvalidScanoutId,
+    InvalidResourceId,
+    InvalidContextId,
+    InvalidParameter,
+}
+
+#[allow(dead_code)]
+#[repr(u32)]
+pub enum Format {
+    B8G8R8A8Unorm = 1,
+    B8G8R8X8Unorm = 2,
+    A8R8G8B8Unorm = 3,
+    X8R8G8B8Unorm = 4,
+    R8G8B8A8Unorm = 67,
+    X8B8G8R8Unorm = 68,
+    A8B8G8R8Unorm = 121,
+    R8G8B8X8Unorm = 134,
+}
+
 #[repr(C)]
 pub struct MemEntry {
     pub addr: u64,
@@ -25,7 +102,7 @@ pub struct MemEntry {
     pub padding: u32,
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Copy, Default)]
 #[repr(C)]
 pub struct Rect {
     pub x: u32,
@@ -34,7 +111,6 @@ pub struct Rect {
     pub height: u32,
 }
 
-#[derive(Debug, Default)]
 #[repr(C)]
 pub struct ResourceAttachBacking {
     pub hdr: CtrlHdr,
@@ -42,7 +118,6 @@ pub struct ResourceAttachBacking {
     pub nr_entries: u32,
 }
 
-#[derive(Debug, Default)]
 #[repr(C)]
 pub struct ResourceCreate2D {
     pub hdr: CtrlHdr,
@@ -52,7 +127,6 @@ pub struct ResourceCreate2D {
     pub height: u32,
 }
 
-#[derive(Debug, Default)]
 #[repr(C)]
 pub struct ResourceFlush {
     pub hdr: CtrlHdr,
@@ -61,14 +135,19 @@ pub struct ResourceFlush {
     pub padding: u32,
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 #[repr(C)]
 pub struct ResponseDisplayInfo {
     pub hdr: CtrlHdr,
-    pub pmodes: [DisplayOne; VIRTIO_GPU_MAX_SCANOUTS],
+    pub pmodes: [DisplayOne; MAX_SCANOUTS],
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
+#[repr(C)]
+pub struct ResponseNodata {
+    pub hdr: CtrlHdr,
+}
+
 #[repr(C)]
 pub struct SetScanout {
     pub hdr: CtrlHdr,
@@ -77,7 +156,6 @@ pub struct SetScanout {
     pub resource_id: u32,
 }
 
-#[derive(Debug, Default)]
 #[repr(C)]
 pub struct TransferToHost2D {
     pub hdr: CtrlHdr,
@@ -87,14 +165,39 @@ pub struct TransferToHost2D {
     pub padding: u32,
 }
 
-pub const VIRTIO_GPU_FORMAT_B8G8R8A8_UNORM: u32 = 1;
-pub const VIRTIO_GPU_MAX_SCANOUTS: usize = 16;
+pub const MAX_SCANOUTS: usize = 16;
 
-pub const VIRTIO_GPU_CMD_GET_DISPLAY_INFO: u32 = 0x0100;
-pub const VIRTIO_GPU_CMD_RESOURCE_CREATE_2D: u32 = 0x0101;
-pub const VIRTIO_GPU_CMD_SET_SCANOUT: u32 = 0x0103;
-pub const VIRTIO_GPU_CMD_RESOURCE_FLUSH: u32 = 0x0104;
-pub const VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D: u32 = 0x0105;
-pub const VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING: u32 = 0x0106;
-pub const VIRTIO_GPU_RESP_OK_NODATA: u32 = 0x1100;
-pub const VIRTIO_GPU_RESP_OK_DISPLAY_INFO: u32 = 0x1101;
+impl CtrlType {
+    pub fn header(self) -> CtrlHdr {
+        CtrlHdr {
+            type_: self as u32,
+            flags: 0,
+            fence_id: 0,
+            ctx_id: 0,
+            ring_idx: 0,
+            padding: [0; _],
+        }
+    }
+}
+
+unsafe impl Response for ResponseDisplayInfo {
+    const TYPE: CtrlType = CtrlType::RespOkDisplayInfo;
+
+    fn hdr(&self) -> &CtrlHdr {
+        &self.hdr
+    }
+}
+
+unsafe impl Response for ResponseNodata {
+    const TYPE: CtrlType = CtrlType::RespOkNodata;
+
+    fn hdr(&self) -> &CtrlHdr {
+        &self.hdr
+    }
+}
+
+impl PartialEq<CtrlType> for u32 {
+    fn eq(&self, other: &CtrlType) -> bool {
+        *self == *other as u32
+    }
+}

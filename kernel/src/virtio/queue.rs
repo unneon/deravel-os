@@ -122,7 +122,7 @@ impl<const INDEX: u16> Queue<INDEX> {
     }
 
     pub fn send_and_recv(&mut self, descriptor: u16) {
-        self.available.ring[self.available.index as usize % QUEUE_SIZE] = descriptor;
+        self.available.ring[self.available.index as usize % self.size()] = descriptor;
         riscv::asm::fence();
         self.available.index += 1;
         riscv::asm::fence();
@@ -135,5 +135,9 @@ impl<const INDEX: u16> Queue<INDEX> {
         unsafe { riscv::register::satp::set(Mode::Bare, 0, 0) }
         self.notify.write(INDEX);
         unsafe { riscv::register::satp::write(old_satp) }
+    }
+
+    fn size(&self) -> usize {
+        self.descriptors.len()
     }
 }
