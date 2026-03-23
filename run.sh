@@ -16,6 +16,8 @@ qemu-system-riscv64 \
     -object filter-dump,id=f1,netdev=net0,file=dump.dat \
     -device virtio-gpu \
     -display gtk,full-screen=on \
+    -device virtio-keyboard \
+    -device virtio-mouse \
     --no-reboot \
     -kernel \
     $@

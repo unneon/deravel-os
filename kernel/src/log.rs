@@ -19,13 +19,20 @@ impl log::Log for Logger {
 
     fn log(&self, record: &Record) {
         if self.enabled(record.metadata()) {
+            let early_color = match record.level() {
+                Level::Error => "\x1B[31m",
+                Level::Warn => "\x1B[33m",
+                _ => "",
+            };
             let time = (riscv::register::time::read64() - self.start_time) as f64
                 / self.timebase_frequency as f64;
             let level = PrettyLogLevel(record.level());
             let message = record.args();
             if record.module_path().is_some() {
                 let module = PrettyModulePath(record.module_path());
-                sbi::console_writeln!("[{time:>13.7}] {level} {module}{message}");
+                sbi::console_writeln!(
+                    "{early_color}[{time:>13.7}] {level} {module}{message}\x1B[0m"
+                );
             } else {
                 let process_name = record.target();
                 sbi::console_writeln!(
@@ -41,8 +48,8 @@ impl log::Log for Logger {
 impl core::fmt::Display for PrettyLogLevel {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(match self.0 {
-            Level::Error => "\x1B[1;31mERRO\x1B[0m",
-            Level::Warn => "\x1B[1;33mWARN\x1B[0m",
+            Level::Error => "\x1B[1mERRO\x1B[22m",
+            Level::Warn => "\x1B[1mWARN\x1B[22m",
             Level::Info => "\x1B[1;32mINFO\x1B[0m",
             Level::Debug => "\x1B[1;36mDEBG\x1B[0m",
             Level::Trace => "\x1B[1;34mTRCE\x1B[0m",
@@ -66,7 +73,7 @@ impl core::fmt::Display for PrettyModulePath<'_> {
         {
             write!(f, "{segment}")?;
         }
-        write!(f, ":\x1B[0m ")
+        write!(f, ":\x1B[22m ")
     }
 }
 

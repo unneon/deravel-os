@@ -3,7 +3,7 @@ use crate::util::volatile::{Volatile, volatile_struct};
 use crate::virtio;
 use fdt::Fdt;
 use fdt::node::FdtNode;
-use log::info;
+use log::{info, warn};
 
 pub unsafe trait VendorPciCapability {}
 
@@ -108,12 +108,15 @@ pub fn initialize_all_pci(device_tree: &Fdt) {
         let config = unsafe {
             Volatile::new(region.starting_address.byte_add(4096 * config_index) as *mut CommonConfig)
         };
-        if config.vendor_id().read() == 0xFFFF {
+
+        let vendor = config.vendor_id().read();
+        if vendor == 0xFFFF {
             continue;
         }
 
-        if config.vendor_id().read() == 0x1B36 && config.device_id().read() == 0x2 {
-            info!("found UART 16550 over PCI");
+        let device = config.device_id().read();
+        if vendor == 0x1B36 && device == 0x2 {
+            info!("found UART 16550");
             let config = config.as_general_device().unwrap();
 
             let bars = allocate_all_bars(config, &pci_ranges, &mut io, &mut mem32, &mut mem64);
@@ -141,30 +144,30 @@ pub fn initialize_all_pci(device_tree: &Fdt) {
             for c in "Hello, world!\n".bytes() {
                 uart_putc(c);
             }
-        } else if config.vendor_id().read() == 0x1AF4 && config.device_id().read() == 0x1041 {
-            info!("found virtio-net over PCI");
+        } else if vendor == 0x1AF4 && device == 0x1041 {
             let config = config.as_general_device().unwrap();
-
             let bars = allocate_all_bars(config, &pci_ranges, &mut io, &mut mem32, &mut mem64);
             config.common().command().write_bitor(0b111);
-
             virtio::initialize_net(config, &bars);
-        } else if config.vendor_id().read() == 0x1AF4 && config.device_id().read() == 0x1042 {
-            info!("found virtio-blk over PCI");
+        } else if vendor == 0x1AF4 && device == 0x1042 {
             let config = config.as_general_device().unwrap();
-
             let bars = allocate_all_bars(config, &pci_ranges, &mut io, &mut mem32, &mut mem64);
             config.common().command().write_bitor(0b111);
-
             virtio::initialize_blk(config, &bars);
-        } else if config.vendor_id().read() == 0x1AF4 && config.device_id().read() == 0x1050 {
-            info!("found virtio-gpu over PCI");
+        } else if vendor == 0x1AF4 && device == 0x1050 {
             let config = config.as_general_device().unwrap();
-
             let bars = allocate_all_bars(config, &pci_ranges, &mut io, &mut mem32, &mut mem64);
             config.common().command().write_bitor(0b111);
-
             virtio::initialize_gpu(config, &bars);
+        } else if vendor == 0x1AF4 && device == 0x1052 {
+            let config = config.as_general_device().unwrap();
+            let bars = allocate_all_bars(config, &pci_ranges, &mut io, &mut mem32, &mut mem64);
+            config.common().command().write_bitor(0b111);
+            virtio::initialize_input(config, &bars);
+        } else if vendor == 0x1B36 && device == 0x0008 {
+            // TODO: Use this to scan the space more efficiently?
+        } else {
+            warn!("unknown PCI device {vendor:04x}:{device:04x}");
         }
     }
 }
