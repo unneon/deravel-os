@@ -1,12 +1,12 @@
 use crate::DISK;
-use crate::pci::{
-    AllocatedRange, GeneralDeviceConfig, PciCapability, VendorPciCapability, walk_capabilities,
-};
+use crate::pci::capability::{PciCapability, VendorPciCapability};
+use crate::pci::{AllocatedRange, GeneralDeviceConfig, walk_capabilities};
 use crate::util::volatile::{Volatile, volatile_struct};
 use crate::virtio::blk::VirtioBlk;
 use crate::virtio::gpu::VirtioGpu;
 use crate::virtio::input::VirtioInput;
 use crate::virtio::net::VirtioNet;
+use log::{debug, warn};
 
 pub mod blk;
 pub mod gpu;
@@ -50,6 +50,7 @@ volatile_struct! { pub VirtioCommonConfig
 #[derive(Debug)]
 struct VirtioPciCapability {
     cap: PciCapability,
+    cap_len: u8,
     cfg_type: u8,
     bar: u8,
     id: u8,
@@ -130,6 +131,10 @@ fn extract_configs<T>(
                 assert!(device.is_none());
                 device = Some(unsafe { Volatile::new(address as *mut T) });
             }
+        } else if let Some(msi_x) = cap.get_msi_x() {
+            debug!("MSI-X cap {msi_x:?}");
+        } else {
+            warn!("unknown capability {:?}", cap);
         }
     }
     Configs {

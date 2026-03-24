@@ -1,11 +1,12 @@
+pub mod capability;
+
 use crate::allocators::TrivialAllocator;
+use crate::pci::capability::PciCapability;
 use crate::util::volatile::{Volatile, volatile_struct};
 use crate::virtio;
 use fdt::Fdt;
 use fdt::node::FdtNode;
 use log::{info, warn};
-
-pub unsafe trait VendorPciCapability {}
 
 #[derive(Default)]
 pub struct AllocatedRange {
@@ -45,14 +46,6 @@ volatile_struct! { pub GeneralDeviceConfig
     max_latency: Readonly u8,
 }
 
-#[repr(C)]
-#[derive(Debug)]
-pub struct PciCapability {
-    vndr: u8,
-    next: u8,
-    len: u8,
-}
-
 struct PciRange {
     soc_base: usize,
     pci_base: usize,
@@ -83,16 +76,6 @@ impl CommonConfig {
         }
         let pointer: *mut CommonConfig = From::from(self);
         Some(unsafe { Volatile::new(pointer as *mut GeneralDeviceConfig) })
-    }
-}
-
-impl PciCapability {
-    pub unsafe fn get_vendor<T: VendorPciCapability>(&self) -> Option<&T> {
-        if self.vndr == 0x09 {
-            Some(unsafe { &*(self as *const Self as *const T) })
-        } else {
-            None
-        }
     }
 }
 
