@@ -6,7 +6,7 @@ pub struct TrivialAllocator {
 }
 
 impl TrivialAllocator {
-    pub fn new(size: usize) -> TrivialAllocator {
+    pub const fn new(size: usize) -> TrivialAllocator {
         TrivialAllocator { range: 0..size }
     }
 

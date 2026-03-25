@@ -1,7 +1,11 @@
+use crate::util::volatile::{Volatile, volatile_struct};
+
 pub unsafe trait VendorPciCapability {}
 
+#[derive(Clone, Copy)]
 pub struct BirAndOffset(u32);
 
+#[derive(Clone, Copy)]
 pub struct MessageControl(u16);
 
 #[repr(C)]
@@ -11,13 +15,11 @@ pub struct PciCapability {
     pub next: u8,
 }
 
-#[repr(C)]
-#[derive(Debug)]
-pub struct PciMsiXCapability {
-    pub cap: PciCapability,
-    pub message_control: MessageControl,
-    pub table: BirAndOffset,
-    pub pending: BirAndOffset,
+volatile_struct! { pub PciMsiXCapability
+    pub cap: Readonly PciCapability,
+    pub message_control: ReadWrite MessageControl,
+    pub table: Readonly BirAndOffset,
+    pub pending: Readonly BirAndOffset,
 }
 
 const PCI_CAP_ID_VNDR: u8 = 0x09;
@@ -35,7 +37,7 @@ impl BirAndOffset {
 
 impl MessageControl {
     pub fn table_size(&self) -> u16 {
-        self.0 & ((1 << 11) - 1)
+        (self.0 & ((1 << 11) - 1)) + 1
     }
 
     pub fn function_mask(&self) -> bool {
@@ -44,6 +46,10 @@ impl MessageControl {
 
     pub fn enable(&self) -> bool {
         self.0 & (1 << 15) != 0
+    }
+
+    pub fn with_enable(&self, enable: bool) -> MessageControl {
+        MessageControl((self.0 & !(1 << 15)) | ((enable as u16) << 15))
     }
 }
 
@@ -56,9 +62,9 @@ impl PciCapability {
         }
     }
 
-    pub fn get_msi_x(&self) -> Option<&PciMsiXCapability> {
+    pub fn get_msi_x(&self) -> Option<Volatile<PciMsiXCapability>> {
         if self.vndr == PCI_CAP_ID_MSI_X {
-            Some(unsafe { &*(self as *const Self as *const PciMsiXCapability) })
+            Some(unsafe { Volatile::new(self as *const _ as *mut _) })
         } else {
             None
         }

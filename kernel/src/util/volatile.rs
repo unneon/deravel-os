@@ -1,15 +1,15 @@
 use core::marker::PhantomData;
 use core::ops::{BitOr, Deref};
 
-pub macro volatile_struct($pub:vis $struct:ident $(<$($param:ident),*>)? $(where $param0:ident: $req0:ident)? $($field_name:ident: $access:ident $field_type:ty,)*) {
+pub macro volatile_struct($struct_vis:vis $struct:ident $(<$($param:ident),*>)? $(where $param0:ident: $req0:ident)? $($field_vis:vis $field_name:ident: $access:ident $field_type:ty,)*) {
     #[repr(C)]
-    $pub struct $struct $(<$($param),*>)? {
-        $($field_name: $field_type,)*
+    $struct_vis struct $struct $(<$($param),*>)? {
+        $($field_vis $field_name: $field_type,)*
     }
 
     impl$(<$($param),*>)? $struct $(<$($param),*>)? $(where $param0: $req0)? {
         $(#[allow(dead_code)]
-        $pub fn $field_name(self: Volatile<Self>) -> Volatile<$field_type, crate::util::volatile::$access> {
+        $field_vis fn $field_name(self: Volatile<Self>) -> Volatile<$field_type, crate::util::volatile::$access> {
             unsafe { Volatile::new(self.0.byte_add(core::mem::offset_of!($struct, $field_name)) as *mut $field_type) }
         })*
     }

@@ -6,7 +6,7 @@ use crate::virtio::input::config::{Config, config_str};
 use crate::virtio::input::types::ConfigSelect;
 use crate::virtio::queue::Queue;
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK};
-use crate::virtio::{NotifySlot, VirtioCommonConfig};
+use crate::virtio::{NotifySlot, TEST_MSIX, VirtioCommonConfig};
 use alloc::vec;
 use alloc::vec::Vec;
 use log::{debug, info};
@@ -53,11 +53,12 @@ impl VirtioInput {
     }
 
     pub fn demo(&mut self) {
-        for _ in 0..1_000_000_000u64 {
-            riscv::asm::nop();
-        }
-        while let Some(event) = self.try_recv() {
-            debug!("received {event:?}");
+        loop {
+            while let Some(event) = self.try_recv() {
+                debug!("received {event:?}");
+            }
+            riscv::asm::delay(2_000_000_000);
+            debug!("delay woke up, msix: {:x?}", unsafe { TEST_MSIX });
         }
     }
 

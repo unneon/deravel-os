@@ -1,7 +1,8 @@
 use crate::DISK;
+use crate::allocators::TrivialAllocator;
 use crate::pci::capability::{PciCapability, VendorPciCapability};
 use crate::pci::{AllocatedRange, GeneralDeviceConfig, walk_capabilities};
-use crate::util::volatile::{Volatile, volatile_struct};
+use crate::util::volatile::{ReadWrite, Volatile, volatile_struct};
 use crate::virtio::blk::VirtioBlk;
 use crate::virtio::gpu::VirtioGpu;
 use crate::virtio::input::VirtioInput;
@@ -105,6 +106,16 @@ pub fn initialize_net(config: Volatile<GeneralDeviceConfig>, bars: &[AllocatedRa
     virtio_net.demo();
 }
 
+volatile_struct! { MsiXEntry
+    message_address_low: ReadWrite u32,
+    message_address_high: ReadWrite u32,
+    message_data: ReadWrite u32,
+    vector_control: ReadWrite u32,
+}
+
+static mut TEST_MSIX: [u32; 16] = [0; 16];
+static mut TEST_MSIX_ALLOCATOR: TrivialAllocator = TrivialAllocator::new(16);
+
 fn extract_configs<T>(
     config: Volatile<GeneralDeviceConfig>,
     bars: &[AllocatedRange; 6],
@@ -132,7 +143,43 @@ fn extract_configs<T>(
                 device = Some(unsafe { Volatile::new(address as *mut T) });
             }
         } else if let Some(msi_x) = cap.get_msi_x() {
-            debug!("MSI-X cap {msi_x:?}");
+            debug!("msix: {:x?}", unsafe { TEST_MSIX });
+            let message_control = msi_x.message_control().read();
+            let table = msi_x.table().read();
+            let message_table =
+                (bars[table.bir() as usize].soc_offset + table.offset() as usize) as *mut MsiXEntry;
+            for i in 0..message_control.table_size() as usize {
+                let entry: Volatile<_, ReadWrite> =
+                    unsafe { Volatile::new(message_table.wrapping_add(i)) };
+                debug!(
+                    "[{i}] before, ma {:#x}:{:x}, md {:#x}, vc {:#x}",
+                    entry.message_address_high().read(),
+                    entry.message_address_low().read(),
+                    entry.message_data().read(),
+                    entry.vector_control().read()
+                );
+                let address =
+                    unsafe { &raw const TEST_MSIX[TEST_MSIX_ALLOCATOR.allocate(1, 1)] } as usize;
+                entry.message_address_low().write(address as u32);
+                entry.message_address_high().write((address >> 32) as u32);
+                entry.message_data().write(0x666);
+                entry.vector_control().write(0);
+                debug!(
+                    "[{i}] after,  ma {:#x}:{:x}, md {:#x}, vc {:#x}",
+                    entry.message_address_high().read(),
+                    entry.message_address_low().read(),
+                    entry.message_data().read(),
+                    entry.vector_control().read()
+                );
+            }
+            debug!("before {message_control:?}, {table:?}");
+            msi_x
+                .message_control()
+                .write(message_control.with_enable(true));
+            let message_control = msi_x.message_control().read();
+            let table = msi_x.table().read();
+            debug!("after  {message_control:?}, {table:?}");
+            debug!("msix: {:x?}", unsafe { TEST_MSIX });
         } else {
             warn!("unknown capability {:?}", cap);
         }
