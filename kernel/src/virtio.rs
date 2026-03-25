@@ -1,6 +1,6 @@
-use crate::DISK;
+use crate::pci::AllocatedRange;
 use crate::pci::capability::{PciCapability, VendorPciCapability};
-use crate::pci::{AllocatedRange, GeneralDeviceConfig, walk_capabilities};
+use crate::pci::config::GeneralDeviceConfig;
 use crate::util::volatile::{Readonly, Volatile, volatile_struct};
 use crate::virtio::blk::VirtioBlk;
 use crate::virtio::gpu::VirtioGpu;
@@ -131,7 +131,7 @@ fn extract_capabilities<T>(
     let mut notify = None;
     let mut isr = None;
     let mut device = None;
-    for cap in walk_capabilities(config) {
+    for cap in config.walk_capabilities() {
         if let Some(cap) = unsafe { cap.get_vendor::<VirtioPciCapability>() } {
             let address = bars[cap.bar as usize].soc_offset + cap.offset as usize;
             if cap.cfg_type == VIRTIO_PCI_CAP_COMMON_CFG {

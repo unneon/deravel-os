@@ -1,50 +1,21 @@
 pub mod capability;
+pub mod config;
 
 use crate::allocators::TrivialAllocator;
 use crate::interrupt::register_interrupt;
-use crate::pci::capability::PciCapability;
-use crate::util::volatile::{Volatile, volatile_struct};
+use crate::pci::config::{CommonConfig, GeneralDeviceConfig};
+use crate::uart::{Uart16550, Uart16550Mmio};
+use crate::util::volatile::Volatile;
 use crate::virtio;
 use fdt::Fdt;
 use fdt::node::FdtNode;
-use log::{debug, info, warn};
+use log::warn;
 
 #[derive(Default)]
 pub struct AllocatedRange {
     pub soc_offset: usize,
     #[allow(dead_code)]
     pub length: usize,
-}
-
-volatile_struct! { pub CommonConfig
-    vendor_id: Readonly u16,
-    device_id: Readonly u16,
-    command: ReadWrite u16,
-    status: ReadWrite u16,
-    revision_id: Readonly u8,
-    prog_if: Readonly u8,
-    subclass: Readonly u8,
-    class_code: Readonly u8,
-    cache_line_size: Readonly u8,
-    latency_timer: Readonly u8,
-    header_type: Readonly u8,
-    bist: Readonly u8,
-}
-
-volatile_struct! { pub GeneralDeviceConfig
-    common: ReadWrite CommonConfig,
-    bars: ReadWrite [u32; 6],
-    cardbus_cis_pointer: Readonly u32,
-    subsystem_vendor_id: Readonly u16,
-    subsystem_id: Readonly u16,
-    expansion_rom_base_address: Readonly u32,
-    capabilities_pointer: Readonly u8,
-    _reserved0: Readonly [u8; 3],
-    _reserved1: Readonly u32,
-    interrupt_line: Readonly u8,
-    interrupt_pin: Readonly u8,
-    min_grant: Readonly u8,
-    max_latency: Readonly u8,
 }
 
 struct PciRange {
@@ -57,27 +28,6 @@ struct PciRanges {
     io: PciRange,
     mem32: PciRange,
     mem64: PciRange,
-}
-
-volatile_struct! { Uart16550
-    rbr_thr_dll: ReadWrite u8,
-    ier_dlm: ReadWrite u8,
-    iir_fcr: ReadWrite u8,
-    lcr: ReadWrite u8,
-    mcr: ReadWrite u8,
-    lsr: ReadWrite u8,
-    msr: ReadWrite u8,
-    scr: ReadWrite u8,
-}
-
-impl CommonConfig {
-    fn as_general_device(self: Volatile<CommonConfig>) -> Option<Volatile<GeneralDeviceConfig>> {
-        if self.header_type().read() != 0x0 {
-            return None;
-        }
-        let pointer: *mut CommonConfig = From::from(self);
-        Some(unsafe { Volatile::new(pointer as *mut GeneralDeviceConfig) })
-    }
 }
 
 pub fn initialize_all_pci(device_tree: &Fdt) {
@@ -100,34 +50,12 @@ pub fn initialize_all_pci(device_tree: &Fdt) {
 
         let device = config.device_id().read();
         if vendor == 0x1B36 && device == 0x2 {
-            info!("found UART 16550");
             let config = config.as_general_device().unwrap();
-
             let bars = allocate_all_bars(config, &pci_ranges, &mut io, &mut mem32, &mut mem64);
             config.common().command().write_bitor(0b111);
-
-            let bar = unsafe { Volatile::new(bars[0].soc_offset as *mut Uart16550) };
-
-            bar.ier_dlm().write(0x00);
-
-            bar.lcr().write(0x80);
-
-            bar.rbr_thr_dll().write(0x01);
-            bar.ier_dlm().write(0x00);
-
-            bar.lcr().write(0x03);
-
-            bar.iir_fcr().write(0xC7);
-
-            bar.mcr().write(0x03);
-
-            let uart_putc = |c: u8| {
-                while bar.lsr().read() & (1 << 5) == 0 {}
-                bar.rbr_thr_dll().write(c);
-            };
-            for c in "Hello, world!\n".bytes() {
-                uart_putc(c);
-            }
+            let bar = unsafe { Volatile::new(bars[0].soc_offset as *mut Uart16550Mmio) };
+            let mut uart = Uart16550::new(bar);
+            uart.demo();
         } else if vendor == 0x1AF4 && device == 0x1041 {
             let config = config.as_general_device().unwrap();
             let bars = allocate_all_bars(config, &pci_ranges, &mut io, &mut mem32, &mut mem64);
@@ -226,22 +154,6 @@ fn allocate_all_bars(
     allocated
 }
 
-pub fn walk_capabilities(
-    config: Volatile<GeneralDeviceConfig>,
-) -> impl Iterator<Item = &'static PciCapability> {
-    assert_ne!(config.common().status().read() & (1 << 4), 0);
-    let config_space: *mut GeneralDeviceConfig = From::from(config);
-    let mut pointer = config.capabilities_pointer().read() & !0x3;
-    core::iter::from_fn(move || {
-        if pointer == 0 {
-            return None;
-        }
-        let cap = unsafe { &*(config_space.byte_add(pointer as usize) as *const PciCapability) };
-        pointer = cap.next;
-        Some(cap)
-    })
-}
-
 fn find_pci_ranges(soc: &FdtNode, pci: &FdtNode) -> PciRanges {
     // TODO: Read the DT spec and implement generic behavior.
     assert_eq!(pci.cell_sizes().address_cells, 3);
@@ -314,7 +226,6 @@ fn pci_interrupt_to_plic(
     let device = config_index / 8 % 32;
     let bus = config_index / 256;
     let interrupt_address = ((bus << 16) | (device << 11) | (function << 8)) as u32 & address_mask;
-    debug!("config entry linked to int addr {interrupt_address:#x}");
 
     let interrupt_map = pci
         .property("interrupt-map")

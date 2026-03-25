@@ -26,6 +26,7 @@ mod page;
 mod pci;
 mod process;
 mod sbi;
+mod uart;
 mod util;
 mod virtio;
 
@@ -44,7 +45,7 @@ use crate::process::{
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use crate::util::volatile::{Volatile, volatile_struct};
 use crate::virtio::blk::VirtioBlk;
-use ::log::{Level, debug, error};
+use ::log::{Level, error};
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::vec;
@@ -101,20 +102,9 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
 
     let device_tree = unsafe { Fdt::from_ptr(device_tree) }.unwrap();
     initialize_log(&device_tree);
-
-    debug!("{device_tree:#?}");
-
     initialize_trap_handler();
     log_sbi_metadata();
     initialize_all_pci(&device_tree);
-
-    debug!(
-        "pci-to-plic interrupts are {:?}",
-        unsafe { INTERRUPTS.iter().flatten() }
-            .map(|e| e.plic_number)
-            .collect::<Vec<_>>()
-    );
-
     initialize_plic(&device_tree);
     enable_interrupts();
 
@@ -157,11 +147,6 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     });
 
     schedule_and_switch_to_userspace();
-}
-
-fn cells(cells: &[[u8; 4]]) -> usize {
-    assert_eq!(cells.len(), 2);
-    ((u32::from_be_bytes(cells[0]) as usize) << 32) + u32::from_be_bytes(cells[1]) as usize
 }
 
 fn clear_bss() {

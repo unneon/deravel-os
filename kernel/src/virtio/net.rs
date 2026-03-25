@@ -1,7 +1,6 @@
 use crate::interrupt::InterruptHandler;
 use crate::util::volatile::{Readonly, Volatile, volatile_struct};
 use crate::virtio::Capabilities;
-use crate::virtio::input::VirtioInput;
 use crate::virtio::queue::{QUEUE_SIZE, Queue};
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, features};
 use log::{debug, error};
