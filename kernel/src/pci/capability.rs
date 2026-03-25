@@ -35,7 +35,7 @@ impl BirAndOffset {
 
 impl MessageControl {
     pub fn table_size(&self) -> u16 {
-        self.0 & ((1 << 10) - 1)
+        self.0 & ((1 << 11) - 1)
     }
 
     pub fn function_mask(&self) -> bool {
