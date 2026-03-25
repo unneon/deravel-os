@@ -83,10 +83,6 @@ impl<const INDEX: u16> Queue<INDEX> {
         assert!(size <= common.queue_size().read() as usize);
         common.queue_size().write(size as u16);
 
-        assert_eq!(common.queue_msix_vector().read(), 0xFFFF);
-        common.queue_msix_vector().write(INDEX);
-        assert_eq!(common.queue_msix_vector().read(), INDEX);
-
         let descriptors = vec![Descriptor::default(); size];
         let available = AvailableRing::new(size);
         let used = UsedRing::new(size);
