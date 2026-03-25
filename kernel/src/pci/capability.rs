@@ -29,7 +29,7 @@ impl BirAndOffset {
     }
 
     pub fn offset(&self) -> u32 {
-        self.0 >> 3
+        self.0 & !0b111
     }
 }
 
