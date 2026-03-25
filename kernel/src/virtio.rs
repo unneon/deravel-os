@@ -1,11 +1,12 @@
 use crate::DISK;
 use crate::pci::capability::{PciCapability, VendorPciCapability};
 use crate::pci::{AllocatedRange, GeneralDeviceConfig, walk_capabilities};
-use crate::util::volatile::{Volatile, volatile_struct};
+use crate::util::volatile::{Readonly, Volatile, volatile_struct};
 use crate::virtio::blk::VirtioBlk;
 use crate::virtio::gpu::VirtioGpu;
 use crate::virtio::input::VirtioInput;
 use crate::virtio::net::VirtioNet;
+use alloc::boxed::Box;
 
 pub mod blk;
 pub mod gpu;
@@ -14,9 +15,10 @@ pub mod net;
 pub mod queue;
 pub mod registers;
 
-struct Configs<T> {
+pub struct Capabilities<T> {
     common: Volatile<VirtioCommonConfig>,
     notify: NotifySlot,
+    isr: Volatile<u8, Readonly>,
     device: Volatile<T>,
 }
 
@@ -66,6 +68,7 @@ struct VirtioPciNotifyCapability {
 
 const VIRTIO_PCI_CAP_COMMON_CFG: u8 = 1;
 const VIRTIO_PCI_CAP_NOTIFY_CFG: u8 = 2;
+const VIRTIO_PCI_CAP_ISR_CFG: u8 = 3;
 const VIRTIO_PCI_CAP_DEVICE_CFG: u8 = 4;
 
 impl NotifySlot {
@@ -77,39 +80,56 @@ impl NotifySlot {
 
 unsafe impl VendorPciCapability for VirtioPciCapability {}
 
-pub fn initialize_blk(config: Volatile<GeneralDeviceConfig>, bars: &[AllocatedRange; 6]) {
-    let configs = extract_configs(config, bars);
-    let device = VirtioBlk::new(configs.common, configs.notify, configs.device);
-    unsafe {
-        assert!(DISK.is_none());
-        DISK = Some(device);
-    }
-}
-
-pub fn initialize_gpu(config: Volatile<GeneralDeviceConfig>, bars: &[AllocatedRange; 6]) {
-    let configs = extract_configs(config, bars);
-    let mut virtio_gpu = VirtioGpu::new(configs.common, configs.notify, configs.device);
-    virtio_gpu.demo();
-}
-
-pub fn initialize_input(config: Volatile<GeneralDeviceConfig>, bars: &[AllocatedRange; 6]) {
-    let configs = extract_configs(config, bars);
-    let mut virtio_input = VirtioInput::new(configs.common, configs.notify, configs.device);
-    virtio_input.demo();
-}
-
-pub fn initialize_net(config: Volatile<GeneralDeviceConfig>, bars: &[AllocatedRange; 6]) {
-    let configs = extract_configs(config, bars);
-    let mut virtio_net = VirtioNet::new(configs.common, configs.notify, configs.device);
-    virtio_net.demo();
-}
-
-fn extract_configs<T>(
+pub fn initialize_blk(
     config: Volatile<GeneralDeviceConfig>,
     bars: &[AllocatedRange; 6],
-) -> Configs<T> {
+) -> &'static VirtioBlk {
+    let caps = extract_capabilities(config, bars);
+    let device = VirtioBlk::new(caps);
+    // unsafe {
+    //     assert!(DISK.is_none());
+    //     DISK = Some(device);
+    // }
+    Box::leak(Box::new(device))
+}
+
+pub fn initialize_gpu(
+    config: Volatile<GeneralDeviceConfig>,
+    bars: &[AllocatedRange; 6],
+) -> &'static VirtioGpu {
+    let caps = extract_capabilities(config, bars);
+    let mut virtio_gpu = VirtioGpu::new(caps);
+    virtio_gpu.demo();
+    Box::leak(Box::new(virtio_gpu))
+}
+
+pub fn initialize_input(
+    config: Volatile<GeneralDeviceConfig>,
+    bars: &[AllocatedRange; 6],
+) -> &'static VirtioInput {
+    let caps = extract_capabilities(config, bars);
+    let mut virtio_input = VirtioInput::new(caps);
+    virtio_input.demo();
+    Box::leak(Box::new(virtio_input))
+}
+
+pub fn initialize_net(
+    config: Volatile<GeneralDeviceConfig>,
+    bars: &[AllocatedRange; 6],
+) -> &'static VirtioNet {
+    let caps = extract_capabilities(config, bars);
+    let mut virtio_net = VirtioNet::new(caps);
+    virtio_net.demo();
+    Box::leak(Box::new(virtio_net))
+}
+
+fn extract_capabilities<T>(
+    config: Volatile<GeneralDeviceConfig>,
+    bars: &[AllocatedRange; 6],
+) -> Capabilities<T> {
     let mut common = None;
     let mut notify = None;
+    let mut isr = None;
     let mut device = None;
     for cap in walk_capabilities(config) {
         if let Some(cap) = unsafe { cap.get_vendor::<VirtioPciCapability>() } {
@@ -126,15 +146,18 @@ fn extract_configs<T>(
                     base: address as *mut u16,
                     off_multiplier: cap.notify_off_multiplier,
                 });
+            } else if cap.cfg_type == VIRTIO_PCI_CAP_ISR_CFG {
+                isr = Some(unsafe { Volatile::<_, Readonly>::new(address as *mut u8) });
             } else if cap.cfg_type == VIRTIO_PCI_CAP_DEVICE_CFG {
                 assert!(device.is_none());
                 device = Some(unsafe { Volatile::new(address as *mut T) });
             }
         }
     }
-    Configs {
+    Capabilities {
         common: common.unwrap(),
         notify: notify.unwrap(),
+        isr: isr.unwrap(),
         device: device.unwrap(),
     }
 }

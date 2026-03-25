@@ -1,8 +1,10 @@
-use crate::util::volatile::{Volatile, volatile_struct};
+use crate::interrupt::InterruptHandler;
+use crate::util::volatile::{Readonly, Volatile, volatile_struct};
+use crate::virtio::Capabilities;
+use crate::virtio::input::VirtioInput;
 use crate::virtio::queue::{QUEUE_SIZE, Queue};
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK};
-use crate::virtio::{NotifySlot, VirtioCommonConfig};
-use log::info;
+use log::{debug, info};
 use riscv::register::satp::Mode;
 
 volatile_struct! { pub VirtioBlkConfig
@@ -17,6 +19,7 @@ struct Header {
 }
 
 pub struct VirtioBlk {
+    isr: Volatile<u8, Readonly>,
     device: Volatile<VirtioBlkConfig>,
     queue: Queue<0>,
 }
@@ -28,21 +31,23 @@ pub const VIRTIO_BLK_T_IN: u32 = 0;
 pub const VIRTIO_BLK_T_OUT: u32 = 1;
 
 impl VirtioBlk {
-    pub fn new(
-        common: Volatile<VirtioCommonConfig>,
-        notify: NotifySlot,
-        device: Volatile<VirtioBlkConfig>,
-    ) -> VirtioBlk {
+    pub fn new(caps: Capabilities<VirtioBlkConfig>) -> VirtioBlk {
+        let common = caps.common;
         common.device_status().write(0);
         common.device_status().write_bitor(STATUS_ACKNOWLEDGE as u8);
         common.device_status().write_bitor(STATUS_DRIVER as u8);
-        let queue = Queue::new(common, &notify, QUEUE_SIZE);
+        let queue = Queue::new(common, &caps.notify, QUEUE_SIZE);
         common.device_status().write_bitor(STATUS_DRIVER_OK as u8);
 
+        let device = caps.device;
         let capacity = device.capacity().read();
         info!("disk has a capacity of {capacity} sectors");
 
-        VirtioBlk { device, queue }
+        VirtioBlk {
+            isr: caps.isr,
+            device,
+            queue,
+        }
     }
 
     #[allow(dead_code)]
@@ -81,6 +86,12 @@ impl VirtioBlk {
         let capacity = self.device.capacity().read() as usize;
         unsafe { riscv::register::satp::write(old_satp) }
         capacity
+    }
+}
+
+impl InterruptHandler for VirtioBlk {
+    fn handle(&self) {
+        debug!("interrupt handler, isr {:#x}", self.isr.read());
     }
 }
 

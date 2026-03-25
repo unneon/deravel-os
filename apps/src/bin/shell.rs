@@ -2,8 +2,11 @@
 #![no_main]
 
 use deravel_kernel_api::*;
+use log::debug;
 
 fn main(args: Args) {
+    debug!("entering infinite loop in U mode so interrupts fire, no preemption yet");
+    loop {}
     set_stdio(args.console);
     let mut buf = [0; 128];
     'prompt: loop {

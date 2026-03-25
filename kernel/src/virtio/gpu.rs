@@ -1,12 +1,14 @@
 mod types;
 
-use crate::util::volatile::{Volatile, volatile_struct};
+use crate::interrupt::InterruptHandler;
+use crate::util::volatile::{Readonly, Volatile, volatile_struct};
+use crate::virtio::Capabilities;
 use crate::virtio::gpu::types::*;
+use crate::virtio::input::VirtioInput;
 use crate::virtio::queue::Queue;
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, features};
-use crate::virtio::{NotifySlot, VirtioCommonConfig};
 use alloc::vec;
-use log::info;
+use log::{debug, info};
 
 volatile_struct! { pub Config
     events_read: Readonly u32,
@@ -24,21 +26,22 @@ features! { VirtioGpu Features 0
 }
 
 pub struct VirtioGpu {
+    isr: Volatile<u8, Readonly>,
     controlq: Queue<0>,
 }
 
 impl VirtioGpu {
-    pub fn new(
-        common: Volatile<VirtioCommonConfig>,
-        notify: NotifySlot,
-        _device: Volatile<Config>,
-    ) -> VirtioGpu {
+    pub fn new(capabilities: Capabilities<Config>) -> VirtioGpu {
+        let common = capabilities.common;
         common.device_status().write(0);
         common.device_status().write_bitor(STATUS_ACKNOWLEDGE as u8);
         common.device_status().write_bitor(STATUS_DRIVER as u8);
-        let controlq = Queue::new(common, &notify, 4);
+        let controlq = Queue::new(common, &capabilities.notify, 4);
         common.device_status().write_bitor(STATUS_DRIVER_OK as u8);
-        VirtioGpu { controlq }
+        VirtioGpu {
+            isr: capabilities.isr,
+            controlq,
+        }
     }
 
     pub fn demo(&mut self) {
@@ -126,5 +129,11 @@ impl VirtioGpu {
             assert_eq!(response.hdr().type_, T::TYPE);
             Ok(response)
         }
+    }
+}
+
+impl InterruptHandler for VirtioGpu {
+    fn handle(&self) {
+        debug!("interrupt handler, isr {:#x}", self.isr.read());
     }
 }

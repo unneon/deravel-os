@@ -1,12 +1,13 @@
 mod config;
 mod types;
 
-use crate::util::volatile::Volatile;
+use crate::interrupt::InterruptHandler;
+use crate::util::volatile::{Readonly, Volatile};
+use crate::virtio::Capabilities;
 use crate::virtio::input::config::{Config, config_str};
 use crate::virtio::input::types::ConfigSelect;
 use crate::virtio::queue::Queue;
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK};
-use crate::virtio::{NotifySlot, VirtioCommonConfig};
 use alloc::vec;
 use alloc::vec::Vec;
 use log::{debug, info};
@@ -20,6 +21,7 @@ struct InputEvent {
 }
 
 pub struct VirtioInput {
+    isr: Volatile<u8, Readonly>,
     eventq: Queue<0>,
     buffers: Vec<InputEvent>,
 }
@@ -27,17 +29,14 @@ pub struct VirtioInput {
 const QUEUE_SIZE: usize = 64;
 
 impl VirtioInput {
-    pub fn new(
-        common: Volatile<VirtioCommonConfig>,
-        notify: NotifySlot,
-        device: Volatile<Config>,
-    ) -> VirtioInput {
+    pub fn new(caps: Capabilities<Config>) -> VirtioInput {
+        let common = caps.common;
         common.device_status().write(0);
         common.device_status().write_bitor(STATUS_ACKNOWLEDGE as u8);
         common.device_status().write_bitor(STATUS_DRIVER as u8);
 
         let mut buffers = vec![InputEvent::default(); QUEUE_SIZE];
-        let mut eventq = Queue::new(common, &notify, QUEUE_SIZE);
+        let mut eventq = Queue::new(common, &caps.notify, QUEUE_SIZE);
         for (i, buffer) in buffers.iter_mut().enumerate() {
             eventq.descriptor_writeonly(i as u16, buffer, None);
             eventq.available.ring[i] = i as u16;
@@ -45,11 +44,15 @@ impl VirtioInput {
         eventq.available.index = QUEUE_SIZE as u16;
         riscv::asm::fence();
 
-        let name = config_str(device, ConfigSelect::IdName, 0);
+        let name = config_str(caps.device, ConfigSelect::IdName, 0);
         info!("found {name}");
 
         common.device_status().write_bitor(STATUS_DRIVER_OK as u8);
-        VirtioInput { eventq, buffers }
+        VirtioInput {
+            isr: caps.isr,
+            eventq,
+            buffers,
+        }
     }
 
     pub fn demo(&mut self) {
@@ -70,5 +73,11 @@ impl VirtioInput {
         self.eventq.available.index += 1;
         riscv::asm::fence();
         Some(event)
+    }
+}
+
+impl InterruptHandler for VirtioInput {
+    fn handle(&self) {
+        debug!("interrupt handler, isr {:#x}", self.isr.read());
     }
 }

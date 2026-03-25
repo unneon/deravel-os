@@ -15,7 +15,7 @@ qemu-system-riscv64 \
     -device virtio-net-pci,netdev=net0,disable-legacy=on \
     -object filter-dump,id=f1,netdev=net0,file=dump.dat \
     -device virtio-gpu \
-    -display gtk,full-screen=on \
+    -display gtk,full-screen=off \
     -device virtio-keyboard \
     -device virtio-mouse \
     --no-reboot \

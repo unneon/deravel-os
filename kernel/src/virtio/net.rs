@@ -1,7 +1,9 @@
-use crate::util::volatile::{Volatile, volatile_struct};
+use crate::interrupt::InterruptHandler;
+use crate::util::volatile::{Readonly, Volatile, volatile_struct};
+use crate::virtio::Capabilities;
+use crate::virtio::input::VirtioInput;
 use crate::virtio::queue::{QUEUE_SIZE, Queue};
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, features};
-use crate::virtio::{NotifySlot, VirtioCommonConfig};
 use log::{debug, error};
 use smoltcp::iface::{Interface, SocketSet, SocketStorage};
 use smoltcp::phy::{DeviceCapabilities, Medium};
@@ -43,6 +45,7 @@ pub struct PacketReceiveToken<'a>(&'a mut Queue<0>);
 pub struct PacketTransmitToken<'a>(&'a mut Queue<1>);
 
 pub struct VirtioNet {
+    isr: Volatile<u8, Readonly>,
     device: Volatile<Config>,
     rx_queue: Queue<0>,
     tx_queue: Queue<1>,
@@ -52,11 +55,8 @@ static mut RECEIVE_BUFFERS: [Packet<[u8; 1514]>; QUEUE_SIZE] = unsafe { core::me
 static mut TRANSMIT_BUFFERS: [Packet<[u8; 1514]>; QUEUE_SIZE] = unsafe { core::mem::zeroed() };
 
 impl VirtioNet {
-    pub fn new(
-        common: Volatile<VirtioCommonConfig>,
-        notify: NotifySlot,
-        device: Volatile<Config>,
-    ) -> VirtioNet {
+    pub fn new(caps: Capabilities<Config>) -> VirtioNet {
+        let common = caps.common;
         common.device_status().write(0);
         common.device_status().write_bitor(STATUS_ACKNOWLEDGE as u8);
         common.device_status().write_bitor(STATUS_DRIVER as u8);
@@ -70,8 +70,8 @@ impl VirtioNet {
         common.driver_feature_select().write(0);
         common.driver_feature().write(driver_features.into());
 
-        let mut rx_queue = Queue::new(common, &notify, QUEUE_SIZE);
-        let mut tx_queue = Queue::new(common, &notify, QUEUE_SIZE);
+        let mut rx_queue = Queue::new(common, &caps.notify, QUEUE_SIZE);
+        let mut tx_queue = Queue::new(common, &caps.notify, QUEUE_SIZE);
 
         initialize_receive_buffers(&mut rx_queue);
         initialize_transmit_buffers(&mut tx_queue);
@@ -79,7 +79,8 @@ impl VirtioNet {
         common.device_status().write_bitor(STATUS_DRIVER_OK as u8);
 
         VirtioNet {
-            device,
+            isr: caps.isr,
+            device: caps.device,
             rx_queue,
             tx_queue,
         }
@@ -130,6 +131,12 @@ impl VirtioNet {
                 }
             }
         }
+    }
+}
+
+impl InterruptHandler for VirtioNet {
+    fn handle(&self) {
+        debug!("interrupt handler, isr {:#x}", self.isr.read());
     }
 }
 

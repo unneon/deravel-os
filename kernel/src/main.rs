@@ -20,6 +20,7 @@ mod capability;
 mod drvli;
 mod elf;
 mod heap;
+mod interrupt;
 mod log;
 mod page;
 mod pci;
@@ -32,6 +33,7 @@ use crate::arch::{RiscvRegisters, initialize_trap_handler, switch_to_userspace_r
 use crate::capability::HANDLERS;
 use crate::drvli::{ConsoleServer, DriveServer};
 use crate::elf::elf;
+use crate::interrupt::INTERRUPTS;
 use crate::log::{initialize_log, log_userspace};
 use crate::page::{PageFlags, PageTable, map_pages};
 use crate::pci::initialize_all_pci;
@@ -40,8 +42,9 @@ use crate::process::{
     schedule_and_switch_to_userspace,
 };
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
+use crate::util::volatile::{Volatile, volatile_struct};
 use crate::virtio::blk::VirtioBlk;
-use ::log::{Level, error};
+use ::log::{Level, debug, error};
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::vec;
@@ -52,11 +55,13 @@ use deravel_types::*;
 use fdt::Fdt;
 use riscv::interrupt::Trap;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
+use riscv::register::satp::Mode;
 
 struct ConsoleHandler;
 struct DriveHandler {}
 
 static mut DISK: Option<VirtioBlk> = None;
+static mut PLIC: Option<Volatile<Plic>> = None;
 
 impl ConsoleServer for ConsoleHandler {
     fn getchar(&self) -> u8 {
@@ -96,21 +101,34 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
 
     let device_tree = unsafe { Fdt::from_ptr(device_tree) }.unwrap();
     initialize_log(&device_tree);
+
+    debug!("{device_tree:#?}");
+
     initialize_trap_handler();
     log_sbi_metadata();
     initialize_all_pci(&device_tree);
 
-    let fs_tar = reserve_process::<TarFs>(elf!("CARGO_BIN_FILE_DERAVEL_FILESYSTEM_TAR"));
-    let ipc_a = reserve_process::<IpcA>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-a"));
-    let ipc_b = reserve_process::<IpcB>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-b"));
-    let ipc_c = reserve_process::<IpcC>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-c"));
+    debug!(
+        "pci-to-plic interrupts are {:?}",
+        unsafe { INTERRUPTS.iter().flatten() }
+            .map(|e| e.plic_number)
+            .collect::<Vec<_>>()
+    );
+
+    initialize_plic(&device_tree);
+    enable_interrupts();
+
+    // let fs_tar = reserve_process::<TarFs>(elf!("CARGO_BIN_FILE_DERAVEL_FILESYSTEM_TAR"));
+    // let ipc_a = reserve_process::<IpcA>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-a"));
+    // let ipc_b = reserve_process::<IpcB>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-b"));
+    // let ipc_c = reserve_process::<IpcC>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-c"));
     let hello = reserve_process::<Hello>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_hello"));
     let shell = reserve_process::<Shell>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_shell"));
 
-    unsafe { CAPABILITY_PAGES[PROCESS_COUNT].0[0] = CapabilityCertificate::granted(fs_tar.id) }
+    // unsafe { CAPABILITY_PAGES[PROCESS_COUNT].0[0] = CapabilityCertificate::granted(fs_tar.id) }
     unsafe { CAPABILITY_PAGES[PROCESS_COUNT].0[1] = CapabilityCertificate::granted(hello.id) }
     unsafe { CAPABILITY_PAGES[PROCESS_COUNT].0[2] = CapabilityCertificate::granted(shell.id) }
-    unsafe { HANDLERS[0] = Some(Box::new(Box::new(DriveHandler {}) as Box<dyn DriveServer>)) }
+    // unsafe { HANDLERS[0] = Some(Box::new(Box::new(DriveHandler {}) as Box<dyn DriveServer>)) }
     unsafe {
         HANDLERS[1] = Some(Box::new(
             Box::new(ConsoleHandler {}) as Box<dyn ConsoleServer>
@@ -122,15 +140,15 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
         ))
     }
 
-    ipc_a.spawn(IpcAArgs {
-        fs: fs_tar.export,
-        b: ipc_b.export,
-    });
-    ipc_b.spawn(IpcBArgs { c: ipc_c.export });
-    ipc_c.spawn(IpcCArgs {});
-    fs_tar.spawn(TarFsArgs {
-        drive: Capability(RawCapability::new(Actor::Kernel, 0), PhantomData),
-    });
+    // ipc_a.spawn(IpcAArgs {
+    //     fs: fs_tar.export,
+    //     b: ipc_b.export,
+    // });
+    // ipc_b.spawn(IpcBArgs { c: ipc_c.export });
+    // ipc_c.spawn(IpcCArgs {});
+    // fs_tar.spawn(TarFsArgs {
+    //     drive: Capability(RawCapability::new(Actor::Kernel, 0), PhantomData),
+    // });
     hello.spawn(HelloArgs {
         console: Capability(RawCapability::new(Actor::Kernel, 1), PhantomData),
     });
@@ -138,9 +156,12 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
         console: Capability(RawCapability::new(Actor::Kernel, 2), PhantomData),
     });
 
-    unsafe { riscv::register::sie::set_stimer() }
-
     schedule_and_switch_to_userspace();
+}
+
+fn cells(cells: &[[u8; 4]]) -> usize {
+    assert_eq!(cells.len(), 2);
+    ((u32::from_be_bytes(cells[0]) as usize) << 32) + u32::from_be_bytes(cells[1]) as usize
 }
 
 fn clear_bss() {
@@ -150,6 +171,56 @@ fn clear_bss() {
     }
     let bss = unsafe { core::slice::from_mut_ptr_range(&raw mut bss_start..&raw mut bss_end) };
     bss.fill(0);
+}
+
+volatile_struct! { Plic
+    // 0x000000
+    priority: ReadWrite [u32; 1024],
+    // 0x001000
+    pending: Readonly [u32; 1024 / 32],
+    _pad0: Readonly [u8; 0x002000 - 0x001000 - 4 * 1024 / 32],
+    // 0x002000
+    enable: ReadWrite [[u32; 1024 / 32]; 15872],
+    _pad1: Readonly [u8; 0x200000 - 0x002000 - 4 * 1024 / 32 * 15872],
+    // 0x200000
+    contexts: ReadWrite [PlicContext; 15872],
+}
+
+volatile_struct! { PlicContext
+    priority_threshold: ReadWrite u32,
+    claim_complete: ReadWrite u32,
+    _reserved: Readonly [u8; 0x1000 - 8],
+}
+
+fn initialize_plic(device_tree: &Fdt) {
+    let plic = find_plic(device_tree).unwrap();
+    unsafe { PLIC = Some(plic) }
+
+    for e in unsafe { INTERRUPTS.iter().flatten() } {
+        plic.priority().index(e.plic_number as usize).write(1);
+    }
+    for i in 0..5 {
+        plic.enable().index(1).index(i).write(!0);
+    }
+    plic.contexts().index(1).priority_threshold().write(0);
+}
+
+fn find_plic(device_tree: &Fdt) -> Option<Volatile<Plic>> {
+    let address = device_tree
+        .find_node("/soc/plic")?
+        .reg()?
+        .next()?
+        .starting_address;
+    Some(unsafe { Volatile::new(address as *mut Plic) })
+}
+
+fn enable_interrupts() {
+    let mut sie = riscv::register::sie::read();
+    sie.set_sext(true);
+    sie.set_stimer(true);
+    unsafe { riscv::register::sie::write(sie) }
+
+    unsafe { riscv::register::sstatus::set_sie() }
 }
 
 fn handle_trap(registers: &mut RiscvRegisters) -> ! {
@@ -163,6 +234,28 @@ fn handle_trap(registers: &mut RiscvRegisters) -> ! {
         handle_syscall(user_pc, registers);
     } else if scause == Trap::Interrupt(Interrupt::SupervisorTimer) {
         sbi::set_timer(u64::MAX);
+        switch_to_userspace_registers_only(registers)
+    } else if scause == Trap::Interrupt(Interrupt::SupervisorExternal) {
+        let satp = riscv::register::satp::read();
+        unsafe { riscv::register::satp::set(Mode::Bare, 0, 0) }
+        let irq = unsafe { PLIC }
+            .unwrap()
+            .contexts()
+            .index(1)
+            .claim_complete()
+            .read();
+        for ie in unsafe { INTERRUPTS.iter().flatten() } {
+            if ie.plic_number == irq {
+                ie.handler.handle();
+            }
+        }
+        unsafe { PLIC }
+            .unwrap()
+            .contexts()
+            .index(1)
+            .claim_complete()
+            .write(irq);
+        unsafe { riscv::register::satp::write(satp) }
         switch_to_userspace_registers_only(registers)
     } else {
         panic!("unexpected trap scause={scause:?} stval={stval:#x} user_pc={user_pc:#x}");

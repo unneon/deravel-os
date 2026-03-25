@@ -1,12 +1,13 @@
 pub mod capability;
 
 use crate::allocators::TrivialAllocator;
+use crate::interrupt::register_interrupt;
 use crate::pci::capability::PciCapability;
 use crate::util::volatile::{Volatile, volatile_struct};
 use crate::virtio;
 use fdt::Fdt;
 use fdt::node::FdtNode;
-use log::{info, warn};
+use log::{debug, info, warn};
 
 #[derive(Default)]
 pub struct AllocatedRange {
@@ -131,22 +132,30 @@ pub fn initialize_all_pci(device_tree: &Fdt) {
             let config = config.as_general_device().unwrap();
             let bars = allocate_all_bars(config, &pci_ranges, &mut io, &mut mem32, &mut mem64);
             config.common().command().write_bitor(0b111);
-            virtio::initialize_net(config, &bars);
+            let virtio_net = virtio::initialize_net(config, &bars);
+            let plic = pci_interrupt_to_plic(device_tree, config_index, config);
+            register_interrupt(plic, virtio_net);
         } else if vendor == 0x1AF4 && device == 0x1042 {
             let config = config.as_general_device().unwrap();
             let bars = allocate_all_bars(config, &pci_ranges, &mut io, &mut mem32, &mut mem64);
             config.common().command().write_bitor(0b111);
-            virtio::initialize_blk(config, &bars);
+            let virtio_blk = virtio::initialize_blk(config, &bars);
+            let plic = pci_interrupt_to_plic(device_tree, config_index, config);
+            register_interrupt(plic, virtio_blk);
         } else if vendor == 0x1AF4 && device == 0x1050 {
             let config = config.as_general_device().unwrap();
             let bars = allocate_all_bars(config, &pci_ranges, &mut io, &mut mem32, &mut mem64);
             config.common().command().write_bitor(0b111);
-            virtio::initialize_gpu(config, &bars);
+            let virtio_gpu = virtio::initialize_gpu(config, &bars);
+            let plic = pci_interrupt_to_plic(device_tree, config_index, config);
+            register_interrupt(plic, virtio_gpu);
         } else if vendor == 0x1AF4 && device == 0x1052 {
             let config = config.as_general_device().unwrap();
             let bars = allocate_all_bars(config, &pci_ranges, &mut io, &mut mem32, &mut mem64);
             config.common().command().write_bitor(0b111);
-            virtio::initialize_input(config, &bars);
+            let virtio_input = virtio::initialize_input(config, &bars);
+            let plic = pci_interrupt_to_plic(device_tree, config_index, config);
+            register_interrupt(plic, virtio_input);
         } else if vendor == 0x1B36 && device == 0x0008 {
             // TODO: Use this to scan the space more efficiently?
         } else {
@@ -278,6 +287,52 @@ fn find_pci_ranges(soc: &FdtNode, pci: &FdtNode) -> PciRanges {
         mem32: mem32.unwrap(),
         mem64: mem64.unwrap(),
     }
+}
+
+fn pci_interrupt_to_plic(
+    device_tree: &Fdt,
+    config_index: usize,
+    config: Volatile<GeneralDeviceConfig>,
+) -> u32 {
+    let pci = device_tree.find_node("/soc/pci").unwrap();
+    let plic = device_tree.find_node("/soc/plic").unwrap();
+
+    assert_eq!(pci.cell_sizes().address_cells, 3);
+    assert_eq!(pci.interrupt_cells().unwrap(), 1);
+    assert_eq!(plic.cell_sizes().address_cells, 0);
+    assert_eq!(plic.interrupt_cells().unwrap(), 1);
+
+    let address_mask = u32::from_be_bytes(
+        *pci.property("interrupt-map-mask")
+            .unwrap()
+            .value
+            .first_chunk()
+            .unwrap(),
+    );
+
+    let function = config_index % 8;
+    let device = config_index / 8 % 32;
+    let bus = config_index / 256;
+    let interrupt_address = ((bus << 16) | (device << 11) | (function << 8)) as u32 & address_mask;
+    debug!("config entry linked to int addr {interrupt_address:#x}");
+
+    let interrupt_map = pci
+        .property("interrupt-map")
+        .unwrap()
+        .value
+        .as_chunks::<4>()
+        .0
+        .as_chunks::<6>()
+        .0;
+
+    let interrupt_pin = config.interrupt_pin().read();
+    for &interrupt in interrupt_map {
+        let [pci_a0, _, _, pci_int, _, plic_int] = interrupt.map(u32::from_be_bytes);
+        if pci_a0 == interrupt_address && pci_int == interrupt_pin as u32 {
+            return plic_int;
+        }
+    }
+    unreachable!()
 }
 
 fn cells_to_usize(cells: &[[u8; 4]]) -> usize {
