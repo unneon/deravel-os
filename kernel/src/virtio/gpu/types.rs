@@ -82,7 +82,7 @@ pub enum Error {
     InvalidParameter,
 }
 
-#[allow(dead_code)]
+#[allow(dead_code, clippy::enum_variant_names)]
 #[repr(u32)]
 pub enum Format {
     B8G8R8A8Unorm = 1,

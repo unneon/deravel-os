@@ -38,8 +38,8 @@ impl VirtioInput {
 
         let mut buffers = vec![InputEvent::default(); QUEUE_SIZE];
         let mut eventq = Queue::new(common, &notify, QUEUE_SIZE);
-        for i in 0..QUEUE_SIZE {
-            eventq.descriptor_writeonly(i as u16, &mut buffers[i], None);
+        for (i, buffer) in buffers.iter_mut().enumerate() {
+            eventq.descriptor_writeonly(i as u16, buffer, None);
             eventq.available.ring[i] = i as u16;
         }
         eventq.available.index = QUEUE_SIZE as u16;

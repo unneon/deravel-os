@@ -1,3 +1,6 @@
+#![allow(clippy::let_unit_value)]
+#![allow(clippy::match_single_binding)]
+
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;

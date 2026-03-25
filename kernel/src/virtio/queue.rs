@@ -105,6 +105,7 @@ impl<const INDEX: u16> Queue<INDEX> {
         }
     }
 
+    // TODO: Does not capture lifetime.
     pub fn descriptor_readonly<T>(&mut self, index: u16, data: &T, next: Option<u16>) {
         let descriptor = &mut self.descriptors[index as usize];
         descriptor.address = data as *const T as u64;
@@ -113,6 +114,7 @@ impl<const INDEX: u16> Queue<INDEX> {
         descriptor.next = next.unwrap_or(0);
     }
 
+    // TODO: Pretty sure doing it this way is UB.
     pub fn descriptor_writeonly<T>(&mut self, index: u16, data: &mut T, next: Option<u16>) {
         let descriptor = &mut self.descriptors[index as usize];
         descriptor.address = data as *mut T as u64;
