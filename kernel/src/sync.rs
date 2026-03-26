@@ -12,7 +12,6 @@ pub struct MutexGuard<'a, T> {
 }
 
 impl<T> Mutex<T> {
-    #[allow(dead_code)]
     pub const fn new(value: T) -> Mutex<T> {
         Mutex {
             locked: AtomicBool::new(false),

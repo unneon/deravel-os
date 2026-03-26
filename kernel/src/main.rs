@@ -35,7 +35,7 @@ mod util;
 mod virtio;
 
 use crate::arch::{RiscvRegisters, initialize_trap_handler, switch_to_userspace_registers_only};
-use crate::capability::{CAPABILITY_PAGES, HANDLERS, reserve_kernel_capability};
+use crate::capability::{CAPABILITY_PAGES, reserve_kernel_capability};
 use crate::elf::elf;
 use crate::interrupt::INTERRUPTS;
 use crate::log::{initialize_log, log_userspace};
@@ -151,8 +151,11 @@ fn handle_trap(registers: &mut RiscvRegisters, hart: &mut HartContext) -> ! {
         let satp = riscv::register::satp::read();
         unsafe { riscv::register::satp::set(Mode::Bare, 0, 0) }
         let irq = plic_claim();
-        for ie in unsafe { INTERRUPTS.iter().flatten() } {
-            if ie.plic_number == irq {
+        for ie in &INTERRUPTS {
+            let ie = ie.lock();
+            if let Some(ie) = *ie
+                && ie.plic_number == irq
+            {
                 ie.handler.handle();
             }
         }
@@ -235,7 +238,7 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                     }
                     Actor::Kernel => {
                         let local_index = original.local_index();
-                        let handler = unsafe { HANDLERS[local_index].as_ref().unwrap() };
+                        let handler = capability::get_handler(local_index);
                         let result = handler.handle(method, args.as_bytes());
                         let buf_ptr = registers.a4 as *mut u8;
                         let buf_len = registers.a5;

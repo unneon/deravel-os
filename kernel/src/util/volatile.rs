@@ -87,3 +87,7 @@ impl<T, Access> core::fmt::Display for Volatile<T, Access> {
         write!(f, "{:#x}", self.0 as usize)
     }
 }
+
+unsafe impl<T, Access> Send for Volatile<T, Access> {}
+
+unsafe impl<T, Access> Sync for Volatile<T, Access> {}
