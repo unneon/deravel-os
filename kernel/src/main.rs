@@ -1,5 +1,6 @@
 #![feature(abi_riscv_interrupt)]
 #![feature(arbitrary_self_types)]
+#![feature(atomic_ptr_null)]
 #![feature(decl_macro)]
 #![feature(iter_array_chunks)]
 #![feature(iter_intersperse)]
@@ -24,6 +25,7 @@ mod interrupt;
 mod log;
 mod page;
 mod pci;
+mod plic;
 mod process;
 mod sbi;
 mod uart;
@@ -38,12 +40,12 @@ use crate::interrupt::INTERRUPTS;
 use crate::log::{initialize_log, log_userspace};
 use crate::page::{PageFlags, PageTable, map_pages};
 use crate::pci::initialize_all_pci;
+use crate::plic::{initialize_plic, plic_claim, plic_complete};
 use crate::process::{
     CAPABILITY_PAGES, CURRENT_PROC, PROCESS_COUNT, PROCESSES, ProcessState, reserve_process,
     schedule_and_switch_to_userspace,
 };
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
-use crate::util::volatile::{Volatile, volatile_struct};
 use crate::virtio::blk::VirtioBlk;
 use ::log::{Level, error};
 use alloc::borrow::ToOwned;
@@ -62,7 +64,6 @@ struct ConsoleHandler;
 struct DriveHandler {}
 
 static mut DISK: Option<VirtioBlk> = None;
-static mut PLIC: Option<Volatile<Plic>> = None;
 
 impl ConsoleServer for ConsoleHandler {
     fn getchar(&self) -> u8 {
@@ -158,47 +159,6 @@ fn clear_bss() {
     bss.fill(0);
 }
 
-volatile_struct! { Plic
-    // 0x000000
-    priority: ReadWrite [u32; 1024],
-    // 0x001000
-    pending: Readonly [u32; 1024 / 32],
-    _pad0: Readonly [u8; 0x002000 - 0x001000 - 4 * 1024 / 32],
-    // 0x002000
-    enable: ReadWrite [[u32; 1024 / 32]; 15872],
-    _pad1: Readonly [u8; 0x200000 - 0x002000 - 4 * 1024 / 32 * 15872],
-    // 0x200000
-    contexts: ReadWrite [PlicContext; 15872],
-}
-
-volatile_struct! { PlicContext
-    priority_threshold: ReadWrite u32,
-    claim_complete: ReadWrite u32,
-    _reserved: Readonly [u8; 0x1000 - 8],
-}
-
-fn initialize_plic(device_tree: &Fdt) {
-    let plic = find_plic(device_tree).unwrap();
-    unsafe { PLIC = Some(plic) }
-
-    for e in unsafe { INTERRUPTS.iter().flatten() } {
-        plic.priority().index(e.plic_number as usize).write(1);
-    }
-    for i in 0..5 {
-        plic.enable().index(1).index(i).write(!0);
-    }
-    plic.contexts().index(1).priority_threshold().write(0);
-}
-
-fn find_plic(device_tree: &Fdt) -> Option<Volatile<Plic>> {
-    let address = device_tree
-        .find_node("/soc/plic")?
-        .reg()?
-        .next()?
-        .starting_address;
-    Some(unsafe { Volatile::new(address as *mut Plic) })
-}
-
 fn enable_interrupts() {
     let mut sie = riscv::register::sie::read();
     sie.set_sext(true);
@@ -223,23 +183,13 @@ fn handle_trap(registers: &mut RiscvRegisters) -> ! {
     } else if scause == Trap::Interrupt(Interrupt::SupervisorExternal) {
         let satp = riscv::register::satp::read();
         unsafe { riscv::register::satp::set(Mode::Bare, 0, 0) }
-        let irq = unsafe { PLIC }
-            .unwrap()
-            .contexts()
-            .index(1)
-            .claim_complete()
-            .read();
+        let irq = plic_claim();
         for ie in unsafe { INTERRUPTS.iter().flatten() } {
             if ie.plic_number == irq {
                 ie.handler.handle();
             }
         }
-        unsafe { PLIC }
-            .unwrap()
-            .contexts()
-            .index(1)
-            .claim_complete()
-            .write(irq);
+        plic_complete(irq);
         unsafe { riscv::register::satp::write(satp) }
         switch_to_userspace_registers_only(registers)
     } else {
