@@ -8,7 +8,6 @@
 #![feature(ptr_metadata)]
 #![feature(slice_from_ptr_range)]
 #![feature(unsafe_cell_access)]
-#![allow(static_mut_refs)]
 #![allow(clippy::missing_safety_doc)]
 #![allow(clippy::type_complexity)]
 #![no_std]

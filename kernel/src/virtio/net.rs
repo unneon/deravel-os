@@ -3,6 +3,7 @@ use crate::util::volatile::{Readonly, Volatile, volatile_struct};
 use crate::virtio::Capabilities;
 use crate::virtio::queue::{QUEUE_SIZE, Queue};
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, features};
+use alloc::boxed::Box;
 use log::{debug, error};
 use smoltcp::iface::{Interface, SocketSet, SocketStorage};
 use smoltcp::phy::{DeviceCapabilities, Medium};
@@ -39,19 +40,18 @@ struct Packet<T> {
     payload: T,
 }
 
-pub struct PacketReceiveToken<'a>(&'a mut Queue<0>);
+pub struct PacketReceiveToken<'a>(&'a mut Queue<0>, &'a mut [Packet<[u8; 1514]>; QUEUE_SIZE]);
 
-pub struct PacketTransmitToken<'a>(&'a mut Queue<1>);
+pub struct PacketTransmitToken<'a>(&'a mut Queue<1>, &'a mut [Packet<[u8; 1514]>; QUEUE_SIZE]);
 
 pub struct VirtioNet {
     isr: Volatile<u8, Readonly>,
     device: Volatile<Config>,
     rx_queue: Queue<0>,
     tx_queue: Queue<1>,
+    rx_buffers: Box<[Packet<[u8; 1514]>; QUEUE_SIZE]>,
+    tx_buffers: Box<[Packet<[u8; 1514]>; QUEUE_SIZE]>,
 }
-
-static mut RECEIVE_BUFFERS: [Packet<[u8; 1514]>; QUEUE_SIZE] = unsafe { core::mem::zeroed() };
-static mut TRANSMIT_BUFFERS: [Packet<[u8; 1514]>; QUEUE_SIZE] = unsafe { core::mem::zeroed() };
 
 impl VirtioNet {
     pub fn new(caps: Capabilities<Config>) -> VirtioNet {
@@ -72,8 +72,8 @@ impl VirtioNet {
         let mut rx_queue = Queue::new(common, &caps.notify, QUEUE_SIZE);
         let mut tx_queue = Queue::new(common, &caps.notify, QUEUE_SIZE);
 
-        initialize_receive_buffers(&mut rx_queue);
-        initialize_transmit_buffers(&mut tx_queue);
+        let rx_buffers = initialize_receive_buffers(&mut rx_queue);
+        let tx_buffers = initialize_transmit_buffers(&mut tx_queue);
 
         common.device_status().write_bitor(STATUS_DRIVER_OK as u8);
 
@@ -82,6 +82,8 @@ impl VirtioNet {
             device: caps.device,
             rx_queue,
             tx_queue,
+            rx_buffers,
+            tx_buffers,
         }
     }
 
@@ -153,8 +155,8 @@ impl smoltcp::phy::Device for VirtioNet {
         }
 
         Some((
-            PacketReceiveToken(&mut self.rx_queue),
-            PacketTransmitToken(&mut self.tx_queue),
+            PacketReceiveToken(&mut self.rx_queue, &mut self.rx_buffers),
+            PacketTransmitToken(&mut self.tx_queue, &mut self.tx_buffers),
         ))
     }
 
@@ -164,7 +166,10 @@ impl smoltcp::phy::Device for VirtioNet {
             return None;
         }
 
-        Some(PacketTransmitToken(&mut self.tx_queue))
+        Some(PacketTransmitToken(
+            &mut self.tx_queue,
+            &mut self.tx_buffers,
+        ))
     }
 
     fn capabilities(&self) -> DeviceCapabilities {
@@ -180,7 +185,7 @@ impl smoltcp::phy::RxToken for PacketReceiveToken<'_> {
         let ring_index = self.0.available.index as usize % QUEUE_SIZE;
         let used_element = &self.0.used.ring[ring_index];
         let descriptor_index = used_element.id as usize;
-        let packet = unsafe { &RECEIVE_BUFFERS[descriptor_index] };
+        let packet = &self.1[descriptor_index];
         let payload_length = used_element.len as usize - size_of::<Header>();
         let payload = &packet.payload[..payload_length];
         let result = f(payload);
@@ -196,7 +201,7 @@ impl smoltcp::phy::RxToken for PacketReceiveToken<'_> {
 impl smoltcp::phy::TxToken for PacketTransmitToken<'_> {
     fn consume<R, F: FnOnce(&mut [u8]) -> R>(self, len: usize, f: F) -> R {
         let index = self.0.available.index as usize % QUEUE_SIZE;
-        let packet = unsafe { &mut TRANSMIT_BUFFERS[index] };
+        let packet = &mut self.1[index];
         let result = f(&mut packet.payload[..len]);
 
         self.0.descriptors[index].length = (size_of::<Header>() + len) as u32;
@@ -208,8 +213,18 @@ impl smoltcp::phy::TxToken for PacketTransmitToken<'_> {
     }
 }
 
-fn initialize_receive_buffers(rx_queue: &mut Queue<0>) {
-    for (i, buffer) in unsafe { RECEIVE_BUFFERS.iter_mut() }.enumerate() {
+impl Default for Packet<[u8; 1514]> {
+    fn default() -> Self {
+        Packet {
+            header: Header::default(),
+            payload: [0; _],
+        }
+    }
+}
+
+fn initialize_receive_buffers(rx_queue: &mut Queue<0>) -> Box<[Packet<[u8; 1514]>; QUEUE_SIZE]> {
+    let mut rx_buffers = Box::new([Default::default(); _]);
+    for (i, buffer) in rx_buffers.iter_mut().enumerate() {
         rx_queue.available.ring[i] = i as u16;
         rx_queue.descriptor_writeonly(i as u16, buffer, None);
     }
@@ -217,12 +232,15 @@ fn initialize_receive_buffers(rx_queue: &mut Queue<0>) {
     rx_queue.available.index = QUEUE_SIZE as u16;
     riscv::asm::fence();
     rx_queue.notify();
+    rx_buffers
 }
 
-fn initialize_transmit_buffers(tx_queue: &mut Queue<1>) {
-    for (i, buffer) in unsafe { TRANSMIT_BUFFERS.iter() }.enumerate() {
+fn initialize_transmit_buffers(tx_queue: &mut Queue<1>) -> Box<[Packet<[u8; 1514]>; QUEUE_SIZE]> {
+    let tx_buffers = Box::new([Default::default(); _]);
+    for (i, buffer) in tx_buffers.iter().enumerate() {
         tx_queue.available.ring[i] = i as u16;
         tx_queue.descriptor_readonly(i as u16, buffer, None);
     }
     riscv::asm::fence();
+    tx_buffers
 }
