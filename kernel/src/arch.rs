@@ -118,8 +118,7 @@ pub fn switch_to_userspace_registers_only(registers: &RiscvRegisters) -> ! {
 unsafe extern "C" fn trap_entry() -> ! {
     naked_asm!(
         ".align 4",
-        "csrw sscratch, sp",
-        "la sp, {stack_top}",
+        "csrrw sp, sscratch, sp",
         // 31 registers, 32 u64s so the stack is aligned.
         "addi sp, sp, -8 * 32",
 
@@ -159,9 +158,10 @@ unsafe extern "C" fn trap_entry() -> ! {
         "sd t6, 8 * 30(sp)",
 
         "mv a0, sp",
+        "addi a1, sp, 8 * 32",
+        "csrw sscratch, a1",
         "j {handle_trap}",
 
-        stack_top = sym stack_top,
         handle_trap = sym handle_trap,
     )
 }
