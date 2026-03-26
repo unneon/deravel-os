@@ -46,9 +46,10 @@ use crate::process::{
 };
 use crate::sbi::{ResetReason, ResetType, SbiConsole, log_sbi_metadata};
 use ::log::{Level, error};
-use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
+use alloc::string::String;
 use alloc::vec;
+use alloc::vec::Vec;
 use core::panic::PanicInfo;
 use core::sync::atomic::Ordering;
 use deravel_types::*;
@@ -178,22 +179,15 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
         }
         1 => {
             if current_proc.state == ProcessState::WaitingForReply {
-                let result = current_proc.reply.take().unwrap();
-                let buf_ptr = registers.a4 as *mut u8;
-                let buf_len = registers.a5;
-                assert!(result.len() <= buf_len);
-                let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr, result.len()) };
-                buf.copy_from_slice(result.as_bytes());
-                registers.a0 = result.len();
+                let reply = current_proc.reply.take().unwrap();
+                copy_to_user(&reply, registers.a4 as *mut u8, registers.a5);
+                registers.a0 = reply.len();
                 current_proc.state = ProcessState::Runnable;
             } else {
                 let farthest_cap =
                     RawCapability::from_pointer(registers.a0 as *mut CapabilityCertificate);
                 let method = registers.a1;
-                let args_ptr = registers.a2 as *const u8;
-                let args_len = registers.a3;
-                let args = unsafe { core::slice::from_raw_parts(args_ptr, args_len) };
-                let args = core::str::from_utf8(args).unwrap().to_owned();
+                let args = copy_from_user(registers.a2 as *const u8, registers.a3);
                 current_proc.state = ProcessState::WaitingForReply;
                 current_proc.registers = registers.clone();
                 current_proc.pc = user_pc;
@@ -235,14 +229,9 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                         schedule_and_switch_to_userspace(hart);
                     }
                     Actor::Kernel => {
-                        let local_index = original.local_index();
-                        let handler = capability::get_handler(local_index);
-                        let result = handler.handle(method, args.as_bytes());
-                        let buf_ptr = registers.a4 as *mut u8;
-                        let buf_len = registers.a5;
-                        assert!(result.len() <= buf_len);
-                        let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr, result.len()) };
-                        buf.copy_from_slice(&result);
+                        let handler = capability::get_handler(original.local_index());
+                        let result = handler.handle(method, &args);
+                        copy_to_user(&result, registers.a4 as *mut u8, registers.a5);
                         registers.a0 = result.len();
                         current_proc.state = ProcessState::Runnable;
                     }
@@ -254,11 +243,7 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
             if let Some((cap, method, args, sender)) =
                 current_proc.messages.as_mut().and_then(|q| q.pop_front())
             {
-                let buf = registers.a0 as *mut u8;
-                let buf_max_len = registers.a1;
-                assert!(args.len() <= buf_max_len);
-                let buf = unsafe { core::slice::from_raw_parts_mut(buf, args.len()) };
-                buf.copy_from_slice(args.as_bytes());
+                copy_to_user(&args, registers.a0 as *mut u8, registers.a1);
                 registers.a0 = cap.as_usize();
                 registers.a1 = method;
                 registers.a2 = args.len();
@@ -274,11 +259,7 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
             }
         }
         3 => {
-            let result_ptr = registers.a0;
-            let result_len = registers.a1;
-            let result =
-                unsafe { core::slice::from_raw_parts(result_ptr as *const u8, result_len) };
-            let result = str::from_utf8(result).unwrap().to_owned();
+            let result = copy_from_user(registers.a0 as *const u8, registers.a1);
             let caller = current_proc.currently_serving.take().unwrap();
             PROCESSES[caller.as_usize()].lock().reply = Some(result.into());
         }
@@ -299,14 +280,9 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
             registers.a0 = virtual_addr;
         }
         5 => {
-            let text = registers.a0 as *const u8;
-            let text_len = registers.a1;
-            assert!(text_len <= 1024);
+            let text = copy_from_user(registers.a0 as *const u8, registers.a1);
+            let text = String::from_utf8(text).unwrap();
             let level = registers.a2;
-            let text = unsafe { core::slice::from_raw_parts(text, text_len) };
-            let mut text_stack = [0; 1024];
-            text_stack[..text_len].copy_from_slice(text);
-            let text = unsafe { core::str::from_utf8_unchecked(&text_stack[..text_len]) };
             let level = match level {
                 0 => Level::Error,
                 1 => Level::Warn,
@@ -315,7 +291,7 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                 4 => Level::Trace,
                 _ => panic!("invalid log level {level}"),
             };
-            log_userspace(level, current_proc.name.unwrap(), text);
+            log_userspace(level, current_proc.name.unwrap(), &text);
         }
         _ => panic!("invalid syscall number {}", registers.a6),
     }
@@ -323,6 +299,17 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
     drop(current_proc);
     unsafe { riscv::register::sepc::write(user_pc + 4) };
     switch_to_userspace_registers_only(registers);
+}
+
+fn copy_to_user(bytes: &[u8], user_ptr: *mut u8, user_max_len: usize) {
+    assert!(bytes.len() <= user_max_len);
+    unsafe { core::slice::from_raw_parts_mut(user_ptr, bytes.len()).copy_from_slice(bytes) }
+}
+
+fn copy_from_user(user_ptr: *const u8, user_len: usize) -> Vec<u8> {
+    let mut bytes = vec![0; user_len];
+    bytes.copy_from_slice(unsafe { core::slice::from_raw_parts(user_ptr, user_len) });
+    bytes
 }
 
 #[panic_handler]

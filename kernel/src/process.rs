@@ -8,7 +8,7 @@ use crate::sync::Mutex;
 use crate::{HartContext, sbi};
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
-use alloc::string::String;
+use alloc::vec::Vec;
 use core::marker::PhantomData;
 use core::sync::atomic::Ordering;
 use deravel_types::*;
@@ -31,9 +31,9 @@ pub struct Process {
     pub pc: usize,
     pub page_table: *const PageTable,
     pub heap_pages_allocated: usize,
-    pub messages: Option<Box<VecDeque<(RawCapability, usize, String, ProcessId)>>>,
+    pub messages: Option<Box<VecDeque<(RawCapability, usize, Vec<u8>, ProcessId)>>>,
     #[allow(clippy::box_collection)]
-    pub reply: Option<Box<String>>,
+    pub reply: Option<Box<Vec<u8>>>,
     pub currently_serving: Option<ProcessId>,
 }
 unsafe impl Send for Process {}
