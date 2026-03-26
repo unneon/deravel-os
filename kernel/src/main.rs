@@ -7,6 +7,7 @@
 #![feature(never_type)]
 #![feature(ptr_metadata)]
 #![feature(slice_from_ptr_range)]
+#![feature(unsafe_cell_access)]
 #![allow(static_mut_refs)]
 #![allow(clippy::missing_safety_doc)]
 #![allow(clippy::type_complexity)]
@@ -28,6 +29,7 @@ mod pci;
 mod plic;
 mod process;
 mod sbi;
+mod sync;
 mod uart;
 mod util;
 mod virtio;
@@ -164,21 +166,23 @@ fn handle_trap(registers: &mut RiscvRegisters, hart: &mut HartContext) -> ! {
 
 fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut HartContext) -> ! {
     let current_pid = hart.current_pid.unwrap().as_usize();
+    let mut current_proc = PROCESSES[current_pid].lock();
     match registers.a6 {
         0 => {
-            unsafe { PROCESSES[current_pid].state = ProcessState::Finished }
+            current_proc.state = ProcessState::Finished;
+            drop(current_proc);
             schedule_and_switch_to_userspace(hart);
         }
         1 => {
-            if unsafe { PROCESSES[current_pid].state } == ProcessState::WaitingForReply {
-                let result = unsafe { PROCESSES[current_pid].reply.take().unwrap() };
+            if current_proc.state == ProcessState::WaitingForReply {
+                let result = current_proc.reply.take().unwrap();
                 let buf_ptr = registers.a4 as *mut u8;
                 let buf_len = registers.a5;
                 assert!(result.len() <= buf_len);
                 let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr, result.len()) };
                 buf.copy_from_slice(result.as_bytes());
                 registers.a0 = result.len();
-                unsafe { PROCESSES[current_pid].state = ProcessState::Runnable };
+                current_proc.state = ProcessState::Runnable;
             } else {
                 let farthest_cap =
                     RawCapability::from_pointer(registers.a0 as *mut CapabilityCertificate);
@@ -187,10 +191,9 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                 let args_len = registers.a3;
                 let args = unsafe { core::slice::from_raw_parts(args_ptr, args_len) };
                 let args = core::str::from_utf8(args).unwrap().to_owned();
-                let proc = unsafe { &mut PROCESSES[current_pid] };
-                proc.state = ProcessState::WaitingForReply;
-                proc.registers = registers.clone();
-                proc.pc = user_pc;
+                current_proc.state = ProcessState::WaitingForReply;
+                current_proc.registers = registers.clone();
+                current_proc.pc = user_pc;
 
                 let mut capability = farthest_cap;
                 let mut sender = Actor::Userspace(ProcessId::new(current_pid));
@@ -218,7 +221,7 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
 
                 match original.certifier() {
                     Actor::Userspace(dest) => {
-                        let dest = unsafe { &mut PROCESSES[dest.as_usize()] };
+                        let mut dest = PROCESSES[dest.as_usize()].lock();
                         dest.messages.get_or_insert_default().push_back((
                             original,
                             method,
@@ -226,6 +229,8 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                             ProcessId::new(current_pid),
                         ));
 
+                        drop(current_proc);
+                        drop(dest);
                         schedule_and_switch_to_userspace(hart);
                     }
                     Actor::Kernel => {
@@ -238,19 +243,16 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                         let buf = unsafe { core::slice::from_raw_parts_mut(buf_ptr, result.len()) };
                         buf.copy_from_slice(&result);
                         registers.a0 = result.len();
-                        unsafe { PROCESSES[current_pid].state = ProcessState::Runnable };
+                        current_proc.state = ProcessState::Runnable;
                     }
                 }
             }
         }
         2 => {
-            assert!(unsafe { PROCESSES[current_pid].currently_serving.is_none() });
-            if let Some((cap, method, args, sender)) = unsafe {
-                PROCESSES[current_pid]
-                    .messages
-                    .as_mut()
-                    .and_then(|q| q.pop_front())
-            } {
+            assert!(current_proc.currently_serving.is_none());
+            if let Some((cap, method, args, sender)) =
+                current_proc.messages.as_mut().and_then(|q| q.pop_front())
+            {
                 let buf = registers.a0 as *mut u8;
                 let buf_max_len = registers.a1;
                 assert!(args.len() <= buf_max_len);
@@ -260,13 +262,13 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                 registers.a1 = method;
                 registers.a2 = args.len();
                 registers.a3 = sender.as_usize();
-                unsafe { PROCESSES[current_pid].currently_serving = Some(sender) };
+                current_proc.currently_serving = Some(sender);
             } else {
-                let proc = unsafe { &mut PROCESSES[current_pid] };
-                proc.state = ProcessState::WaitingForMessage;
-                proc.registers = registers.clone();
-                proc.pc = user_pc;
+                current_proc.state = ProcessState::WaitingForMessage;
+                current_proc.registers = registers.clone();
+                current_proc.pc = user_pc;
 
+                drop(current_proc);
                 schedule_and_switch_to_userspace(hart);
             }
         }
@@ -276,14 +278,14 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
             let result =
                 unsafe { core::slice::from_raw_parts(result_ptr as *const u8, result_len) };
             let result = str::from_utf8(result).unwrap().to_owned();
-            let caller = unsafe { PROCESSES[current_pid].currently_serving.take().unwrap() };
-            unsafe { PROCESSES[caller.as_usize()].reply = Some(result.into()) };
+            let caller = current_proc.currently_serving.take().unwrap();
+            PROCESSES[caller.as_usize()].lock().reply = Some(result.into());
         }
         4 => {
             let page_count = registers.a0;
             let pages = vec![[0; PAGE_SIZE]; page_count];
-            let pages_allocated = unsafe { PROCESSES[current_pid].heap_pages_allocated };
-            let page_table = unsafe { &mut *(PROCESSES[current_pid].page_table as *mut PageTable) };
+            let pages_allocated = current_proc.heap_pages_allocated;
+            let page_table = unsafe { &mut *(current_proc.page_table as *mut PageTable) };
             let virtual_addr = 0x1800000 + pages_allocated * PAGE_SIZE;
             map_pages(
                 page_table,
@@ -292,7 +294,7 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                 PageFlags::readwrite().user(),
                 page_count,
             );
-            unsafe { PROCESSES[current_pid].heap_pages_allocated += page_count }
+            current_proc.heap_pages_allocated += page_count;
             registers.a0 = virtual_addr;
         }
         5 => {
@@ -312,11 +314,12 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                 4 => Level::Trace,
                 _ => panic!("invalid log level {level}"),
             };
-            log_userspace(level, unsafe { PROCESSES[current_pid].name.unwrap() }, text);
+            log_userspace(level, current_proc.name.unwrap(), text);
         }
         _ => panic!("invalid syscall number {}", registers.a6),
     }
 
+    drop(current_proc);
     unsafe { riscv::register::sepc::write(user_pc + 4) };
     switch_to_userspace_registers_only(registers);
 }

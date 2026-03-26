@@ -4,6 +4,7 @@ use crate::elf::load_elf;
 use crate::heap::log_heap_statistics;
 use crate::page::{PageFlags, PageTable, map_pages};
 use crate::sbi::{ResetReason, ResetType};
+use crate::sync::Mutex;
 use crate::{HartContext, sbi};
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
@@ -34,6 +35,7 @@ pub struct Process {
     pub reply: Option<Box<String>>,
     pub currently_serving: Option<ProcessId>,
 }
+unsafe impl Send for Process {}
 
 pub struct ProcessReservation<T: ProcessTag> {
     pub id: ProcessId,
@@ -53,7 +55,7 @@ unsafe extern "C" {
     static readwrite_end: u8;
 }
 
-pub static mut PROCESSES: [Process; PROCESS_COUNT] = unsafe { core::mem::zeroed() };
+pub static PROCESSES: [Mutex<Process>; PROCESS_COUNT] = unsafe { core::mem::zeroed() };
 
 impl Process {
     pub fn satp(&self) -> Satp {
@@ -72,7 +74,7 @@ impl<T: ProcessTag> ProcessReservation<T> {
 
 pub fn reserve_process<T: ProcessTag>(elf: &'static [u8]) -> ProcessReservation<T> {
     let pid = find_free_process_slot().expect("exhausted all process slots");
-    let proc = unsafe { &mut PROCESSES[pid] };
+    let mut proc = PROCESSES[pid].lock();
     proc.state = ProcessState::Reserved;
     ProcessReservation {
         id: ProcessId::new(pid),
@@ -98,7 +100,7 @@ pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: Pro
     map_capability_memory(&mut page_table, pid);
     map_inputs_memory(&mut page_table, inputs);
 
-    let proc = unsafe { &mut PROCESSES[pid] };
+    let mut proc = PROCESSES[pid].lock();
     proc.name = Some(name);
     proc.state = ProcessState::Runnable;
     proc.pc = entry_point;
@@ -163,8 +165,8 @@ fn map_inputs_memory<T: ProcessTag>(pages: &mut PageTable, inputs: ProcessInputs
 }
 
 fn find_free_process_slot() -> Option<usize> {
-    for (i, process) in unsafe { PROCESSES.iter_mut().enumerate() } {
-        if process.state == ProcessState::Unused {
+    for (i, process) in PROCESSES.iter().enumerate() {
+        if process.lock().state == ProcessState::Unused {
             return Some(i);
         }
     }
@@ -176,7 +178,7 @@ pub fn schedule_and_switch_to_userspace(hart: &mut HartContext) -> ! {
         log_heap_statistics();
         sbi::system_reset(ResetType::Shutdown, ResetReason::NoReason).unwrap()
     };
-    let next = unsafe { &PROCESSES[next_pid.as_usize()] };
+    let next = PROCESSES[next_pid.as_usize()].lock();
     hart.current_pid = Some(next_pid);
 
     switch_to_userspace_full(next);
@@ -190,7 +192,7 @@ pub fn find_runnable_process(hart: &HartContext) -> Option<ProcessId> {
 
     for scan_offset in 0..PROCESS_COUNT {
         let scan_index = (scan_start + scan_offset) % PROCESS_COUNT;
-        let process = unsafe { &PROCESSES[scan_index] };
+        let process = PROCESSES[scan_index].lock();
         if process.state == ProcessState::Runnable
             || (process.state == ProcessState::WaitingForMessage
                 && process.messages.as_ref().is_some_and(|q| !q.is_empty()))

@@ -1,4 +1,5 @@
 use crate::process::Process;
+use crate::sync::MutexGuard;
 use crate::{handle_trap, main};
 use core::arch::{asm, naked_asm};
 use riscv::register::mtvec::TrapMode;
@@ -61,7 +62,7 @@ pub fn initialize_trap_handler() {
     unsafe { riscv::register::stvec::write(Stvec::new(address, TrapMode::Direct)) }
 }
 
-pub fn switch_to_userspace_full(next: &Process) -> ! {
+pub fn switch_to_userspace_full(next: MutexGuard<Process>) -> ! {
     riscv::asm::sfence_vma_all();
     unsafe { riscv::register::satp::write(next.satp()) };
     riscv::asm::sfence_vma_all();
@@ -70,10 +71,12 @@ pub fn switch_to_userspace_full(next: &Process) -> ! {
     status.set_spie(true);
     status.set_sum(true);
     unsafe { riscv::register::sstatus::write(status) };
-    switch_to_userspace_registers_only(&next.registers)
+    let registers = &next.registers as *const _;
+    drop(next);
+    switch_to_userspace_registers_only(registers)
 }
 
-pub fn switch_to_userspace_registers_only(registers: &RiscvRegisters) -> ! {
+pub fn switch_to_userspace_registers_only(registers: *const RiscvRegisters) -> ! {
     unsafe {
         asm!(
             "ld ra, 8 * 0(t6)",
