@@ -1,5 +1,6 @@
 use crate::{PAGE_SIZE, ProcessId};
 use core::marker::PhantomData;
+use core::sync::atomic::{AtomicU64, Ordering};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Clone, Copy, Deserialize, Serialize)]
@@ -7,8 +8,10 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 #[serde(transparent)]
 pub struct Capability<T>(pub RawCapability, pub PhantomData<T>);
 
+pub struct CapabilityCertificate(AtomicU64);
+
 #[derive(Clone, Copy)]
-pub struct CapabilityCertificate {
+pub struct CapabilityCertificateValue {
     grantee: u32,
     payload: u32,
 }
@@ -24,6 +27,9 @@ pub enum CapabilityCertificateUnpacked {
     },
 }
 
+#[repr(align(4096))]
+pub struct CapabilityPage(pub [CapabilityCertificate; CAPABILITIES_PER_PAGE]);
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum Actor {
     Userspace(ProcessId),
@@ -34,8 +40,11 @@ pub enum Actor {
 #[repr(transparent)]
 pub struct RawCapability(*const CapabilityCertificate);
 
+pub const CAPABILITIES_PER_PAGE: usize = PAGE_SIZE / size_of::<CapabilityCertificate>();
+
 pub const CAPABILITIES_START: usize = 0x2000000;
 pub const CAPABILITIES_END: usize = 0x3000000;
+
 pub const MAX_PROCESSES: usize = (CAPABILITIES_END - CAPABILITIES_START) / PAGE_SIZE - 1;
 
 impl RawCapability {
@@ -54,7 +63,7 @@ impl RawCapability {
         RawCapability(pointer as *const _)
     }
 
-    pub fn from_pointer(pointer: *mut CapabilityCertificate) -> RawCapability {
+    pub fn from_pointer(pointer: *const CapabilityCertificate) -> RawCapability {
         assert!(is_capability_pointer_valid(pointer));
         RawCapability(pointer)
     }
@@ -78,15 +87,28 @@ impl RawCapability {
 }
 
 impl CapabilityCertificate {
-    pub const fn empty() -> CapabilityCertificate {
-        CapabilityCertificate {
+    pub fn load(&self, ordering: Ordering) -> CapabilityCertificateValue {
+        unsafe { core::mem::transmute::<u64, CapabilityCertificateValue>(self.0.load(ordering)) }
+    }
+
+    pub fn store(&self, value: CapabilityCertificateValue, ordering: Ordering) {
+        self.0.store(
+            unsafe { core::mem::transmute::<CapabilityCertificateValue, u64>(value) },
+            ordering,
+        )
+    }
+}
+
+impl CapabilityCertificateValue {
+    pub const fn empty() -> CapabilityCertificateValue {
+        CapabilityCertificateValue {
             grantee: u32::MAX,
             payload: 0,
         }
     }
 
-    pub fn granted(grantee: impl Into<Actor>) -> CapabilityCertificate {
-        CapabilityCertificate {
+    pub fn granted(grantee: impl Into<Actor>) -> CapabilityCertificateValue {
+        CapabilityCertificateValue {
             grantee: match grantee.into() {
                 Actor::Userspace(pid) => pid.0 as u32,
                 Actor::Kernel => MAX_PROCESSES as u32,
@@ -95,8 +117,8 @@ impl CapabilityCertificate {
         }
     }
 
-    pub fn forwarded(forwardee: Actor, capability: RawCapability) -> CapabilityCertificate {
-        CapabilityCertificate {
+    pub fn forwarded(forwardee: Actor, capability: RawCapability) -> CapabilityCertificateValue {
+        CapabilityCertificateValue {
             grantee: match forwardee {
                 Actor::Userspace(pid) => pid.0 as u32,
                 Actor::Kernel => MAX_PROCESSES as u32,
@@ -181,12 +203,19 @@ impl Serialize for RawCapability {
     }
 }
 
-pub fn get_capability_certificate_page(actor: Actor) -> *mut CapabilityCertificate {
+pub fn get_capability_certificate_page(
+    actor: Actor,
+) -> &'static [CapabilityCertificate; CAPABILITIES_PER_PAGE] {
     let offset = match actor {
         Actor::Userspace(pid) => pid.0,
         Actor::Kernel => MAX_PROCESSES,
     };
-    (CAPABILITIES_START + PAGE_SIZE * offset) as _
+    &get_capability_certificate_pages()[offset]
+}
+
+fn get_capability_certificate_pages()
+-> &'static [[CapabilityCertificate; CAPABILITIES_PER_PAGE]; MAX_PROCESSES + 1] {
+    unsafe { &*(CAPABILITIES_START as *const _) }
 }
 
 fn is_capability_pointer_valid(maybe_cap: *const CapabilityCertificate) -> bool {

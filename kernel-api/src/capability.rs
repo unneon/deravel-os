@@ -2,8 +2,8 @@ use crate::current_pid;
 use core::marker::PhantomData;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use deravel_types::{
-    Actor, Capability, CapabilityCertificate, CapabilityCertificateUnpacked, RawCapability,
-    get_capability_certificate_page,
+    Actor, Capability, CapabilityCertificate, CapabilityCertificateUnpacked,
+    CapabilityCertificateValue, RawCapability, get_capability_certificate_page,
 };
 use log::trace;
 
@@ -12,7 +12,10 @@ static CAPABILITIES_ALLOCATED: AtomicUsize = AtomicUsize::new(0);
 pub fn grant_capability<T>(grantee: impl Into<Actor>) -> Capability<T> {
     let grantee = grantee.into();
     let certificate = allocate_certificate();
-    *certificate = CapabilityCertificate::granted(grantee);
+    certificate.store(
+        CapabilityCertificateValue::granted(grantee),
+        Ordering::Relaxed,
+    );
     let cap = Capability(RawCapability::from_pointer(certificate), PhantomData);
     trace!("granted {cap:?} to {grantee:?}");
     cap
@@ -20,7 +23,10 @@ pub fn grant_capability<T>(grantee: impl Into<Actor>) -> Capability<T> {
 
 pub fn forward_capability<T, U>(cap: Capability<T>, forwardee: Capability<U>) -> Capability<T> {
     let certificate = allocate_certificate();
-    *certificate = CapabilityCertificate::forwarded(forwardee.certifier(), cap.0);
+    certificate.store(
+        CapabilityCertificateValue::forwarded(forwardee.certifier(), cap.0),
+        Ordering::Relaxed,
+    );
     let forwarded = Capability(RawCapability::from_pointer(certificate), PhantomData);
     trace!("forwarded {cap:?} as {forwarded:?} to {forwardee:?}");
     forwarded
@@ -50,21 +56,18 @@ pub fn validate_capability(cap: RawCapability, claimer: Actor) -> RawCapability 
     original
 }
 
-fn read_certificate(cap: RawCapability) -> CapabilityCertificate {
-    unsafe {
-        get_capability_certificate_page(cap.certifier())
-            .add(cap.local_index())
-            .read()
-    }
+fn read_certificate(cap: RawCapability) -> CapabilityCertificateValue {
+    get_capability_certificate_page(cap.certifier())[cap.local_index()].load(Ordering::Relaxed)
 }
 
-fn allocate_certificate() -> &'static mut CapabilityCertificate {
+fn allocate_certificate() -> &'static CapabilityCertificate {
     let index = CAPABILITIES_ALLOCATED.fetch_add(1, Ordering::Relaxed) + 1;
     assert!(
-        index < 4096 / size_of::<CapabilityCertificate>(),
+        index < 4096 / size_of::<CapabilityCertificateValue>(),
         "out of capability certificate slots"
     );
-    let our_certificates = get_capability_certificate_page(current_pid().into());
+    let our_certificates = get_capability_certificate_page(current_pid().into()) as *const _
+        as *mut CapabilityCertificate;
     let certificate = unsafe { our_certificates.add(index) };
     unsafe { &mut *certificate }
 }

@@ -51,6 +51,7 @@ use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::vec;
 use core::panic::PanicInfo;
+use core::sync::atomic::Ordering;
 use deravel_types::*;
 use fdt::Fdt;
 use riscv::interrupt::Trap;
@@ -202,14 +203,12 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                 let mut sender = Actor::Userspace(ProcessId::new(current_pid));
                 let original = loop {
                     let certifier = capability.certifier();
-                    let certificate = unsafe {
-                        CAPABILITY_PAGES[match certifier {
-                            Actor::Userspace(pid) => pid.as_usize(),
-                            Actor::Kernel => PROCESS_COUNT,
-                        }]
-                        .0[capability.local_index()]
-                    };
-                    match certificate.unpack() {
+                    let certificate = &CAPABILITY_PAGES[match certifier {
+                        Actor::Userspace(pid) => pid.as_usize(),
+                        Actor::Kernel => PROCESS_COUNT,
+                    }]
+                    .0[capability.local_index()];
+                    match certificate.load(Ordering::Relaxed).unpack() {
                         CapabilityCertificateUnpacked::Granted { grantee } => {
                             assert!(grantee == sender);
                             break capability;
