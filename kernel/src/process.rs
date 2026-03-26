@@ -1,4 +1,5 @@
 use crate::arch::{RiscvRegisters, switch_to_userspace_full};
+use crate::capability::CAPABILITY_PAGES;
 use crate::elf::load_elf;
 use crate::heap::log_heap_statistics;
 use crate::page::{PageFlags, PageTable, map_pages};
@@ -10,12 +11,6 @@ use alloc::string::String;
 use core::marker::PhantomData;
 use deravel_types::*;
 use riscv::register::satp::{Mode, Satp};
-
-#[repr(C, align(4096))]
-#[derive(Clone, Copy)]
-pub struct CapabilityPage(
-    pub [CapabilityCertificate; PAGE_SIZE / size_of::<CapabilityCertificate>()],
-);
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ProcessState {
@@ -59,13 +54,6 @@ unsafe extern "C" {
 }
 
 pub static mut PROCESSES: [Process; PROCESS_COUNT] = unsafe { core::mem::zeroed() };
-pub static mut CAPABILITY_PAGES: [CapabilityPage; PROCESS_COUNT + 1] = [CapabilityPage::empty(); _];
-
-impl CapabilityPage {
-    const fn empty() -> CapabilityPage {
-        CapabilityPage([CapabilityCertificate::empty(); _])
-    }
-}
 
 impl Process {
     pub fn satp(&self) -> Satp {

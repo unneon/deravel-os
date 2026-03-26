@@ -47,7 +47,11 @@ fn generate_server_trait(interface: &Entity, out: &mut String) {
 fn generate_handler_impl(interface: &Entity, out: &mut String) {
     let name_snake = &interface.name;
     let name_camel = camel_case(name_snake);
-    writeln!(out, "impl Handler for Box<dyn {name_camel}Server> {{").unwrap();
+    writeln!(
+        out,
+        "impl<T: {name_camel}Server> Handler<{name_camel}> for T {{"
+    )
+    .unwrap();
     writeln!(
         out,
         "    fn handle(&self, method: usize, _args: &[u8]) -> Vec<u8> {{"

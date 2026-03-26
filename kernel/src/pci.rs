@@ -7,6 +7,7 @@ use crate::pci::config::{CommonConfig, GeneralDeviceConfig};
 use crate::uart::{Uart16550, Uart16550Mmio};
 use crate::util::volatile::Volatile;
 use crate::virtio;
+use crate::virtio::blk::VirtioBlk;
 use fdt::Fdt;
 use fdt::node::FdtNode;
 use log::warn;
@@ -30,7 +31,7 @@ struct PciRanges {
     mem64: PciRange,
 }
 
-pub fn initialize_all_pci(device_tree: &Fdt) {
+pub fn initialize_all_pci(device_tree: &Fdt) -> &'static VirtioBlk {
     let soc = device_tree.find_node("/soc").unwrap();
     let pci = device_tree.find_node("/soc/pci").unwrap();
     let pci_ranges = find_pci_ranges(&soc, &pci);
@@ -38,6 +39,7 @@ pub fn initialize_all_pci(device_tree: &Fdt) {
     let mut mem32 = TrivialAllocator::new(pci_ranges.mem32.length);
     let mut mem64 = TrivialAllocator::new(pci_ranges.mem64.length);
     let region = pci.reg().unwrap().next().unwrap();
+    let mut virtio_blk_slot = None;
     for config_index in 0..region.size.unwrap() / 4096 {
         let config = unsafe {
             Volatile::new(region.starting_address.byte_add(4096 * config_index) as *mut CommonConfig)
@@ -70,6 +72,7 @@ pub fn initialize_all_pci(device_tree: &Fdt) {
             let virtio_blk = virtio::initialize_blk(config, &bars);
             let plic = pci_interrupt_to_plic(device_tree, config_index, config);
             register_interrupt(plic, virtio_blk);
+            virtio_blk_slot = Some(virtio_blk);
         } else if vendor == 0x1AF4 && device == 0x1050 {
             let config = config.as_general_device().unwrap();
             let bars = allocate_all_bars(config, &pci_ranges, &mut io, &mut mem32, &mut mem64);
@@ -90,6 +93,7 @@ pub fn initialize_all_pci(device_tree: &Fdt) {
             warn!("unknown PCI device {vendor:04x}:{device:04x}");
         }
     }
+    virtio_blk_slot.unwrap()
 }
 
 fn allocate_all_bars(

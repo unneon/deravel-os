@@ -33,8 +33,7 @@ mod util;
 mod virtio;
 
 use crate::arch::{RiscvRegisters, initialize_trap_handler, switch_to_userspace_registers_only};
-use crate::capability::HANDLERS;
-use crate::drvli::{ConsoleServer, DriveServer};
+use crate::capability::{CAPABILITY_PAGES, HANDLERS, reserve_kernel_capability};
 use crate::elf::elf;
 use crate::interrupt::INTERRUPTS;
 use crate::log::{initialize_log, log_userspace};
@@ -42,17 +41,13 @@ use crate::page::{PageFlags, PageTable, map_pages};
 use crate::pci::initialize_all_pci;
 use crate::plic::{initialize_plic, plic_claim, plic_complete};
 use crate::process::{
-    CAPABILITY_PAGES, PROCESS_COUNT, PROCESSES, ProcessState, reserve_process,
-    schedule_and_switch_to_userspace,
+    PROCESS_COUNT, PROCESSES, ProcessState, reserve_process, schedule_and_switch_to_userspace,
 };
-use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
-use crate::virtio::blk::VirtioBlk;
+use crate::sbi::{ResetReason, ResetType, SbiConsole, log_sbi_metadata};
 use ::log::{Level, error};
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::vec;
-use alloc::vec::Vec;
-use core::marker::PhantomData;
 use core::panic::PanicInfo;
 use deravel_types::*;
 use fdt::Fdt;
@@ -71,45 +66,7 @@ struct HartStack {
     ctx: HartContext,
 }
 
-struct ConsoleHandler;
-struct DriveHandler {}
-
 const STACK_SIZE: usize = 128 * 4096;
-
-static mut DISK: Option<VirtioBlk> = None;
-
-impl ConsoleServer for ConsoleHandler {
-    fn getchar(&self) -> u8 {
-        let mut c = 0;
-        while sbi::debug_console_read(core::slice::from_mut(&mut c)).unwrap() == 0 {}
-        c
-    }
-
-    fn putchar(&self, c: u8) {
-        sbi::debug_console_write_byte(c).unwrap()
-    }
-}
-
-impl DriveServer for DriveHandler {
-    fn read(&self, sector: u64) -> Vec<u8> {
-        let mut buf = Box::new([0; 512]);
-        unsafe { DISK.as_mut().unwrap().read(sector, &mut buf).unwrap() }
-        Vec::from(buf as Box<[u8]>)
-    }
-
-    fn write(&self, sector: u64, data: &[u8]) {
-        unsafe {
-            DISK.as_mut()
-                .unwrap()
-                .write(sector, data.try_into().unwrap())
-                .unwrap()
-        }
-    }
-
-    fn capacity(&self) -> u64 {
-        unsafe { DISK.as_mut().unwrap().capacity() as u64 }
-    }
-}
 
 fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     clear_bss();
@@ -118,47 +75,32 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     initialize_log(&device_tree);
     initialize_trap_handler();
     log_sbi_metadata();
-    initialize_all_pci(&device_tree);
+    let virtio_blk = initialize_all_pci(&device_tree);
     initialize_plic(&device_tree);
     initialize_hart_stack();
     enable_interrupts();
 
-    // let fs_tar = reserve_process::<TarFs>(elf!("CARGO_BIN_FILE_DERAVEL_FILESYSTEM_TAR"));
-    // let ipc_a = reserve_process::<IpcA>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-a"));
-    // let ipc_b = reserve_process::<IpcB>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-b"));
-    // let ipc_c = reserve_process::<IpcC>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-c"));
+    let fs_tar = reserve_process::<TarFs>(elf!("CARGO_BIN_FILE_DERAVEL_FILESYSTEM_TAR"));
+    let ipc_a = reserve_process::<IpcA>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-a"));
+    let ipc_b = reserve_process::<IpcB>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-b"));
+    let ipc_c = reserve_process::<IpcC>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-c"));
     let hello = reserve_process::<Hello>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_hello"));
     let shell = reserve_process::<Shell>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_shell"));
 
-    // unsafe { CAPABILITY_PAGES[PROCESS_COUNT].0[0] = CapabilityCertificate::granted(fs_tar.id) }
-    unsafe { CAPABILITY_PAGES[PROCESS_COUNT].0[1] = CapabilityCertificate::granted(hello.id) }
-    unsafe { CAPABILITY_PAGES[PROCESS_COUNT].0[2] = CapabilityCertificate::granted(shell.id) }
-    // unsafe { HANDLERS[0] = Some(Box::new(Box::new(DriveHandler {}) as Box<dyn DriveServer>)) }
-    unsafe {
-        HANDLERS[1] = Some(Box::new(
-            Box::new(ConsoleHandler {}) as Box<dyn ConsoleServer>
-        ))
-    }
-    unsafe {
-        HANDLERS[2] = Some(Box::new(
-            Box::new(ConsoleHandler {}) as Box<dyn ConsoleServer>
-        ))
-    }
-
-    // ipc_a.spawn(IpcAArgs {
-    //     fs: fs_tar.export,
-    //     b: ipc_b.export,
-    // });
-    // ipc_b.spawn(IpcBArgs { c: ipc_c.export });
-    // ipc_c.spawn(IpcCArgs {});
-    // fs_tar.spawn(TarFsArgs {
-    //     drive: Capability(RawCapability::new(Actor::Kernel, 0), PhantomData),
-    // });
+    ipc_a.spawn(IpcAArgs {
+        fs: fs_tar.export,
+        b: ipc_b.export,
+    });
+    ipc_b.spawn(IpcBArgs { c: ipc_c.export });
+    ipc_c.spawn(IpcCArgs {});
+    fs_tar.spawn(TarFsArgs {
+        drive: reserve_kernel_capability(virtio_blk),
+    });
     hello.spawn(HelloArgs {
-        console: Capability(RawCapability::new(Actor::Kernel, 1), PhantomData),
+        console: reserve_kernel_capability(&SbiConsole),
     });
     shell.spawn(ShellArgs {
-        console: Capability(RawCapability::new(Actor::Kernel, 2), PhantomData),
+        console: reserve_kernel_capability(&SbiConsole),
     });
 
     let hart = unsafe { &mut *(riscv::register::sscratch::read() as *mut HartContext) };

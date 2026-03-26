@@ -1,16 +1,16 @@
 mod ffi;
 
+use crate::drvli::ConsoleServer;
 use log::info;
 
 #[cfg(doc)]
 use Error::*;
 
 pub macro console_writeln($($arg:tt)*) {
-    core::fmt::write(&mut crate::sbi::Console, format_args!("{}\n", format_args!($($arg)*))).unwrap()
+    core::fmt::write(&mut crate::sbi::SbiConsole, format_args!("{}\n", format_args!($($arg)*))).unwrap()
 }
 
-#[doc(hidden)]
-pub struct Console;
+pub struct SbiConsole;
 
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -104,7 +104,19 @@ impl SpecVersion {
     }
 }
 
-impl core::fmt::Write for Console {
+impl ConsoleServer for SbiConsole {
+    fn getchar(&self) -> u8 {
+        let mut c = 0;
+        while debug_console_read(core::slice::from_mut(&mut c)).unwrap() == 0 {}
+        c
+    }
+
+    fn putchar(&self, c: u8) {
+        debug_console_write_byte(c).unwrap()
+    }
+}
+
+impl core::fmt::Write for SbiConsole {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         let mut to_write = s.as_bytes();
         while !to_write.is_empty() {

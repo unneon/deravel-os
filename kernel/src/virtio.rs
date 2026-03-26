@@ -86,10 +86,6 @@ pub fn initialize_blk(
 ) -> &'static VirtioBlk {
     let caps = extract_capabilities(config, bars);
     let device = VirtioBlk::new(caps);
-    // unsafe {
-    //     assert!(DISK.is_none());
-    //     DISK = Some(device);
-    // }
     Box::leak(Box::new(device))
 }
 

@@ -1,8 +1,11 @@
+use crate::drvli::DriveServer;
 use crate::interrupt::InterruptHandler;
 use crate::util::volatile::{Readonly, Volatile, volatile_struct};
 use crate::virtio::Capabilities;
 use crate::virtio::queue::{QUEUE_SIZE, Queue};
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK};
+use alloc::boxed::Box;
+use alloc::vec::Vec;
 use log::{debug, info};
 use riscv::register::satp::Mode;
 
@@ -35,16 +38,16 @@ impl VirtioBlk {
         common.device_status().write(0);
         common.device_status().write_bitor(STATUS_ACKNOWLEDGE as u8);
         common.device_status().write_bitor(STATUS_DRIVER as u8);
+
+        let capacity = caps.device.capacity().read();
+        info!("drive has a capacity of {capacity} sectors");
+
         let queue = Queue::new(common, &caps.notify, QUEUE_SIZE);
         common.device_status().write_bitor(STATUS_DRIVER_OK as u8);
 
-        let device = caps.device;
-        let capacity = device.capacity().read();
-        info!("disk has a capacity of {capacity} sectors");
-
         VirtioBlk {
             isr: caps.isr,
-            device,
+            device: caps.device,
             queue,
         }
     }
@@ -91,6 +94,28 @@ impl VirtioBlk {
 impl InterruptHandler for VirtioBlk {
     fn handle(&self) {
         debug!("interrupt handler, isr {:#x}", self.isr.read());
+    }
+}
+
+impl DriveServer for VirtioBlk {
+    fn read(&self, sector: u64) -> Vec<u8> {
+        // TODO: Use a mutex here.
+        #[allow(invalid_reference_casting)]
+        let this = unsafe { &mut *(self as *const _ as *mut VirtioBlk) };
+        let mut buf = Box::new([0u8; 512]);
+        this.read(sector, &mut buf).unwrap();
+        Vec::from(buf as Box<[u8]>)
+    }
+
+    fn write(&self, sector: u64, data: &[u8]) {
+        // TODO: Use a mutex here.
+        #[allow(invalid_reference_casting)]
+        let this = unsafe { &mut *(self as *const _ as *mut VirtioBlk) };
+        this.write(sector, data.try_into().unwrap()).unwrap()
+    }
+
+    fn capacity(&self) -> u64 {
+        self.capacity() as u64
     }
 }
 
