@@ -81,7 +81,7 @@ impl NotifySlot {
 unsafe impl VendorPciCapability for VirtioPciCapability {}
 
 pub fn initialize_blk(
-    config: Volatile<GeneralDeviceConfig>,
+    config: &GeneralDeviceConfig,
     bars: &[AllocatedRange; 6],
 ) -> &'static VirtioBlk {
     let caps = extract_capabilities(config, bars);
@@ -90,7 +90,7 @@ pub fn initialize_blk(
 }
 
 pub fn initialize_gpu(
-    config: Volatile<GeneralDeviceConfig>,
+    config: &GeneralDeviceConfig,
     bars: &[AllocatedRange; 6],
 ) -> &'static VirtioGpu {
     let caps = extract_capabilities(config, bars);
@@ -100,7 +100,7 @@ pub fn initialize_gpu(
 }
 
 pub fn initialize_input(
-    config: Volatile<GeneralDeviceConfig>,
+    config: &GeneralDeviceConfig,
     bars: &[AllocatedRange; 6],
 ) -> &'static VirtioInput {
     let caps = extract_capabilities(config, bars);
@@ -110,7 +110,7 @@ pub fn initialize_input(
 }
 
 pub fn initialize_net(
-    config: Volatile<GeneralDeviceConfig>,
+    config: &GeneralDeviceConfig,
     bars: &[AllocatedRange; 6],
 ) -> &'static VirtioNet {
     let caps = extract_capabilities(config, bars);
@@ -120,7 +120,7 @@ pub fn initialize_net(
 }
 
 fn extract_capabilities<T>(
-    config: Volatile<GeneralDeviceConfig>,
+    config: &GeneralDeviceConfig,
     bars: &[AllocatedRange; 6],
 ) -> Capabilities<T> {
     let mut common = None;

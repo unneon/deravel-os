@@ -1,3 +1,4 @@
+use core::cell::UnsafeCell;
 use core::marker::PhantomData;
 use core::ops::{BitOr, Deref};
 
@@ -19,6 +20,8 @@ pub trait Readable {}
 pub trait Writable {}
 
 pub struct Volatile<T, Access = ReadWrite>(*mut T, PhantomData<Access>);
+
+pub struct VolatileCellWithPureReads<T>(UnsafeCell<T>);
 
 pub struct Readonly;
 pub struct ReadWrite;
@@ -50,6 +53,24 @@ impl<T: BitOr<Output = T>, Access: Readable + Writable> Volatile<T, Access> {
 impl<T, Access, const N: usize> Volatile<[T; N], Access> {
     pub fn index(&self, index: usize) -> Volatile<T, Access> {
         unsafe { Volatile::new((self.0 as *mut T).add(index)) }
+    }
+}
+
+impl<T: Copy> VolatileCellWithPureReads<T> {
+    pub fn read(&self) -> T {
+        unsafe { self.0.get().read_volatile() }
+    }
+
+    pub fn write(&mut self, value: T) {
+        unsafe { self.0.get().write_volatile(value) }
+    }
+
+    pub fn write_bitor(&mut self, value: T)
+    where
+        T: BitOr<Output = T>,
+    {
+        let left = unsafe { self.0.get().read_volatile() };
+        unsafe { self.0.get().write_volatile(left | value) }
     }
 }
 
