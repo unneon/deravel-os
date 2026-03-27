@@ -17,7 +17,9 @@ pub fn serialize_archive(files: &[File], drive: Capability<Drive>) {
         header.version = *b"00";
         header.type_ = b'0';
         header.size = to_octal(file.size);
-        buf.header.checksum = to_octal(calculate_checksum(&buf));
+
+        let checksum = calculate_checksum(unsafe { &buf.bytes });
+        buf.header.checksum = to_octal(checksum);
 
         sectors.write(unsafe { &buf.bytes });
         for i in 0..file.data.len() / SECTOR_SIZE {
@@ -27,9 +29,9 @@ pub fn serialize_archive(files: &[File], drive: Capability<Drive>) {
     }
 }
 
-fn calculate_checksum(buf: &TarHeaderBuf) -> usize {
-    let mut checksum = b' ' as usize * unsafe { buf.header.checksum.len() };
-    for byte in unsafe { buf.bytes } {
+fn calculate_checksum(bytes: &[u8]) -> usize {
+    let mut checksum = b' ' as usize * 8;
+    for &byte in bytes {
         checksum += byte as usize;
     }
     checksum

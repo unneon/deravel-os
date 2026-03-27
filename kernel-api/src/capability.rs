@@ -66,8 +66,5 @@ fn allocate_certificate() -> &'static CapabilityCertificate {
         index < 4096 / size_of::<CapabilityCertificateValue>(),
         "out of capability certificate slots"
     );
-    let our_certificates = get_capability_certificate_page(current_pid().into()) as *const _
-        as *mut CapabilityCertificate;
-    let certificate = unsafe { our_certificates.add(index) };
-    unsafe { &mut *certificate }
+    &get_capability_certificate_page(current_pid().into())[index]
 }

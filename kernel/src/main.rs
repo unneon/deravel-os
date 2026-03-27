@@ -106,6 +106,7 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
         console: reserve_kernel_capability(&SbiConsole),
     });
 
+    // TODO: initialize_hart_stack should take a callback and pass this with the correct lifetime.
     let hart = unsafe { &mut *(riscv::register::sscratch::read() as *mut HartContext) };
     schedule_and_switch_to_userspace(hart);
 }

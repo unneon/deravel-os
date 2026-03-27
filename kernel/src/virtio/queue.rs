@@ -9,6 +9,8 @@ use riscv::register::satp::Mode;
 
 pub const QUEUE_SIZE: usize = 16;
 
+// TODO: How should safety here work? Most of these fields aren't really MMIO registers.
+
 #[repr(C, align(16))]
 #[derive(Clone, Default)]
 pub struct Descriptor {

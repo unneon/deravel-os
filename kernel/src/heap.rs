@@ -23,7 +23,7 @@ unsafe impl GlobalAlloc for Heap {
         let max_pages =
             ((&raw const heap_end) as usize - (&raw const heap_start) as usize) / PAGE_SIZE;
         assert!(max_pages - page_offset >= page_count);
-        unsafe { (&raw mut heap_start).byte_add(PAGE_SIZE * page_offset) }
+        (&raw mut heap_start).wrapping_byte_add(PAGE_SIZE * page_offset)
     }
 
     unsafe fn dealloc(&self, _: *mut u8, _: Layout) {}
