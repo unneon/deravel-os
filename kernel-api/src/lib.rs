@@ -63,11 +63,7 @@ static STDIO: AtomicUsize = AtomicUsize::new(0);
 
 impl Write for Stdio {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        let stdio = STDIO.load(Ordering::SeqCst);
-        let stdio = Capability::<Console>(
-            RawCapability::from_pointer(stdio as *mut CapabilityCertificate),
-            PhantomData,
-        );
+        let stdio = stdio();
         for byte in s.bytes() {
             stdio.putchar(byte);
         }
@@ -124,25 +120,21 @@ pub fn exit() -> ! {
 }
 
 pub fn getchar() -> u8 {
-    let stdio = STDIO.load(Ordering::SeqCst);
-    let stdio = Capability::<Console>(
-        RawCapability::from_pointer(stdio as *mut CapabilityCertificate),
-        PhantomData,
-    );
-    stdio.getchar()
+    stdio().getchar()
 }
 
 pub fn putchar(ch: u8) {
-    let stdio = STDIO.load(Ordering::SeqCst);
-    let stdio = Capability::<Console>(
-        RawCapability::from_pointer(stdio as *mut CapabilityCertificate),
-        PhantomData,
-    );
-    stdio.putchar(ch)
+    stdio().putchar(ch)
 }
 
 pub fn set_stdio(cap: Capability<Console>) {
     STDIO.store(cap.as_usize(), Ordering::SeqCst);
+}
+
+fn stdio() -> Capability<Console> {
+    let stdio = STDIO.load(Ordering::SeqCst) as *mut CapabilityCertificate;
+    assert!(!stdio.is_null(), "standard input/output not set");
+    Capability(RawCapability::from_pointer(stdio), PhantomData)
 }
 
 fn current_pid() -> ProcessId {

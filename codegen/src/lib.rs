@@ -24,6 +24,7 @@ pub enum EntityDetails {
 pub fn rust_arg_type(type_: &str) -> Cow<'static, str> {
     match type_ {
         "u8" => "u8".into(),
+        "u32" => "u32".into(),
         "u64" => "u64".into(),
         "text" => "&str".into(),
         "bytes" => "&[u8]".into(),
@@ -34,6 +35,7 @@ pub fn rust_arg_type(type_: &str) -> Cow<'static, str> {
 pub fn rust_ret_type(type_: &str) -> Cow<'static, str> {
     match type_ {
         "u8" => "u8".into(),
+        "u32" => "u32".into(),
         "u64" => "u64".into(),
         "text" => "String".into(),
         "bytes" => "Vec<u8>".into(),

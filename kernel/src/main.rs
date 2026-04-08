@@ -44,7 +44,7 @@ use crate::plic::{initialize_plic, plic_claim, plic_complete};
 use crate::process::{
     PROCESS_COUNT, PROCESSES, ProcessState, reserve_process, schedule_and_switch_to_userspace,
 };
-use crate::sbi::{ResetReason, ResetType, SbiConsole, log_sbi_metadata};
+use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use ::log::{Level, error};
 use alloc::boxed::Box;
 use alloc::string::String;
@@ -78,32 +78,36 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     initialize_log(&device_tree);
     initialize_trap_handler();
     log_sbi_metadata();
-    let virtio_blk = initialize_all_pci(&device_tree);
+    let (_virtio_blk, virtio_gpu) = initialize_all_pci(&device_tree);
     initialize_plic(&device_tree);
     initialize_hart_stack();
     enable_interrupts();
 
-    let fs_tar = reserve_process::<TarFs>(elf!("CARGO_BIN_FILE_DERAVEL_FILESYSTEM_TAR"));
-    let ipc_a = reserve_process::<IpcA>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-a"));
-    let ipc_b = reserve_process::<IpcB>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-b"));
-    let ipc_c = reserve_process::<IpcC>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-c"));
-    let hello = reserve_process::<Hello>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_hello"));
-    let shell = reserve_process::<Shell>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_shell"));
+    // let fs_tar = reserve_process::<TarFs>(elf!("CARGO_BIN_FILE_DERAVEL_FILESYSTEM_TAR"));
+    // let ipc_a = reserve_process::<IpcA>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-a"));
+    // let ipc_b = reserve_process::<IpcB>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-b"));
+    // let ipc_c = reserve_process::<IpcC>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-c"));
+    // let hello = reserve_process::<Hello>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_hello"));
+    // let shell = reserve_process::<Shell>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_shell"));
+    let windowing = reserve_process::<Windowing>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_windowing"));
 
-    ipc_a.spawn(IpcAArgs {
-        fs: fs_tar.export,
-        b: ipc_b.export,
-    });
-    ipc_b.spawn(IpcBArgs { c: ipc_c.export });
-    ipc_c.spawn(IpcCArgs {});
-    fs_tar.spawn(TarFsArgs {
-        drive: reserve_kernel_capability(virtio_blk),
-    });
-    hello.spawn(HelloArgs {
-        console: reserve_kernel_capability(&SbiConsole),
-    });
-    shell.spawn(ShellArgs {
-        console: reserve_kernel_capability(&SbiConsole),
+    // ipc_a.spawn(IpcAArgs {
+    //     fs: fs_tar.export,
+    //     b: ipc_b.export,
+    // });
+    // ipc_b.spawn(IpcBArgs { c: ipc_c.export });
+    // ipc_c.spawn(IpcCArgs {});
+    // fs_tar.spawn(TarFsArgs {
+    //     drive: reserve_kernel_capability(virtio_blk),
+    // });
+    // hello.spawn(HelloArgs {
+    //     console: reserve_kernel_capability(&SbiConsole),
+    // });
+    // shell.spawn(ShellArgs {
+    //     console: reserve_kernel_capability(&SbiConsole),
+    // });
+    windowing.spawn(WindowingArgs {
+        display: reserve_kernel_capability(virtio_gpu),
     });
 
     // TODO: initialize_hart_stack should take a callback and pass this with the correct lifetime.
@@ -172,6 +176,7 @@ fn handle_trap(registers: &mut RiscvRegisters, hart: &mut HartContext) -> ! {
 fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut HartContext) -> ! {
     let current_pid = hart.current_pid.unwrap().as_usize();
     let mut current_proc = PROCESSES[current_pid].lock();
+    ::log::trace!("received syscall {}", registers.a6);
     match registers.a6 {
         0 => {
             current_proc.state = ProcessState::Finished;
@@ -269,7 +274,11 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
             let pages = vec![[0; PAGE_SIZE]; page_count];
             let pages_allocated = current_proc.heap_pages_allocated;
             let page_table = unsafe { &mut *(current_proc.page_table as *mut PageTable) };
-            let virtual_addr = 0x1800000 + pages_allocated * PAGE_SIZE;
+            let virtual_addr = 0x4000000 + pages_allocated * PAGE_SIZE;
+            ::log::trace!(
+                "alloc from {virtual_addr:#x} to {:#x}",
+                virtual_addr + PAGE_SIZE * page_count
+            );
             map_pages(
                 page_table,
                 virtual_addr,
@@ -279,6 +288,7 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
             );
             current_proc.heap_pages_allocated += page_count;
             registers.a0 = virtual_addr;
+            ::log::trace!("finished syscall 4");
         }
         5 => {
             let text = copy_from_user(registers.a0 as *const u8, registers.a1);

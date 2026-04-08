@@ -6,7 +6,7 @@ use crate::virtio::queue::{QUEUE_SIZE, Queue};
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK};
 use alloc::boxed::Box;
 use alloc::vec::Vec;
-use log::{debug, info};
+use log::info;
 use riscv::register::satp::Mode;
 
 volatile_struct! { pub VirtioBlkConfig
@@ -93,7 +93,7 @@ impl VirtioBlk {
 
 impl InterruptHandler for VirtioBlk {
     fn handle(&self) {
-        debug!("interrupt handler, isr {:#x}", self.isr.read());
+        self.isr.read();
     }
 }
 

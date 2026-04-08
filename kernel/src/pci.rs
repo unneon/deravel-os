@@ -8,6 +8,7 @@ use crate::uart::{Uart16550, Uart16550Mmio};
 use crate::util::volatile::Volatile;
 use crate::virtio;
 use crate::virtio::blk::VirtioBlk;
+use crate::virtio::gpu::VirtioGpu;
 use fdt::Fdt;
 use fdt::node::FdtNode;
 use log::warn;
@@ -31,7 +32,7 @@ struct PciRanges {
     mem64: PciRange,
 }
 
-pub fn initialize_all_pci(device_tree: &Fdt) -> &'static VirtioBlk {
+pub fn initialize_all_pci(device_tree: &Fdt) -> (&'static VirtioBlk, &'static VirtioGpu) {
     let soc = device_tree.find_node("/soc").unwrap();
     let pci = device_tree.find_node("/soc/pci").unwrap();
     let pci_ranges = find_pci_ranges(&soc, &pci);
@@ -43,6 +44,7 @@ pub fn initialize_all_pci(device_tree: &Fdt) -> &'static VirtioBlk {
     let configs = configs..configs.wrapping_byte_add(region.size.unwrap());
     let configs = unsafe { core::slice::from_mut_ptr_range(configs) };
     let mut virtio_blk_slot = None;
+    let mut virtio_gpu_slot = None;
     for (config_index, config) in configs.iter_mut().enumerate() {
         if config.vendor_id == 0xFFFF {
             continue;
@@ -77,6 +79,7 @@ pub fn initialize_all_pci(device_tree: &Fdt) -> &'static VirtioBlk {
             let virtio_gpu = virtio::initialize_gpu(config, &bars);
             let plic = pci_interrupt_to_plic(device_tree, config_index, config);
             register_interrupt(plic, virtio_gpu);
+            virtio_gpu_slot = Some(virtio_gpu);
         } else if config.vendor_id == 0x1AF4 && config.device_id == 0x1052 {
             let config = config.as_general_device().unwrap();
             let bars = allocate_all_bars(config, &pci_ranges, &mut io, &mut mem32, &mut mem64);
@@ -93,7 +96,7 @@ pub fn initialize_all_pci(device_tree: &Fdt) -> &'static VirtioBlk {
             );
         }
     }
-    virtio_blk_slot.unwrap()
+    (virtio_blk_slot.unwrap(), virtio_gpu_slot.unwrap())
 }
 
 fn allocate_all_bars(

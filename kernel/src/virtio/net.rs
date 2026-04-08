@@ -137,7 +137,7 @@ impl VirtioNet {
 
 impl InterruptHandler for VirtioNet {
     fn handle(&self) {
-        debug!("interrupt handler, isr {:#x}", self.isr.read());
+        self.isr.read();
     }
 }
 

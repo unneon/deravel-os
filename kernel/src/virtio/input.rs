@@ -78,6 +78,6 @@ impl VirtioInput {
 
 impl InterruptHandler for VirtioInput {
     fn handle(&self) {
-        debug!("interrupt handler, isr {:#x}", self.isr.read());
+        self.isr.read();
     }
 }

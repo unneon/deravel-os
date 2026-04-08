@@ -12,6 +12,8 @@ app shell(console console)
 
 app tar_fs(drive drive) implements filesystem
 
+app windowing(display display)
+
 interface filesystem
     func read(path text) bytes
     func write(path text, data bytes)
@@ -25,3 +27,8 @@ interface drive
 interface console
     func getchar() u8
     func putchar(c u8)
+
+interface display
+    func width() u32
+    func height() u32
+    func draw(bgra bytes)

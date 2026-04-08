@@ -1,5 +1,6 @@
 mod types;
 
+use crate::drvli::DisplayServer;
 use crate::interrupt::InterruptHandler;
 use crate::util::volatile::{Readonly, Volatile, volatile_struct};
 use crate::virtio::Capabilities;
@@ -7,7 +8,7 @@ use crate::virtio::gpu::types::*;
 use crate::virtio::queue::Queue;
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, features};
 use alloc::vec;
-use log::{debug, info};
+use log::info;
 
 volatile_struct! { pub Config
     events_read: Readonly u32,
@@ -27,6 +28,8 @@ features! { VirtioGpu Features 0
 pub struct VirtioGpu {
     isr: Volatile<u8, Readonly>,
     controlq: Queue<0>,
+    width: u32,
+    height: u32,
 }
 
 impl VirtioGpu {
@@ -37,24 +40,39 @@ impl VirtioGpu {
         common.device_status().write_bitor(STATUS_DRIVER as u8);
         let controlq = Queue::new(common, &capabilities.notify, 4);
         common.device_status().write_bitor(STATUS_DRIVER_OK as u8);
-        VirtioGpu {
+
+        let mut gpu = VirtioGpu {
             isr: capabilities.isr,
             controlq,
-        }
-    }
+            width: 0,
+            height: 0,
+        };
 
-    pub fn demo(&mut self) {
         let req = CtrlType::CmdGetDisplayInfo.header();
-        self.controlq.descriptor_readonly(0, &req, Some(1));
-        let resp: ResponseDisplayInfo = self.command(1).unwrap();
+        gpu.controlq.descriptor_readonly(0, &req, Some(1));
+        let resp: ResponseDisplayInfo = gpu.command(1).unwrap();
         let pmode = &resp.pmodes[0];
         assert_eq!(pmode.enabled, 1);
         assert_eq!(pmode.r.x, 0);
         assert_eq!(pmode.r.y, 0);
-        let r = pmode.r;
-        let width = r.width;
-        let height = r.height;
+        let width = pmode.r.width;
+        let height = pmode.r.height;
+        gpu.width = width;
+        gpu.height = height;
         info!("detected a {width}x{height} display");
+
+        gpu
+    }
+
+    pub fn demo(&mut self) {
+        let width = self.width;
+        let height = self.height;
+        let r = Rect {
+            x: 0,
+            y: 0,
+            width,
+            height,
+        };
 
         let req = ResourceCreate2D {
             hdr: CtrlType::CmdResourceCreate2D.header(),
@@ -133,6 +151,21 @@ impl VirtioGpu {
 
 impl InterruptHandler for VirtioGpu {
     fn handle(&self) {
-        debug!("interrupt handler, isr {:#x}", self.isr.read());
+        self.isr.read();
+    }
+}
+
+impl DisplayServer for VirtioGpu {
+    fn width(&self) -> u32 {
+        self.width
+    }
+
+    fn height(&self) -> u32 {
+        self.height
+    }
+
+    fn draw(&self, _bgra: &[u8]) {
+        log::debug!("kernel received draw call");
+        todo!()
     }
 }
