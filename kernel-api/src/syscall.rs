@@ -1,7 +1,7 @@
 #![allow(clippy::missing_safety_doc)]
 
 use core::arch::asm;
-use deravel_types::{ProcessId, RawCapability};
+use deravel_types::{Capability, ProcessId, RawCapability, SharedMemory};
 
 macro syscalls(
     $(#[no = $no:literal] pub fn $name:ident(
@@ -127,6 +127,9 @@ syscalls! {
     pub fn allocate_pages(count: usize) -> *mut u8;
 
     #[no = 5]
+    pub fn map_shared_memory(cap: Capability<SharedMemory>) -> (*mut u8, usize);
+
+    #[no = 6]
     pub fn log(text: *const u8, text_len: usize, level: usize);
 }
 

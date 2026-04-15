@@ -31,4 +31,9 @@ interface console
 interface display
     func width() u32
     func height() u32
-    func draw(bgra bytes)
+    func framebuffer() shared_memory
+    func draw()
+
+interface shared_memory
+    func physical_address() u64
+    func length() u64

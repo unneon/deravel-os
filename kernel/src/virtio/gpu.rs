@@ -1,13 +1,17 @@
 mod types;
 
-use crate::drvli::DisplayServer;
+use crate::capability::reserve_kernel_capability;
+use crate::drvli::{DisplayServer, SharedMemoryServer};
 use crate::interrupt::InterruptHandler;
 use crate::util::volatile::{Readonly, Volatile, volatile_struct};
 use crate::virtio::Capabilities;
 use crate::virtio::gpu::types::*;
 use crate::virtio::queue::Queue;
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, features};
+use alloc::boxed::Box;
 use alloc::vec;
+use alloc::vec::Vec;
+use deravel_types::{Capability, SharedMemory};
 use log::info;
 
 volatile_struct! { pub Config
@@ -30,6 +34,7 @@ pub struct VirtioGpu {
     controlq: Queue<0>,
     width: u32,
     height: u32,
+    framebuffer: Vec<u8>,
 }
 
 impl VirtioGpu {
@@ -46,6 +51,7 @@ impl VirtioGpu {
             controlq,
             width: 0,
             height: 0,
+            framebuffer: Vec::new(),
         };
 
         let req = CtrlType::CmdGetDisplayInfo.header();
@@ -59,6 +65,7 @@ impl VirtioGpu {
         let height = pmode.r.height;
         gpu.width = width;
         gpu.height = height;
+        gpu.framebuffer = vec![0u8; width as usize * height as usize * 4];
         info!("detected a {width}x{height} display");
 
         gpu
@@ -84,15 +91,14 @@ impl VirtioGpu {
         self.controlq.descriptor_readonly(0, &req, Some(1));
         self.command::<ResponseNodata>(1).unwrap();
 
-        let mut framebuffer = vec![0u8; width as usize * height as usize * 4];
         let req = ResourceAttachBacking {
             hdr: CtrlType::CmdResourceAttachBacking.header(),
             resouce_id: 1,
             nr_entries: 1,
         };
         let mem_entry = MemEntry {
-            addr: framebuffer.as_ptr() as u64,
-            length: framebuffer.len() as u32,
+            addr: self.framebuffer.as_ptr() as u64,
+            length: self.framebuffer.len() as u32,
             padding: 0,
         };
         self.controlq.descriptor_readonly(0, &req, Some(1));
@@ -108,7 +114,7 @@ impl VirtioGpu {
         self.controlq.descriptor_readonly(0, &req, Some(1));
         self.command::<ResponseNodata>(1).unwrap();
 
-        for [b, g, r, a] in framebuffer.as_chunks_mut().0 {
+        for [b, g, r, a] in self.framebuffer.as_chunks_mut().0 {
             *b = 255;
             *g = 0;
             *r = 255;
@@ -164,8 +170,28 @@ impl DisplayServer for VirtioGpu {
         self.height
     }
 
-    fn draw(&self, _bgra: &[u8]) {
-        log::debug!("kernel received draw call");
+    fn framebuffer(&self) -> Capability<SharedMemory> {
+        reserve_kernel_capability(Box::leak(Box::new(Framebuffer {
+            physical_address: self.framebuffer.as_ptr() as u64,
+            length: (self.width * self.height * 4) as u64,
+        })))
+    }
+
+    fn draw(&self) {
         todo!()
+    }
+}
+
+struct Framebuffer {
+    physical_address: u64,
+    length: u64,
+}
+impl SharedMemoryServer for Framebuffer {
+    fn physical_address(&self) -> u64 {
+        self.physical_address
+    }
+
+    fn length(&self) -> u64 {
+        self.length
     }
 }

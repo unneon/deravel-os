@@ -173,6 +173,30 @@ fn handle_trap(registers: &mut RiscvRegisters, hart: &mut HartContext) -> ! {
     }
 }
 
+fn validate_untrusted_capability(farthest_cap: RawCapability, current_pid: usize) -> RawCapability {
+    let mut capability = farthest_cap;
+    let mut sender = Actor::Userspace(ProcessId::new(current_pid));
+    loop {
+        let certifier = capability.certifier();
+        let certificate = &CAPABILITY_PAGES[match certifier {
+            Actor::Userspace(pid) => pid.as_usize(),
+            Actor::Kernel => PROCESS_COUNT,
+        }]
+        .0[capability.local_index()];
+        match certificate.load(Ordering::Relaxed).unpack() {
+            CapabilityCertificateUnpacked::Granted { grantee } => {
+                assert!(grantee == sender);
+                break capability;
+            }
+            CapabilityCertificateUnpacked::Forwarded { forwardee, inner } => {
+                assert!(forwardee == sender);
+                capability = inner;
+                sender = certifier;
+            }
+        }
+    }
+}
+
 fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut HartContext) -> ! {
     let current_pid = hart.current_pid.unwrap().as_usize();
     let mut current_proc = PROCESSES[current_pid].lock();
@@ -198,28 +222,7 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                 current_proc.registers = registers.clone();
                 current_proc.pc = user_pc;
 
-                let mut capability = farthest_cap;
-                let mut sender = Actor::Userspace(ProcessId::new(current_pid));
-                let original = loop {
-                    let certifier = capability.certifier();
-                    let certificate = &CAPABILITY_PAGES[match certifier {
-                        Actor::Userspace(pid) => pid.as_usize(),
-                        Actor::Kernel => PROCESS_COUNT,
-                    }]
-                    .0[capability.local_index()];
-                    match certificate.load(Ordering::Relaxed).unpack() {
-                        CapabilityCertificateUnpacked::Granted { grantee } => {
-                            assert!(grantee == sender);
-                            break capability;
-                        }
-                        CapabilityCertificateUnpacked::Forwarded { forwardee, inner } => {
-                            assert!(forwardee == sender);
-                            capability = inner;
-                            sender = certifier;
-                        }
-                    }
-                };
-
+                let original = validate_untrusted_capability(farthest_cap, current_pid);
                 match original.certifier() {
                     Actor::Userspace(dest) => {
                         let mut dest = PROCESSES[dest.as_usize()].lock();
@@ -291,6 +294,22 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
             ::log::trace!("finished syscall 4");
         }
         5 => {
+            let farthest_cap =
+                RawCapability::from_pointer(registers.a0 as *mut CapabilityCertificate);
+            let original = validate_untrusted_capability(farthest_cap, current_pid);
+            assert_eq!(
+                original.certifier(),
+                Actor::Kernel,
+                "shared memory capabilities can only be created by the kernel"
+            );
+            todo!()
+            // let handler = capability::get_handler(original.local_index());
+            // let result = handler.handle(method, &args);
+            // copy_to_user(&result, registers.a4 as *mut u8, registers.a5);
+            // registers.a0 = result.len();
+            // current_proc.state = ProcessState::Runnable;
+        }
+        6 => {
             let text = copy_from_user(registers.a0 as *const u8, registers.a1);
             let text = String::from_utf8(text).unwrap();
             let level = registers.a2;
