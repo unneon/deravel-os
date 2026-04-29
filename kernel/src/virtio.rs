@@ -105,8 +105,7 @@ pub fn initialize_input(
     bars: &[AllocatedRange; 6],
 ) -> &'static VirtioInput {
     let caps = extract_capabilities(config, bars);
-    let mut virtio_input = VirtioInput::new(caps);
-    virtio_input.demo();
+    let virtio_input = VirtioInput::new(caps);
     Box::leak(Box::new(virtio_input))
 }
 
