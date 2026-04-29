@@ -3,6 +3,7 @@ mod types;
 use crate::capability::reserve_kernel_capability;
 use crate::drvli::{DisplayServer, SharedMemoryServer};
 use crate::interrupt::InterruptHandler;
+use crate::sync::Mutex;
 use crate::util::volatile::{Readonly, Volatile, volatile_struct};
 use crate::virtio::Capabilities;
 use crate::virtio::gpu::types::*;
@@ -155,30 +156,56 @@ impl VirtioGpu {
     }
 }
 
-impl InterruptHandler for VirtioGpu {
+impl InterruptHandler for Mutex<VirtioGpu> {
     fn handle(&self) {
-        self.isr.read();
+        self.lock().isr.read();
     }
 }
 
-impl DisplayServer for VirtioGpu {
+impl DisplayServer for Mutex<VirtioGpu> {
     fn width(&self) -> u32 {
-        self.width
+        self.lock().width
     }
 
     fn height(&self) -> u32 {
-        self.height
+        self.lock().height
     }
 
     fn framebuffer(&self) -> Capability<SharedMemory> {
+        let self_ = self.lock();
         reserve_kernel_capability(Box::leak(Box::new(Framebuffer {
-            physical_address: self.framebuffer.as_ptr() as u64,
-            length: (self.width * self.height * 4) as u64,
+            physical_address: self_.framebuffer.as_ptr() as u64,
+            length: (self_.width * self_.height * 4) as u64,
         })))
     }
 
     fn draw(&self) {
-        todo!()
+        let mut self_ = self.lock();
+        let r = Rect {
+            x: 0,
+            y: 0,
+            width: self_.width,
+            height: self_.height,
+        };
+
+        let req = TransferToHost2D {
+            hdr: CtrlType::CmdTransferToHost2D.header(),
+            r,
+            offset: 0,
+            resource_id: 1,
+            padding: 0,
+        };
+        self_.controlq.descriptor_readonly(0, &req, Some(1));
+        self_.command::<ResponseNodata>(1).unwrap();
+
+        let req = ResourceFlush {
+            hdr: CtrlType::CmdResourceFlush.header(),
+            r,
+            resource_id: 1,
+            padding: 0,
+        };
+        self_.controlq.descriptor_readonly(0, &req, Some(1));
+        self_.command::<ResponseNodata>(1).unwrap();
     }
 }
 

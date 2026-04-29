@@ -1,6 +1,5 @@
 #![feature(decl_macro)]
 #![feature(never_type)]
-#![feature(pointer_is_aligned_to)]
 #![no_std]
 
 extern crate alloc;

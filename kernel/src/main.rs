@@ -1,8 +1,6 @@
-#![feature(abi_riscv_interrupt)]
 #![feature(arbitrary_self_types)]
 #![feature(atomic_ptr_null)]
 #![feature(decl_macro)]
-#![feature(iter_array_chunks)]
 #![feature(iter_intersperse)]
 #![feature(never_type)]
 #![feature(ptr_metadata)]
@@ -200,7 +198,6 @@ fn validate_untrusted_capability(farthest_cap: RawCapability, current_pid: usize
 fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut HartContext) -> ! {
     let current_pid = hart.current_pid.unwrap().as_usize();
     let mut current_proc = PROCESSES[current_pid].lock();
-    ::log::trace!("received syscall {}", registers.a6);
     match registers.a6 {
         0 => {
             current_proc.state = ProcessState::Finished;
@@ -278,10 +275,6 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
             let pages_allocated = current_proc.heap_pages_allocated;
             let page_table = unsafe { &mut *(current_proc.page_table as *mut PageTable) };
             let virtual_addr = 0x4000000 + pages_allocated * PAGE_SIZE;
-            ::log::trace!(
-                "alloc from {virtual_addr:#x} to {:#x}",
-                virtual_addr + PAGE_SIZE * page_count
-            );
             map_pages(
                 page_table,
                 virtual_addr,
@@ -291,7 +284,6 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
             );
             current_proc.heap_pages_allocated += page_count;
             registers.a0 = virtual_addr;
-            ::log::trace!("finished syscall 4");
         }
         5 => {
             let farthest_cap =
@@ -302,12 +294,32 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                 Actor::Kernel,
                 "shared memory capabilities can only be created by the kernel"
             );
-            todo!()
-            // let handler = capability::get_handler(original.local_index());
-            // let result = handler.handle(method, &args);
-            // copy_to_user(&result, registers.a4 as *mut u8, registers.a5);
-            // registers.a0 = result.len();
-            // current_proc.state = ProcessState::Runnable;
+            let handler = capability::get_handler(original.local_index());
+            let physical_address = String::from_utf8(handler.handle(0, b"null"))
+                .unwrap()
+                .parse::<usize>()
+                .unwrap();
+            let length = String::from_utf8(handler.handle(1, b"null"))
+                .unwrap()
+                .parse::<usize>()
+                .unwrap();
+            assert!(length.is_multiple_of(PAGE_SIZE));
+
+            let pages_allocated = current_proc.heap_pages_allocated;
+            let virtual_addr = 0x4000000 + pages_allocated * PAGE_SIZE;
+            current_proc.heap_pages_allocated += length / PAGE_SIZE;
+
+            let page_table = unsafe { &mut *(current_proc.page_table as *mut PageTable) };
+            map_pages(
+                page_table,
+                virtual_addr,
+                physical_address,
+                PageFlags::readwrite().user(),
+                length / PAGE_SIZE,
+            );
+
+            registers.a0 = virtual_addr;
+            registers.a1 = length;
         }
         6 => {
             let text = copy_from_user(registers.a0 as *const u8, registers.a1);

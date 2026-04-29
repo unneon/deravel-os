@@ -4,6 +4,7 @@ pub mod config;
 use crate::allocators::TrivialAllocator;
 use crate::interrupt::register_interrupt;
 use crate::pci::config::{Config, GeneralDeviceConfig};
+use crate::sync::Mutex;
 use crate::uart::{Uart16550, Uart16550Mmio};
 use crate::util::volatile::Volatile;
 use crate::virtio;
@@ -32,7 +33,7 @@ struct PciRanges {
     mem64: PciRange,
 }
 
-pub fn initialize_all_pci(device_tree: &Fdt) -> (&'static VirtioBlk, &'static VirtioGpu) {
+pub fn initialize_all_pci(device_tree: &Fdt) -> (&'static VirtioBlk, &'static Mutex<VirtioGpu>) {
     let soc = device_tree.find_node("/soc").unwrap();
     let pci = device_tree.find_node("/soc/pci").unwrap();
     let pci_ranges = find_pci_ranges(&soc, &pci);

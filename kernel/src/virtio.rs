@@ -1,6 +1,7 @@
 use crate::pci::AllocatedRange;
 use crate::pci::capability::{PciCapability, VendorPciCapability};
 use crate::pci::config::GeneralDeviceConfig;
+use crate::sync::Mutex;
 use crate::util::volatile::{Readonly, Volatile, volatile_struct};
 use crate::virtio::blk::VirtioBlk;
 use crate::virtio::gpu::VirtioGpu;
@@ -92,11 +93,11 @@ pub fn initialize_blk(
 pub fn initialize_gpu(
     config: &GeneralDeviceConfig,
     bars: &[AllocatedRange; 6],
-) -> &'static VirtioGpu {
+) -> &'static Mutex<VirtioGpu> {
     let caps = extract_capabilities(config, bars);
     let mut virtio_gpu = VirtioGpu::new(caps);
     virtio_gpu.demo();
-    Box::leak(Box::new(virtio_gpu))
+    Box::leak(Box::new(Mutex::new(virtio_gpu)))
 }
 
 pub fn initialize_input(

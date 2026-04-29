@@ -1,4 +1,3 @@
-#![feature(pointer_is_aligned_to)]
 #![no_std]
 
 mod capability;
