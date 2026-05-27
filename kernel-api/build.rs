@@ -6,7 +6,8 @@ use std::fmt::Write;
 fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let drvli_path = format!("{manifest_dir}/../interfaces.drvli");
-    let drvli = parse_drvli(&std::fs::read_to_string(drvli_path).unwrap());
+    let drvli_text = std::fs::read_to_string(drvli_path).unwrap();
+    let drvli = parse_drvli(&drvli_text);
     let mut output = String::new();
     for interface in &drvli.interfaces {
         let name_snake = &interface.name;

@@ -5,8 +5,9 @@ use std::fmt::Write;
 
 fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let drvli_path = format!("{manifest_dir}/../interfaces.drvli");
-    let drvli = parse_drvli(&std::fs::read_to_string(drvli_path).unwrap());
+    let drvli_text =
+        std::fs::read_to_string(format!("{manifest_dir}/../interfaces.drvli")).unwrap();
+    let drvli = parse_drvli(&drvli_text);
     let mut output = String::new();
     for struct_ in &drvli.structs {
         let name_camel = camel_case(&struct_.name);

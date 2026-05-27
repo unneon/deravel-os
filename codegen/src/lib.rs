@@ -2,38 +2,38 @@ use std::borrow::Cow;
 use std::iter::Peekable;
 use std::str::Lines;
 
-pub struct Drvli {
-    pub interfaces: Vec<Interface>,
-    pub structs: Vec<Struct>,
+pub struct Drvli<'a> {
+    pub interfaces: Vec<Interface<'a>>,
+    pub structs: Vec<Struct<'a>>,
 }
 
-pub struct Struct {
-    pub name: String,
-    pub members: Vec<(String, String)>,
+pub struct Struct<'a> {
+    pub name: &'a str,
+    pub members: Vec<(&'a str, &'a str)>,
 }
 
-pub struct Interface {
-    pub name: String,
-    pub methods: Vec<Method>,
-    pub streams: Vec<Stream>,
-    pub details: InterfaceDetails,
+pub struct Interface<'a> {
+    pub name: &'a str,
+    pub methods: Vec<Method<'a>>,
+    pub streams: Vec<Stream<'a>>,
+    pub details: InterfaceDetails<'a>,
 }
 
-pub struct Method {
-    pub name: String,
-    pub args: Vec<(String, String)>,
-    pub return_type: Option<String>,
+pub struct Method<'a> {
+    pub name: &'a str,
+    pub args: Vec<(&'a str, &'a str)>,
+    pub return_type: Option<&'a str>,
 }
 
-pub struct Stream {
-    pub name: String,
-    pub type_: String,
+pub struct Stream<'a> {
+    pub name: &'a str,
+    pub type_: &'a str,
 }
 
-pub enum InterfaceDetails {
+pub enum InterfaceDetails<'a> {
     App {
-        args: Vec<(String, String)>,
-        implements: Option<String>,
+        args: Vec<(&'a str, &'a str)>,
+        implements: Option<&'a str>,
     },
     Interface,
 }
@@ -89,24 +89,20 @@ pub fn rust_escape_name(name: &str) -> &str {
     }
 }
 
-pub fn parse_drvli(text: &str) -> Drvli {
+pub fn parse_drvli(text: &str) -> Drvli<'_> {
     let mut lines = text.lines().peekable();
     let mut structs = Vec::new();
     let mut interfaces = Vec::new();
     while let Some(line) = lines.next() {
-        if let Some(struct_name) = line.strip_prefix("struct ") {
+        if let Some(name) = line.strip_prefix("struct ") {
             let mut members = Vec::new();
             while let Some(line) = lines.peek()
                 && let Some(line) = line.strip_prefix("    ")
             {
-                let (member_name, member_type) = line.split_once(' ').unwrap();
-                members.push((member_name.to_owned(), member_type.to_owned()));
+                members.push(line.split_once(' ').unwrap());
                 lines.next();
             }
-            structs.push(Struct {
-                name: struct_name.to_owned(),
-                members,
-            });
+            structs.push(Struct { name, members });
         } else if let Some(line) = line.strip_prefix("app ") {
             let name_len = line.find(['(', ' ']).unwrap_or(line.len());
             let name = &line[..name_len];
@@ -116,17 +112,14 @@ pub fn parse_drvli(text: &str) -> Drvli {
                 let args = args
                     .split(", ")
                     .filter(|arg| !arg.is_empty())
-                    .map(|arg| {
-                        let (name, type_) = arg.split_once(' ').unwrap();
-                        (name.to_owned(), type_.to_owned())
-                    })
+                    .map(|arg| arg.split_once(' ').unwrap())
                     .collect();
                 (args, line)
             } else {
                 (Vec::new(), line)
             };
             let line = line.trim();
-            let implements = line.strip_prefix("implements ").map(str::to_owned);
+            let implements = line.strip_prefix("implements ");
             let interface =
                 parse_interface(name, &mut lines, InterfaceDetails::App { args, implements });
             interfaces.push(interface);
@@ -141,43 +134,37 @@ pub fn parse_drvli(text: &str) -> Drvli {
     }
 }
 
-pub fn parse_interface(
-    name: &str,
-    lines: &mut Peekable<Lines>,
-    details: InterfaceDetails,
-) -> Interface {
+pub fn parse_interface<'a>(
+    name: &'a str,
+    lines: &mut Peekable<Lines<'a>>,
+    details: InterfaceDetails<'a>,
+) -> Interface<'a> {
     let mut methods = Vec::new();
     let mut streams = Vec::new();
     while let Some(line) = lines.next()
         && let Some(line) = line.strip_prefix("    ")
     {
         if let Some(line) = line.strip_prefix("func ") {
-            let (method_name, line) = line.split_once('(').unwrap();
+            let (name, line) = line.split_once('(').unwrap();
             let (method_args, line) = line.split_once(")").unwrap();
-            let method_args: Vec<_> = method_args
+            let args: Vec<_> = method_args
                 .split(", ")
                 .filter(|s| !s.is_empty())
-                .map(|arg| {
-                    let (name, type_) = arg.split_once(' ').unwrap();
-                    (name.to_owned(), type_.to_owned())
-                })
+                .map(|arg| arg.split_once(' ').unwrap())
                 .collect();
-            let method_return_type = line.strip_prefix(" ").map(str::to_owned);
+            let return_type = line.strip_prefix(" ");
             methods.push(Method {
-                name: method_name.to_owned(),
-                args: method_args,
-                return_type: method_return_type,
+                name,
+                args,
+                return_type,
             });
         } else if let Some(line) = line.strip_prefix("stream ") {
-            let (stream_name, stream_type) = line.split_once(' ').unwrap();
-            streams.push(Stream {
-                name: stream_name.to_owned(),
-                type_: stream_type.to_owned(),
-            });
+            let (name, type_) = line.split_once(' ').unwrap();
+            streams.push(Stream { name, type_ });
         }
     }
     Interface {
-        name: name.to_owned(),
+        name,
         methods,
         streams,
         details,
