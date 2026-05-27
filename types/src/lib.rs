@@ -1,10 +1,14 @@
 #![no_std]
 
+mod align;
 mod capability;
 mod drvli;
+mod ring_buffer;
 
+pub use align::CacheLineAligned;
 pub use capability::*;
 pub use drvli::*;
+pub use ring_buffer::RingBufferState;
 
 #[repr(transparent)]
 #[derive(Clone, Copy, Eq, PartialEq)]

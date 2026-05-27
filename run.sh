@@ -17,7 +17,6 @@ qemu-system-riscv64 \
     -device virtio-gpu \
     -display gtk,full-screen=off \
     -device virtio-keyboard \
-    -device virtio-mouse \
     --no-reboot \
     -kernel \
     $@

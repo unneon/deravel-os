@@ -6,14 +6,19 @@ use core::marker::PhantomData;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use deravel_types::{
     Actor, Capability, CapabilityCertificateValue, CapabilityPage, PAGE_SIZE, RawCapability,
+    RingBufferState,
 };
 
 pub trait Handler<T> {
-    fn handle(&self, method: usize, args: &[u8]) -> Vec<u8>;
+    fn call_method(&self, method: usize, args: &[u8]) -> Vec<u8>;
+
+    fn map_stream(&self, stream: usize) -> (*mut u8, usize, *mut RingBufferState);
 }
 
 pub trait RawHandler {
-    fn handle(&self, method: usize, args: &[u8]) -> Vec<u8>;
+    fn call_method(&self, method: usize, args: &[u8]) -> Vec<u8>;
+
+    fn map_stream(&self, stream: usize) -> (*mut u8, usize, *mut RingBufferState);
 }
 
 struct TypedHandler<T, H: 'static>(&'static H, PhantomData<T>);
@@ -26,8 +31,12 @@ static HANDLERS: [Mutex<Option<&'static (dyn RawHandler + Sync)>>;
     PAGE_SIZE / size_of::<CapabilityCertificateValue>()] = [const { Mutex::new(None) }; _];
 
 impl<T, H: Handler<T>> RawHandler for TypedHandler<T, H> {
-    fn handle(&self, method: usize, args: &[u8]) -> Vec<u8> {
-        self.0.handle(method, args)
+    fn call_method(&self, method: usize, args: &[u8]) -> Vec<u8> {
+        self.0.call_method(method, args)
+    }
+
+    fn map_stream(&self, stream: usize) -> (*mut u8, usize, *mut RingBufferState) {
+        self.0.map_stream(stream)
     }
 }
 

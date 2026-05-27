@@ -25,6 +25,7 @@ mod page;
 mod pci;
 mod plic;
 mod process;
+mod ring_buffer;
 mod sbi;
 mod sync;
 mod uart;
@@ -76,7 +77,7 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     initialize_log(&device_tree);
     initialize_trap_handler();
     log_sbi_metadata();
-    let (_virtio_blk, virtio_gpu) = initialize_all_pci(&device_tree);
+    let (_virtio_blk, virtio_gpu, virtio_input) = initialize_all_pci(&device_tree);
     initialize_plic(&device_tree);
     initialize_hart_stack();
     enable_interrupts();
@@ -106,6 +107,7 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     // });
     windowing.spawn(WindowingArgs {
         display: reserve_kernel_capability(virtio_gpu),
+        keyboard: reserve_kernel_capability(virtio_input),
     });
 
     // TODO: initialize_hart_stack should take a callback and pass this with the correct lifetime.
@@ -236,7 +238,7 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                     }
                     Actor::Kernel => {
                         let handler = capability::get_handler(original.local_index());
-                        let result = handler.handle(method, &args);
+                        let result = handler.call_method(method, &args);
                         copy_to_user(&result, registers.a4 as *mut u8, registers.a5);
                         registers.a0 = result.len();
                         current_proc.state = ProcessState::Runnable;
@@ -295,11 +297,11 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                 "shared memory capabilities can only be created by the kernel"
             );
             let handler = capability::get_handler(original.local_index());
-            let physical_address = String::from_utf8(handler.handle(0, b"null"))
+            let physical_address = String::from_utf8(handler.call_method(0, b"null"))
                 .unwrap()
                 .parse::<usize>()
                 .unwrap();
-            let length = String::from_utf8(handler.handle(1, b"null"))
+            let length = String::from_utf8(handler.call_method(1, b"null"))
                 .unwrap()
                 .parse::<usize>()
                 .unwrap();
@@ -334,6 +336,42 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                 _ => panic!("invalid log level {level}"),
             };
             log_userspace(level, current_proc.name.unwrap(), &text);
+        }
+        7 => {
+            let farthest_cap =
+                RawCapability::from_pointer(registers.a0 as *mut CapabilityCertificate);
+            let stream = registers.a1;
+
+            let original = validate_untrusted_capability(farthest_cap, current_pid);
+            match original.certifier() {
+                Actor::Userspace(_) => unimplemented!(),
+                Actor::Kernel => {
+                    let handler = capability::get_handler(original.local_index());
+                    let (data, len, state) = handler.map_stream(stream);
+
+                    let page_table = unsafe { &mut *(current_proc.page_table as *mut PageTable) };
+                    let pages_allocated = current_proc.heap_pages_allocated;
+                    let virtual_addr = 0x4000000 + pages_allocated * PAGE_SIZE;
+                    current_proc.heap_pages_allocated += 2;
+                    map_pages(
+                        page_table,
+                        virtual_addr,
+                        data as usize,
+                        PageFlags::readonly().user(),
+                        1,
+                    );
+                    map_pages(
+                        page_table,
+                        virtual_addr + PAGE_SIZE,
+                        state as usize,
+                        PageFlags::readwrite().user(),
+                        1,
+                    );
+                    registers.a0 = virtual_addr;
+                    registers.a1 = len;
+                    registers.a2 = virtual_addr + PAGE_SIZE;
+                }
+            }
         }
         _ => panic!("invalid syscall number {}", registers.a6),
     }

@@ -1,17 +1,31 @@
-use deravel_codegen::{EntityDetails, camel_case, parse_interfaces};
+use deravel_codegen::{
+    InterfaceDetails, camel_case, parse_drvli, rust_escape_name, rust_member_type,
+};
 use std::fmt::Write;
 
 fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let interfaces_path = format!("{manifest_dir}/../interfaces.drvli");
-    let interfaces = parse_interfaces(&std::fs::read_to_string(interfaces_path).unwrap());
+    let drvli_path = format!("{manifest_dir}/../interfaces.drvli");
+    let drvli = parse_drvli(&std::fs::read_to_string(drvli_path).unwrap());
     let mut output = String::new();
-    for interface in &interfaces {
+    for struct_ in &drvli.structs {
+        let name_camel = camel_case(&struct_.name);
+        writeln!(&mut output, "#[derive(Clone, Copy, Debug)]").unwrap();
+        writeln!(&mut output, "#[repr(C)]").unwrap();
+        writeln!(&mut output, "pub struct {name_camel} {{").unwrap();
+        for (member_name, member_type) in &struct_.members {
+            let member_name = rust_escape_name(member_name);
+            let member_type = rust_member_type(&member_type);
+            writeln!(&mut output, "    pub {member_name}: {member_type},").unwrap();
+        }
+        writeln!(&mut output, "}}").unwrap();
+    }
+    for interface in &drvli.interfaces {
         let name_snake = &interface.name;
         let name_camel = camel_case(name_snake);
         writeln!(&mut output, "#[derive(Clone, Copy)]").unwrap();
         writeln!(&mut output, "pub struct {name_camel};").unwrap();
-        if let EntityDetails::App { args, implements } = &interface.details {
+        if let InterfaceDetails::App { args, implements } = &interface.details {
             writeln!(&mut output, "#[repr(C)]").unwrap();
             writeln!(&mut output, "pub struct {name_camel}Args {{").unwrap();
             for (arg_name, arg_type) in args {

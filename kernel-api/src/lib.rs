@@ -7,10 +7,12 @@ extern crate alloc;
 mod capability;
 pub mod drvli;
 pub mod syscall;
+mod user_ring_buffer;
 
 pub use capability::*;
 pub use deravel_types::*;
 pub use drvli::*;
+pub use user_ring_buffer::UserRingBuffer;
 
 use alloc::string::String;
 use core::alloc::{GlobalAlloc, Layout};

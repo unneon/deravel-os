@@ -1,14 +1,14 @@
 use deravel_codegen::{
-    camel_case, parse_interfaces, rust_arg_type, rust_borrow_or_copy, rust_ret_type,
+    camel_case, parse_drvli, rust_arg_type, rust_borrow_or_copy, rust_ret_type, rust_stream_type,
 };
 use std::fmt::Write;
 
 fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let interfaces_path = format!("{manifest_dir}/../interfaces.drvli");
-    let interfaces = parse_interfaces(&std::fs::read_to_string(interfaces_path).unwrap());
+    let drvli_path = format!("{manifest_dir}/../interfaces.drvli");
+    let drvli = parse_drvli(&std::fs::read_to_string(drvli_path).unwrap());
     let mut output = String::new();
-    for interface in &interfaces {
+    for interface in &drvli.interfaces {
         let name_snake = &interface.name;
         let name_camel = camel_case(name_snake);
         writeln!(&mut output, "pub trait {name_camel}Client {{").unwrap();
@@ -25,6 +25,15 @@ fn main() {
                 write!(&mut output, " -> {return_type}").unwrap();
             }
             writeln!(&mut output, ";").unwrap();
+        }
+        for stream in &interface.streams {
+            let stream_name = &stream.name;
+            let stream_type = rust_stream_type(&stream.type_);
+            writeln!(
+                &mut output,
+                "    fn {stream_name}(self) -> UserRingBuffer<{stream_type}>;"
+            )
+            .unwrap();
         }
         writeln!(&mut output, "}}").unwrap();
         writeln!(&mut output, "pub trait {name_camel}Server {{").unwrap();
@@ -77,6 +86,19 @@ fn main() {
                 "        serde_json::from_slice(&buf[..result_len]).unwrap()"
             )
             .unwrap();
+            writeln!(&mut output, "    }}").unwrap();
+        }
+        for (stream_id, stream) in interface.streams.iter().enumerate() {
+            let name = &stream.name;
+            let type_ = camel_case(&stream.type_);
+            writeln!(
+                &mut output,
+                "    fn {name}(self) -> UserRingBuffer<{type_}> {{"
+            )
+            .unwrap();
+            writeln!(&mut output, "        let (data, len, state) = unsafe {{ ipc_map_ring_buffer(self.0, {stream_id}) }};").unwrap();
+            writeln!(&mut output, "        let data = data as *mut {type_};").unwrap();
+            writeln!(&mut output, "        UserRingBuffer {{ data, len, state }}").unwrap();
             writeln!(&mut output, "    }}").unwrap();
         }
         writeln!(&mut output, "}}").unwrap();

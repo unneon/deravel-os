@@ -1,7 +1,9 @@
 mod config;
 mod types;
 
+use crate::drvli::InputDeviceServer;
 use crate::interrupt::InterruptHandler;
+use crate::ring_buffer::RingBuffer;
 use crate::sync::Mutex;
 use crate::util::volatile::{Readonly, Volatile};
 use crate::virtio::Capabilities;
@@ -11,19 +13,13 @@ use crate::virtio::queue::Queue;
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK};
 use alloc::vec;
 use alloc::vec::Vec;
-use log::{debug, info};
-
-#[derive(Clone, Copy, Debug, Default)]
-#[repr(C)]
-struct Event {
-    type_: u16,
-    code: u16,
-    value: u32,
-}
+use deravel_types::{InputEvent, RingBufferState};
+use log::info;
 
 struct State {
     eventq: Queue<0>,
-    buffers: Vec<Event>,
+    buffers: Vec<InputEvent>,
+    ring: RingBuffer<InputEvent>,
 }
 
 pub struct VirtioInput {
@@ -40,7 +36,14 @@ impl VirtioInput {
         common.device_status().write_bitor(STATUS_ACKNOWLEDGE as u8);
         common.device_status().write_bitor(STATUS_DRIVER as u8);
 
-        let mut buffers = vec![Event::default(); QUEUE_SIZE];
+        let mut buffers = vec![
+            InputEvent {
+                type_: 0,
+                code: 0,
+                value: 0,
+            };
+            QUEUE_SIZE
+        ];
         let mut eventq = Queue::new(common, &caps.notify, QUEUE_SIZE);
         for (i, buffer) in buffers.iter_mut().enumerate() {
             eventq.descriptor_writeonly(i as u16, buffer, None);
@@ -52,10 +55,16 @@ impl VirtioInput {
         let name = config_str(caps.device, ConfigSelect::IdName, 0);
         info!("found {name}");
 
+        let ring = RingBuffer::new();
+
         common.device_status().write_bitor(STATUS_DRIVER_OK as u8);
         VirtioInput {
             isr: caps.isr,
-            state: Mutex::new(State { eventq, buffers }),
+            state: Mutex::new(State {
+                eventq,
+                buffers,
+                ring,
+            }),
         }
     }
 }
@@ -69,14 +78,17 @@ impl InterruptHandler for VirtioInput {
         riscv::asm::fence();
         for used_index in used_start..used_end {
             let event = state.buffers[used_index as usize % QUEUE_SIZE];
-            if event.type_ == 0 {
-                continue;
-            }
-            debug!("received {event:?}");
+            state.ring.push(event);
         }
         riscv::asm::fence();
         unsafe {
             (&raw mut state.eventq.available.index).write_volatile(used_end + QUEUE_SIZE as u16)
         }
+    }
+}
+
+impl InputDeviceServer for VirtioInput {
+    fn events(&self) -> (*mut u8, usize, *mut RingBufferState) {
+        self.state.lock().ring.expose()
     }
 }

@@ -1,14 +1,14 @@
 use deravel_codegen::{
-    Entity, camel_case, parse_interfaces, rust_arg_type, rust_borrow_or_copy, rust_ret_type,
+    Interface, camel_case, parse_drvli, rust_arg_type, rust_borrow_or_copy, rust_ret_type,
 };
 use std::fmt::Write;
 
 fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let interfaces_path = format!("{manifest_dir}/../interfaces.drvli");
-    let interfaces = parse_interfaces(&std::fs::read_to_string(interfaces_path).unwrap());
+    let drvli_path = format!("{manifest_dir}/../interfaces.drvli");
+    let drvli = parse_drvli(&std::fs::read_to_string(drvli_path).unwrap());
     let mut output = String::new();
-    for interface in &interfaces {
+    for interface in &drvli.interfaces {
         generate_server_trait(interface, &mut output);
         generate_handler_impl(interface, &mut output);
     }
@@ -22,7 +22,7 @@ fn main() {
     println!("cargo::rustc-link-arg=-Tkernel/kernel.ld");
 }
 
-fn generate_server_trait(interface: &Entity, out: &mut String) {
+fn generate_server_trait(interface: &Interface, out: &mut String) {
     let name_snake = &interface.name;
     let name_camel = camel_case(name_snake);
     writeln!(out, "#[allow(dead_code)]").unwrap();
@@ -41,10 +41,18 @@ fn generate_server_trait(interface: &Entity, out: &mut String) {
         }
         writeln!(out, ";").unwrap();
     }
+    for stream in &interface.streams {
+        let stream_name = &stream.name;
+        writeln!(
+            out,
+            "    fn {stream_name}(&self) -> (*mut u8, usize, *mut RingBufferState);"
+        )
+        .unwrap();
+    }
     writeln!(out, "}}").unwrap();
 }
 
-fn generate_handler_impl(interface: &Entity, out: &mut String) {
+fn generate_handler_impl(interface: &Interface, out: &mut String) {
     let name_snake = &interface.name;
     let name_camel = camel_case(name_snake);
     writeln!(
@@ -54,7 +62,7 @@ fn generate_handler_impl(interface: &Entity, out: &mut String) {
     .unwrap();
     writeln!(
         out,
-        "    fn handle(&self, method: usize, _args: &[u8]) -> Vec<u8> {{"
+        "    fn call_method(&self, method: usize, _args: &[u8]) -> Vec<u8> {{"
     )
     .unwrap();
     writeln!(out, "        match method {{").unwrap();
@@ -79,6 +87,19 @@ fn generate_handler_impl(interface: &Entity, out: &mut String) {
         writeln!(out, ");").unwrap();
         writeln!(out, "                serde_json::to_vec(&result).unwrap()").unwrap();
         writeln!(out, "            }}").unwrap();
+    }
+    writeln!(out, "            _ => unreachable!(),").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    fn map_stream(&self, stream: usize) -> (*mut u8, usize, *mut RingBufferState) {{"
+    )
+    .unwrap();
+    writeln!(out, "        match stream {{").unwrap();
+    for (stream_index, stream) in interface.streams.iter().enumerate() {
+        let stream_name = &stream.name;
+        writeln!(out, "            {stream_index} => self.{stream_name}(),").unwrap();
     }
     writeln!(out, "            _ => unreachable!(),").unwrap();
     writeln!(out, "        }}").unwrap();
