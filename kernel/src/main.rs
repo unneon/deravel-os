@@ -36,7 +36,7 @@ use crate::arch::{RiscvRegisters, initialize_trap_handler, switch_to_userspace_r
 use crate::capability::{CAPABILITY_PAGES, reserve_kernel_capability};
 use crate::elf::elf;
 use crate::interrupt::INTERRUPTS;
-use crate::log::{initialize_log, log_userspace};
+use crate::log::{find_timebase_frequency, initialize_log, log_userspace};
 use crate::page::{PageFlags, PageTable, map_pages};
 use crate::pci::initialize_all_pci;
 use crate::plic::{initialize_plic, plic_claim, plic_complete};
@@ -55,11 +55,12 @@ use deravel_types::*;
 use fdt::Fdt;
 use riscv::interrupt::Trap;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
-use riscv::register::satp::Mode;
+use riscv::register::satp::{Mode, Satp};
 
 #[repr(align(16))]
 struct HartContext {
     current_pid: Option<ProcessId>,
+    fdt: Fdt<'static>,
 }
 
 #[repr(C, align(4096))]
@@ -79,7 +80,7 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     log_sbi_metadata();
     let (_virtio_blk, virtio_gpu, virtio_input) = initialize_all_pci(&device_tree);
     initialize_plic(&device_tree);
-    initialize_hart_stack();
+    initialize_hart_stack(device_tree);
     enable_interrupts();
 
     // let fs_tar = reserve_process::<TarFs>(elf!("CARGO_BIN_FILE_DERAVEL_FILESYSTEM_TAR"));
@@ -124,10 +125,13 @@ fn clear_bss() {
     bss.fill(0);
 }
 
-fn initialize_hart_stack() {
+fn initialize_hart_stack(fdt: Fdt<'static>) {
     let stack = Box::leak(Box::new(HartStack {
         data: [0; _],
-        ctx: HartContext { current_pid: None },
+        ctx: HartContext {
+            current_pid: None,
+            fdt,
+        },
     }));
     unsafe { riscv::register::sscratch::write((&raw mut stack.ctx) as usize) }
 }
@@ -372,6 +376,12 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                     registers.a2 = virtual_addr + PAGE_SIZE;
                 }
             }
+        }
+        9 => {
+            let satp = riscv::register::satp::read();
+            unsafe { riscv::register::satp::write(Satp::from_bits(0)) }
+            registers.a0 = find_timebase_frequency(&hart.fdt).unwrap();
+            unsafe { riscv::register::satp::write(satp) }
         }
         _ => panic!("invalid syscall number {}", registers.a6),
     }

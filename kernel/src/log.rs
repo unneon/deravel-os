@@ -98,7 +98,7 @@ pub fn log_userspace(level: Level, process_name: &str, message: &str) {
     log::logger().log(&record);
 }
 
-fn find_timebase_frequency(device_tree: &Fdt) -> Option<usize> {
+pub fn find_timebase_frequency(device_tree: &Fdt) -> Option<usize> {
     device_tree
         .find_node("/cpus")?
         .property("timebase-frequency")?

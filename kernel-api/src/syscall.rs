@@ -134,6 +134,12 @@ syscalls! {
 
     #[no = 7]
     pub fn ipc_map_ring_buffer(cap: RawCapability, stream: usize) -> (*mut u8, usize, *mut RingBufferState);
+
+    #[no = 8]
+    pub fn yield_();
+
+    #[no = 9]
+    pub fn riscv_timebase_frequency() -> usize;
 }
 
 unsafe fn to_arg<T: Copy>(rust: T) -> usize {

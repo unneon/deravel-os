@@ -11,15 +11,24 @@ fn main(args: Args) {
     let framebuffer = args.display.framebuffer();
     let (framebuffer, framebuffer_len) = unsafe { syscall::map_shared_memory(framebuffer) };
     let framebuffer = unsafe { core::slice::from_raw_parts_mut(framebuffer, framebuffer_len) };
+    let start_time = riscv::register::time::read();
+    let timebase_frequency = unsafe { syscall::riscv_timebase_frequency() } as f64;
     let mut keyboard = args.keyboard.events();
+    let mut last_switch = f64::NEG_INFINITY;
+    let mut last_color = [255, 0, 0];
     loop {
+        let time = (riscv::register::time::read() - start_time) as f64 / timebase_frequency;
         while let Some(event) = keyboard.next() {
             if event.type_ != 0 {
-                debug!("{event:?}");
+                debug!("{event:?} at time {time:.02}s");
             }
         }
-        fill_screen(255, 0, 0, framebuffer, &args);
-        fill_screen(0, 0, 255, framebuffer, &args);
+        if time - last_switch >= 0.5 {
+            let [r, g, b] = last_color;
+            fill_screen(b, g, r, framebuffer, &args);
+            last_switch = time;
+            last_color = [b, g, r];
+        }
     }
 }
 
