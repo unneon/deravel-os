@@ -84,7 +84,7 @@ pub fn initialize_log(device_tree: &Fdt) {
         timebase_frequency,
     };
     log::set_logger(Box::leak(Box::new(logger))).unwrap();
-    log::set_max_level(LevelFilter::Trace);
+    log::set_max_level(LevelFilter::Debug);
     info!("timebase frequency is {timebase_frequency}");
 }
 

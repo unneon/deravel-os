@@ -5,18 +5,18 @@ use alloc::vec::Vec;
 use core::marker::PhantomData;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use deravel_types::{
-    Actor, Capability, CapabilityCertificateValue, CapabilityPage, PAGE_SIZE, RawCapability,
-    RingBufferState,
+    Actor, Capability, CapabilityCertificateValue, CapabilityPage, PAGE_SIZE, ProcessId,
+    RawCapability, RingBufferState,
 };
 
 pub trait Handler<T> {
-    fn call_method(&self, method: usize, args: &[u8]) -> Vec<u8>;
+    fn call_method(&self, method: usize, args: &[u8], sender: ProcessId) -> Vec<u8>;
 
     fn map_stream(&self, stream: usize) -> (*mut u8, usize, *mut RingBufferState);
 }
 
 pub trait RawHandler {
-    fn call_method(&self, method: usize, args: &[u8]) -> Vec<u8>;
+    fn call_method(&self, method: usize, args: &[u8], sender: ProcessId) -> Vec<u8>;
 
     fn map_stream(&self, stream: usize) -> (*mut u8, usize, *mut RingBufferState);
 }
@@ -31,13 +31,26 @@ static HANDLERS: [Mutex<Option<&'static (dyn RawHandler + Sync)>>;
     PAGE_SIZE / size_of::<CapabilityCertificateValue>()] = [const { Mutex::new(None) }; _];
 
 impl<T, H: Handler<T>> RawHandler for TypedHandler<T, H> {
-    fn call_method(&self, method: usize, args: &[u8]) -> Vec<u8> {
-        self.0.call_method(method, args)
+    fn call_method(&self, method: usize, args: &[u8], sender: ProcessId) -> Vec<u8> {
+        self.0.call_method(method, args, sender)
     }
 
     fn map_stream(&self, stream: usize) -> (*mut u8, usize, *mut RingBufferState) {
         self.0.map_stream(stream)
     }
+}
+
+pub fn grant_kernel_capability<T: 'static + Sync>(
+    grantee: ProcessId,
+    handler: &'static (impl Handler<T> + Sync),
+) -> Capability<T> {
+    let cap = reserve_kernel_capability(handler);
+    // TODO: Race condition, PID 0 can use the capability.
+    CAPABILITY_PAGES[PROCESS_COUNT].0[cap.local_index()].store(
+        CapabilityCertificateValue::granted(grantee),
+        Ordering::Relaxed,
+    );
+    cap
 }
 
 pub fn reserve_kernel_capability<T: 'static + Sync>(

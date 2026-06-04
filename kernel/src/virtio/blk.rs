@@ -6,6 +6,7 @@ use crate::virtio::queue::{QUEUE_SIZE, Queue};
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK};
 use alloc::boxed::Box;
 use alloc::vec::Vec;
+use deravel_types::ProcessId;
 use log::info;
 use riscv::register::satp::Mode;
 
@@ -98,7 +99,7 @@ impl InterruptHandler for VirtioBlk {
 }
 
 impl DriveServer for VirtioBlk {
-    fn read(&self, sector: u64) -> Vec<u8> {
+    fn read(&self, _: ProcessId, sector: u64) -> Vec<u8> {
         // TODO: Use a mutex here.
         #[allow(invalid_reference_casting)]
         let this = unsafe { &mut *(self as *const _ as *mut VirtioBlk) };
@@ -107,14 +108,14 @@ impl DriveServer for VirtioBlk {
         Vec::from(buf as Box<[u8]>)
     }
 
-    fn write(&self, sector: u64, data: &[u8]) {
+    fn write(&self, _: ProcessId, sector: u64, data: &[u8]) {
         // TODO: Use a mutex here.
         #[allow(invalid_reference_casting)]
         let this = unsafe { &mut *(self as *const _ as *mut VirtioBlk) };
         this.write(sector, data.try_into().unwrap()).unwrap()
     }
 
-    fn capacity(&self) -> u64 {
+    fn capacity(&self, _: ProcessId) -> u64 {
         self.capacity() as u64
     }
 }

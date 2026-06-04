@@ -1,6 +1,6 @@
 mod types;
 
-use crate::capability::reserve_kernel_capability;
+use crate::capability::grant_kernel_capability;
 use crate::drvli::{DisplayServer, SharedMemoryServer};
 use crate::interrupt::InterruptHandler;
 use crate::sync::Mutex;
@@ -12,7 +12,7 @@ use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
-use deravel_types::{Capability, SharedMemory};
+use deravel_types::{Capability, ProcessId, SharedMemory};
 use log::info;
 
 volatile_struct! { pub Config
@@ -163,23 +163,26 @@ impl InterruptHandler for Mutex<VirtioGpu> {
 }
 
 impl DisplayServer for Mutex<VirtioGpu> {
-    fn width(&self) -> u32 {
+    fn width(&self, _: ProcessId) -> u32 {
         self.lock().width
     }
 
-    fn height(&self) -> u32 {
+    fn height(&self, _: ProcessId) -> u32 {
         self.lock().height
     }
 
-    fn framebuffer(&self) -> Capability<SharedMemory> {
+    fn framebuffer(&self, sender: ProcessId) -> Capability<SharedMemory> {
         let self_ = self.lock();
-        reserve_kernel_capability(Box::leak(Box::new(Framebuffer {
-            physical_address: self_.framebuffer.as_ptr() as u64,
-            length: (self_.width * self_.height * 4) as u64,
-        })))
+        grant_kernel_capability(
+            sender,
+            Box::leak(Box::new(Framebuffer {
+                physical_address: self_.framebuffer.as_ptr() as u64,
+                length: (self_.width * self_.height * 4) as u64,
+            })),
+        )
     }
 
-    fn draw(&self) {
+    fn draw(&self, _: ProcessId) {
         let mut self_ = self.lock();
         let r = Rect {
             x: 0,
@@ -214,11 +217,11 @@ struct Framebuffer {
     length: u64,
 }
 impl SharedMemoryServer for Framebuffer {
-    fn physical_address(&self) -> u64 {
+    fn physical_address(&self, _: ProcessId) -> u64 {
         self.physical_address
     }
 
-    fn length(&self) -> u64 {
+    fn length(&self, _: ProcessId) -> u64 {
         self.length
     }
 }

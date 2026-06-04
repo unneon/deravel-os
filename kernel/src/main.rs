@@ -44,7 +44,7 @@ use crate::process::{
     PROCESS_COUNT, PROCESSES, ProcessState, reserve_process, schedule_and_switch_to_userspace,
 };
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
-use ::log::{Level, error};
+use ::log::{Level, error, trace};
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec;
@@ -89,6 +89,7 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     // let ipc_c = reserve_process::<IpcC>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-c"));
     // let hello = reserve_process::<Hello>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_hello"));
     // let shell = reserve_process::<Shell>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_shell"));
+    let terminal = reserve_process::<Terminal>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_terminal"));
     let windowing = reserve_process::<Windowing>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_windowing"));
 
     // ipc_a.spawn(IpcAArgs {
@@ -106,6 +107,9 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     // shell.spawn(ShellArgs {
     //     console: reserve_kernel_capability(&SbiConsole),
     // });
+    terminal.spawn(TerminalArgs {
+        windowing: windowing.export,
+    });
     windowing.spawn(WindowingArgs {
         display: reserve_kernel_capability(virtio_gpu),
         keyboard: reserve_kernel_capability(virtio_input),
@@ -178,6 +182,7 @@ fn handle_trap(registers: &mut RiscvRegisters, hart: &mut HartContext) -> ! {
 }
 
 fn validate_untrusted_capability(farthest_cap: RawCapability, current_pid: usize) -> RawCapability {
+    trace!("validating capability {farthest_cap:?} presented by {current_pid}");
     let mut capability = farthest_cap;
     let mut sender = Actor::Userspace(ProcessId::new(current_pid));
     loop {
@@ -189,10 +194,12 @@ fn validate_untrusted_capability(farthest_cap: RawCapability, current_pid: usize
         .0[capability.local_index()];
         match certificate.load(Ordering::Relaxed).unpack() {
             CapabilityCertificateUnpacked::Granted { grantee } => {
+                trace!("... granted by {certifier:?} to {grantee:?}");
                 assert!(grantee == sender);
                 break capability;
             }
             CapabilityCertificateUnpacked::Forwarded { forwardee, inner } => {
+                trace!("... forwarded {inner:?} by {certifier:?} to {forwardee:?}");
                 assert!(forwardee == sender);
                 capability = inner;
                 sender = certifier;
@@ -242,7 +249,8 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                     }
                     Actor::Kernel => {
                         let handler = capability::get_handler(original.local_index());
-                        let result = handler.call_method(method, &args);
+                        let result =
+                            handler.call_method(method, &args, ProcessId::new(current_pid));
                         copy_to_user(&result, registers.a4 as *mut u8, registers.a5);
                         registers.a0 = result.len();
                         current_proc.state = ProcessState::Runnable;
@@ -301,14 +309,16 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                 "shared memory capabilities can only be created by the kernel"
             );
             let handler = capability::get_handler(original.local_index());
-            let physical_address = String::from_utf8(handler.call_method(0, b"null"))
-                .unwrap()
-                .parse::<usize>()
-                .unwrap();
-            let length = String::from_utf8(handler.call_method(1, b"null"))
-                .unwrap()
-                .parse::<usize>()
-                .unwrap();
+            let physical_address =
+                String::from_utf8(handler.call_method(0, b"null", ProcessId::new(current_pid)))
+                    .unwrap()
+                    .parse::<usize>()
+                    .unwrap();
+            let length =
+                String::from_utf8(handler.call_method(1, b"null", ProcessId::new(current_pid)))
+                    .unwrap()
+                    .parse::<usize>()
+                    .unwrap();
             assert!(length.is_multiple_of(PAGE_SIZE));
 
             let pages_allocated = current_proc.heap_pages_allocated;

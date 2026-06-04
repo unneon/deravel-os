@@ -1,10 +1,10 @@
 mod ffi;
 
 use crate::drvli::ConsoleServer;
-use log::info;
-
 #[cfg(doc)]
 use Error::*;
+use deravel_types::ProcessId;
+use log::info;
 
 pub macro console_writeln($($arg:tt)*) {
     core::fmt::write(&mut crate::sbi::SbiConsole, format_args!("{}\n", format_args!($($arg)*))).unwrap()
@@ -105,13 +105,13 @@ impl SpecVersion {
 }
 
 impl ConsoleServer for SbiConsole {
-    fn getchar(&self) -> u8 {
+    fn getchar(&self, _: ProcessId) -> u8 {
         let mut c = 0;
         while debug_console_read(core::slice::from_mut(&mut c)).unwrap() == 0 {}
         c
     }
 
-    fn putchar(&self, c: u8) {
+    fn putchar(&self, _: ProcessId, c: u8) {
         debug_console_write_byte(c).unwrap()
     }
 }

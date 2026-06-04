@@ -30,7 +30,7 @@ fn generate_server_trait(interface: &Interface, out: &mut String) {
     writeln!(out, "pub trait {name_camel}Server {{").unwrap();
     for method in &interface.methods {
         let method_name = &method.name;
-        write!(out, "    fn {method_name}(&self").unwrap();
+        write!(out, "    fn {method_name}(&self, sender: ProcessId").unwrap();
         for (arg_name, arg_type) in &method.args {
             let arg_type = rust_arg_type(arg_type);
             write!(out, ", {arg_name}: {arg_type}").unwrap();
@@ -63,7 +63,7 @@ fn generate_handler_impl(interface: &Interface, out: &mut String) {
     .unwrap();
     writeln!(
         out,
-        "    fn call_method(&self, method: usize, _args: &[u8]) -> Vec<u8> {{"
+        "    fn call_method(&self, method: usize, _args: &[u8], _sender: ProcessId) -> Vec<u8> {{"
     )
     .unwrap();
     writeln!(out, "        match method {{").unwrap();
@@ -80,7 +80,11 @@ fn generate_handler_impl(interface: &Interface, out: &mut String) {
             write!(out, "{arg_type},").unwrap();
         }
         writeln!(out, ") = serde_json::from_slice(_args).unwrap();").unwrap();
-        write!(out, "                let result = self.{method_name}(").unwrap();
+        write!(
+            out,
+            "                let result = self.{method_name}(_sender, "
+        )
+        .unwrap();
         for (arg_name, arg_type) in &method.args {
             let borrow = rust_borrow_or_copy(arg_type);
             write!(out, "{borrow}{arg_name},").unwrap();
