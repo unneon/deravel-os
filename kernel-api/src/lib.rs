@@ -132,6 +132,10 @@ pub fn set_stdio(cap: Capability<Console>) {
     STDIO.store(cap.as_usize(), Ordering::SeqCst);
 }
 
+pub fn yield_() {
+    unsafe { syscall::yield_() }
+}
+
 fn stdio() -> Capability<Console> {
     let stdio = STDIO.load(Ordering::SeqCst) as *mut CapabilityCertificate;
     assert!(!stdio.is_null(), "standard input/output not set");

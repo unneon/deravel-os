@@ -161,6 +161,67 @@ fn main() {
         writeln!(&mut output, "        ").unwrap();
         writeln!(&mut output, "    }}").unwrap();
         writeln!(&mut output, "}}").unwrap();
+        writeln!(
+            &mut output,
+            "pub fn ipc_serve_{name_snake}_async(server: &mut impl {name_camel}Server) {{"
+        )
+        .unwrap();
+        writeln!(&mut output, "    loop {{").unwrap();
+        writeln!(&mut output, "        let mut buf = [0u8; 4096];").unwrap();
+        writeln!(&mut output, "        let (cap, method, args_len, sender) = unsafe {{ ipc_receive_async(buf.as_mut_ptr(), buf.len()) }};").unwrap();
+        writeln!(&mut output, "        if cap.as_usize() == 0 {{").unwrap();
+        writeln!(&mut output, "            break;").unwrap();
+        writeln!(&mut output, "        }}").unwrap();
+        writeln!(
+            &mut output,
+            "        let cap = Capability::<{name_camel}>(cap, PhantomData);"
+        )
+        .unwrap();
+        writeln!(&mut output, "        match method {{").unwrap();
+        for (method_id, method) in interface.methods.iter().enumerate() {
+            let method_name = &method.name;
+            writeln!(&mut output, "            {method_id} => {{").unwrap();
+            writeln!(&mut output, "                let (").unwrap();
+            for (arg_name, _) in &method.args {
+                writeln!(&mut output, "                    {arg_name},").unwrap();
+            }
+            writeln!(&mut output, "                ): (").unwrap();
+            for (_, arg_type) in &method.args {
+                let arg_type = rust_ret_type(arg_type);
+                writeln!(&mut output, "                    {arg_type},").unwrap();
+            }
+            writeln!(
+                &mut output,
+                "                ) = serde_json::from_slice(&buf[..args_len]).unwrap();"
+            )
+            .unwrap();
+            writeln!(
+                &mut output,
+                "                let result = server.{method_name}(cap, sender,"
+            )
+            .unwrap();
+            for (arg_name, arg_type) in &method.args {
+                let borrow = rust_borrow_or_copy(arg_type);
+                writeln!(&mut output, "                    {borrow}{arg_name},").unwrap();
+            }
+            writeln!(&mut output, "                );").unwrap();
+            writeln!(
+                &mut output,
+                "                let result = serde_json::to_vec(&result).unwrap();"
+            )
+            .unwrap();
+            writeln!(
+                &mut output,
+                "                unsafe {{ ipc_reply(result.as_ptr(), result.len()) }};"
+            )
+            .unwrap();
+            writeln!(&mut output, "            }},").unwrap();
+        }
+        writeln!(&mut output, "            _ => unreachable!(),").unwrap();
+        writeln!(&mut output, "        }}").unwrap();
+        writeln!(&mut output, "        ").unwrap();
+        writeln!(&mut output, "    }}").unwrap();
+        writeln!(&mut output, "}}").unwrap();
     }
     std::fs::write(
         format!("{}/drvli.rs", std::env::var("OUT_DIR").unwrap()),

@@ -387,11 +387,33 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                 }
             }
         }
+        8 => {
+            current_proc.registers = registers.clone();
+            current_proc.pc = user_pc + 4;
+
+            drop(current_proc);
+            schedule_and_switch_to_userspace(hart);
+        }
         9 => {
             let satp = riscv::register::satp::read();
             unsafe { riscv::register::satp::write(Satp::from_bits(0)) }
             registers.a0 = find_timebase_frequency(&hart.fdt).unwrap();
             unsafe { riscv::register::satp::write(satp) }
+        }
+        10 => {
+            assert!(current_proc.currently_serving.is_none());
+            if let Some((cap, method, args, sender)) =
+                current_proc.messages.as_mut().and_then(|q| q.pop_front())
+            {
+                copy_to_user(&args, registers.a0 as *mut u8, registers.a1);
+                registers.a0 = cap.as_usize();
+                registers.a1 = method;
+                registers.a2 = args.len();
+                registers.a3 = sender.as_usize();
+                current_proc.currently_serving = Some(sender);
+            } else {
+                registers.a0 = 0;
+            }
         }
         _ => panic!("invalid syscall number {}", registers.a6),
     }
