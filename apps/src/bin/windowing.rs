@@ -2,20 +2,28 @@
 #![no_main]
 extern crate alloc;
 
-use alloc::vec::Vec;
+use alloc::boxed::Box;
 use deravel_kernel_api::*;
 use log::debug;
 
-struct Server {
-    windows: Vec<WindowData>,
-}
+struct Server {}
 
 struct WindowData {}
 
 impl WindowingServer for Server {
-    fn create_window(&mut self, _: Capability<Windowing>, sender: ProcessId) -> Capability<Window> {
-        self.windows.push(WindowData {});
-        grant_capability(sender)
+    fn create_window(&self, sender: ProcessId) -> Capability<Window> {
+        let data = Box::leak(Box::new(WindowData {}));
+        grant_capability2(sender, data)
+    }
+}
+
+impl WindowServer for WindowData {
+    fn width(&self, _: ProcessId) -> u32 {
+        400
+    }
+
+    fn height(&self, _: ProcessId) -> u32 {
+        300
     }
 }
 
@@ -31,9 +39,8 @@ fn main(args: Args) {
     let mut keyboard = args.keyboard.events();
     let mut last_switch = f64::NEG_INFINITY;
     let mut last_color = [255, 0, 0];
-    let mut server = Server {
-        windows: Vec::new(),
-    };
+    let mut server = Box::leak(Box::new(Server {}));
+    register_root_capability(server);
     loop {
         let time = (riscv::register::time::read() - start_time) as f64 / timebase_frequency;
         while let Some(event) = keyboard.next() {
@@ -41,7 +48,8 @@ fn main(args: Args) {
                 debug!("{event:?} at time {time:.02}s");
             }
         }
-        ipc_serve_windowing_async(&mut server);
+        ipc_serve();
+        // ipc_serve_windowing_async(&mut server);
         if time - last_switch >= 0.5 {
             let [r, g, b] = last_color;
             fill_screen(b, g, r, framebuffer, &args);

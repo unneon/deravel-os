@@ -5,8 +5,11 @@ use deravel_kernel_api::*;
 use log::debug;
 
 fn main(args: Args) {
-    let _window = args.windowing.create_window();
+    let window = args.windowing.create_window();
     debug!("created window");
+    let width = window.width();
+    let height = window.height();
+    debug!("window is {width}x{height}");
     loop {
         yield_();
     }

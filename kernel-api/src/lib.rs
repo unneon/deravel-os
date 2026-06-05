@@ -124,6 +124,20 @@ pub fn getchar() -> u8 {
     stdio().getchar()
 }
 
+pub fn ipc_serve() {
+    loop {
+        let mut buf = [0u8; 4096];
+        let (cap, method, args_len, sender) =
+            unsafe { syscall::ipc_receive_async(buf.as_mut_ptr(), buf.len()) };
+        if cap.as_usize() == 0 {
+            break;
+        }
+        let handler = unsafe { HANDLERS[cap.local_index()].as_ref().unwrap() };
+        let result = handler.call_method(method, &buf[..args_len], sender);
+        unsafe { syscall::ipc_reply(result.as_ptr(), result.len()) }
+    }
+}
+
 pub fn putchar(ch: u8) {
     stdio().putchar(ch)
 }

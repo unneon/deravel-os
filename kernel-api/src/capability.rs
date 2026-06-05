@@ -1,13 +1,39 @@
 use crate::current_pid;
+use alloc::boxed::Box;
+use alloc::vec::Vec;
 use core::marker::PhantomData;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use deravel_types::{
     Actor, Capability, CapabilityCertificate, CapabilityCertificateUnpacked,
-    CapabilityCertificateValue, RawCapability, get_capability_certificate_page,
+    CapabilityCertificateValue, PAGE_SIZE, ProcessId, RawCapability,
+    get_capability_certificate_page,
 };
 use log::trace;
 
+pub trait Handler<T> {
+    fn call_method(&self, method: usize, args: &[u8], sender: ProcessId) -> Vec<u8>;
+}
+
+pub trait RawHandler {
+    fn call_method(&self, method: usize, args: &[u8], sender: ProcessId) -> Vec<u8>;
+}
+
+struct TypedHandler<T, H: 'static>(&'static H, PhantomData<T>);
+
+// TODO: Unify the allocation counts.
+
 static CAPABILITIES_ALLOCATED: AtomicUsize = AtomicUsize::new(0);
+
+pub static mut HANDLERS: [Option<&'static (dyn RawHandler + Sync)>;
+    PAGE_SIZE / size_of::<CapabilityCertificateValue>()] = [None; _];
+
+static HANDLERS_ALLOCATED: AtomicUsize = AtomicUsize::new(1);
+
+impl<T, H: Handler<T>> RawHandler for TypedHandler<T, H> {
+    fn call_method(&self, method: usize, args: &[u8], sender: ProcessId) -> Vec<u8> {
+        self.0.call_method(method, args, sender)
+    }
+}
 
 pub fn grant_capability<T>(grantee: impl Into<Actor>) -> Capability<T> {
     let grantee = grantee.into();
@@ -19,6 +45,19 @@ pub fn grant_capability<T>(grantee: impl Into<Actor>) -> Capability<T> {
     let cap = Capability(RawCapability::from_pointer(certificate), PhantomData);
     trace!("granted {cap:?} to {grantee:?}");
     cap
+}
+
+pub fn grant_capability2<T: 'static + Sync>(
+    grantee: impl Into<Actor>,
+    handler: &'static (impl Handler<T> + Sync),
+) -> Capability<T> {
+    let local_index = HANDLERS_ALLOCATED.fetch_add(1, Ordering::Relaxed);
+    unsafe { HANDLERS[local_index] = Some(Box::leak(Box::new(TypedHandler(handler, PhantomData)))) }
+    grant_capability(grantee)
+}
+
+pub fn register_root_capability<T: 'static + Sync>(handler: &'static (impl Handler<T> + Sync)) {
+    unsafe { HANDLERS[0] = Some(Box::leak(Box::new(TypedHandler(handler, PhantomData)))) }
 }
 
 pub fn forward_capability<T, U>(cap: Capability<T>, forwardee: Capability<U>) -> Capability<T> {

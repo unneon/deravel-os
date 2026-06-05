@@ -63,47 +63,45 @@ union TarHeaderBuf {
 const SECTOR_SIZE: usize = 512;
 
 impl FilesystemServer for Server {
-    fn read(&mut self, cap: Capability<Filesystem>, _: ProcessId, path_suffix: &str) -> Vec<u8> {
-        let cap = &self.capabilities[cap.local_index()];
-        let path_prefix = &cap.path;
-        let path = concat_path(path_prefix, path_suffix);
-        let file = self.files.iter().find(|file| file.name == path);
-        let Some(file) = file else {
-            panic!("file {path:?} not found");
-        };
-        file.data[..file.size].to_owned()
+    fn read(&self, _: ProcessId, path_suffix: &str) -> Vec<u8> {
+        // let cap = &self.capabilities[todo!()];
+        // let path_prefix = &cap.path;
+        // let path = concat_path(path_prefix, path_suffix);
+        // let file = self.files.iter().find(|file| file.name == path);
+        // let Some(file) = file else {
+        //     panic!("file {path:?} not found");
+        // };
+        // file.data[..file.size].to_owned()
+        todo!()
     }
 
-    fn write(&mut self, cap: Capability<Filesystem>, _: ProcessId, path_suffix: &str, data: &[u8]) {
-        let cap = &self.capabilities[cap.local_index()];
-        let path_prefix = &cap.path;
-        let path = concat_path(path_prefix, path_suffix);
-        let file = self.files.iter().find(|file| file.name == path);
-        if file.is_some() {
-            error!("file {path:?} already exists");
-        }
-        let size = data.len();
-        let mut data = data.to_owned();
-        data.resize(size.next_multiple_of(SECTOR_SIZE), 0);
-        self.files.push(File {
-            name: path.into_owned(),
-            data,
-            size,
-        });
-        serialize_archive(&self.files, self.drive);
+    fn write(&self, _: ProcessId, path_suffix: &str, data: &[u8]) {
+        // let cap = &self.capabilities[todo!()];
+        // let path_prefix = &cap.path;
+        // let path = concat_path(path_prefix, path_suffix);
+        // let file = self.files.iter().find(|file| file.name == path);
+        // if file.is_some() {
+        //     error!("file {path:?} already exists");
+        // }
+        // let size = data.len();
+        // let mut data = data.to_owned();
+        // data.resize(size.next_multiple_of(SECTOR_SIZE), 0);
+        // self.files.push(File {
+        //     name: path.into_owned(),
+        //     data,
+        //     size,
+        // });
+        // serialize_archive(&self.files, self.drive);
+        todo!()
     }
 
-    fn subcapability(
-        &mut self,
-        cap: Capability<Filesystem>,
-        sender: ProcessId,
-        path_suffix: &str,
-    ) -> Capability<Filesystem> {
-        let cap = &self.capabilities[cap.local_index()];
-        let path_prefix = &cap.path;
-        let path = concat_path(path_prefix, path_suffix).into_owned();
-        self.capabilities.push(CapabilityData { path });
-        grant_capability(sender)
+    fn subcapability(&self, sender: ProcessId, path_suffix: &str) -> Capability<Filesystem> {
+        todo!()
+        // let cap = &self.capabilities[todo!()];
+        // let path_prefix = &cap.path;
+        // let path = concat_path(path_prefix, path_suffix).into_owned();
+        // self.capabilities.push(CapabilityData { path });
+        // grant_capability(sender)
     }
 }
 

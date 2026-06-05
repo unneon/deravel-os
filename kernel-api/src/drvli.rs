@@ -5,8 +5,8 @@
     clippy::never_loop
 )]
 
-use crate::UserRingBuffer;
 use crate::syscall::*;
+use crate::{Handler, UserRingBuffer};
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::marker::PhantomData;

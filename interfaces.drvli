@@ -50,3 +50,5 @@ interface input_device
     stream events input_event
 
 interface window
+    func width() u32
+    func height() u32
