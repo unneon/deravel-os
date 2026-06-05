@@ -100,7 +100,7 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     // ipc_b.spawn(IpcBArgs { c: ipc_c.export });
     // ipc_c.spawn(IpcCArgs {});
     // fs_tar.spawn(TarFsArgs {
-    //     drive: reserve_kernel_capability(virtio_blk),
+    //     drive: reserve_kernel_capability(_virtio_blk),
     // });
     // hello.spawn(HelloArgs {
     //     console: reserve_kernel_capability(&SbiConsole),

@@ -10,15 +10,17 @@ mod serialize;
 use crate::deserialize::deserialize_archive;
 use crate::serialize::serialize_archive;
 use alloc::borrow::{Cow, ToOwned};
-use alloc::string::String;
+use alloc::boxed::Box;
+use alloc::format;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use alloc::{format, vec};
+use core::cell::RefCell;
 use deravel_kernel_api::*;
 use log::error;
 
-#[derive(Debug)]
-struct CapabilityData {
+struct CapabilityRoot {
     path: String,
+    server: &'static RefCell<Server>,
 }
 
 struct File {
@@ -30,7 +32,6 @@ struct File {
 struct Server {
     drive: Capability<Drive>,
     files: Vec<File>,
-    capabilities: Vec<CapabilityData>,
 }
 
 #[repr(C, packed)]
@@ -62,59 +63,65 @@ union TarHeaderBuf {
 
 const SECTOR_SIZE: usize = 512;
 
-impl FilesystemServer for Server {
+impl FilesystemServer for CapabilityRoot {
     fn read(&self, _: ProcessId, path_suffix: &str) -> Vec<u8> {
-        // let cap = &self.capabilities[todo!()];
-        // let path_prefix = &cap.path;
-        // let path = concat_path(path_prefix, path_suffix);
-        // let file = self.files.iter().find(|file| file.name == path);
-        // let Some(file) = file else {
-        //     panic!("file {path:?} not found");
-        // };
-        // file.data[..file.size].to_owned()
-        todo!()
+        let path = concat_path(&self.path, path_suffix);
+        let server = self.server.borrow();
+        let file = server.files.iter().find(|file| file.name == path);
+        let Some(file) = file else {
+            panic!("file {path:?} not found")
+        };
+        file.data[..file.size].to_owned()
     }
 
     fn write(&self, _: ProcessId, path_suffix: &str, data: &[u8]) {
-        // let cap = &self.capabilities[todo!()];
-        // let path_prefix = &cap.path;
-        // let path = concat_path(path_prefix, path_suffix);
-        // let file = self.files.iter().find(|file| file.name == path);
-        // if file.is_some() {
-        //     error!("file {path:?} already exists");
-        // }
-        // let size = data.len();
-        // let mut data = data.to_owned();
-        // data.resize(size.next_multiple_of(SECTOR_SIZE), 0);
-        // self.files.push(File {
-        //     name: path.into_owned(),
-        //     data,
-        //     size,
-        // });
-        // serialize_archive(&self.files, self.drive);
-        todo!()
+        let path = concat_path(&self.path, path_suffix);
+        let mut server = self.server.borrow_mut();
+        let file = server.files.iter().find(|file| file.name == path);
+        if file.is_some() {
+            error!("file {path:?} already exists");
+        }
+        let size = data.len();
+        let mut data = data.to_owned();
+        data.resize(size.next_multiple_of(SECTOR_SIZE), 0);
+        server.files.push(File {
+            name: path.into_owned(),
+            data,
+            size,
+        });
+        serialize_archive(&server.files, server.drive);
     }
 
     fn subcapability(&self, sender: ProcessId, path_suffix: &str) -> Capability<Filesystem> {
-        todo!()
-        // let cap = &self.capabilities[todo!()];
-        // let path_prefix = &cap.path;
-        // let path = concat_path(path_prefix, path_suffix).into_owned();
-        // self.capabilities.push(CapabilityData { path });
-        // grant_capability(sender)
+        let path = concat_path(&self.path, path_suffix);
+        grant_capability2(
+            sender,
+            Box::leak(Box::new(CapabilityRoot {
+                path: path.to_string(),
+                server: self.server,
+            })),
+        )
     }
 }
 
+unsafe impl Send for CapabilityRoot {}
+
+unsafe impl Sync for CapabilityRoot {}
+
 fn main(args: Args) {
     let files = deserialize_archive(args.drive);
-    let capabilities = vec![CapabilityData {
-        path: String::new(),
-    }];
-    ipc_serve_filesystem(Server {
+    let server = Box::leak(Box::new(RefCell::new(Server {
         drive: args.drive,
         files,
-        capabilities,
-    })
+    })));
+    register_root_capability(Box::leak(Box::new(CapabilityRoot {
+        path: String::new(),
+        server,
+    })));
+    loop {
+        ipc_serve();
+        yield_();
+    }
 }
 
 fn concat_path<'a>(prefix: &'a str, suffix: &'a str) -> Cow<'a, str> {

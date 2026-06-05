@@ -9,7 +9,6 @@ use log::debug;
 
 struct Server {
     width: u32,
-    height: u32,
     framebuffer: &'static RefCell<&'static mut [u8]>,
     cap: Capability<Display>,
 }
@@ -22,7 +21,6 @@ struct WindowData {
     window_framebuffer_data: &'static mut [u8],
     window_framebuffer_cap: Capability<SharedMemory>,
     display_width: u32,
-    display_height: u32,
     display_framebuffer: &'static RefCell<&'static mut [u8]>,
     display_cap: Capability<Display>,
 }
@@ -45,7 +43,6 @@ impl WindowingServer for Server {
             window_framebuffer_data,
             window_framebuffer_cap,
             display_width: self.width,
-            display_height: self.height,
             display_framebuffer: self.framebuffer,
             display_cap: self.cap,
         }));
@@ -99,7 +96,6 @@ fn main(args: Args) {
     fill_screen(191, 215, 234, framebuffer, &args);
     let server = Box::leak(Box::new(Server {
         width,
-        height,
         framebuffer: Box::leak(Box::new(RefCell::new(framebuffer))),
         cap: args.display,
     }));

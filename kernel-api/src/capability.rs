@@ -35,8 +35,13 @@ impl<T, H: Handler<T>> RawHandler for TypedHandler<T, H> {
     }
 }
 
-pub fn grant_capability<T>(grantee: impl Into<Actor>) -> Capability<T> {
+pub fn grant_capability2<T: 'static + Sync>(
+    grantee: impl Into<Actor>,
+    handler: &'static (impl Handler<T> + Sync),
+) -> Capability<T> {
     let grantee = grantee.into();
+    let local_index = HANDLERS_ALLOCATED.fetch_add(1, Ordering::Relaxed);
+    unsafe { HANDLERS[local_index] = Some(Box::leak(Box::new(TypedHandler(handler, PhantomData)))) }
     let certificate = allocate_certificate();
     certificate.store(
         CapabilityCertificateValue::granted(grantee),
@@ -45,15 +50,6 @@ pub fn grant_capability<T>(grantee: impl Into<Actor>) -> Capability<T> {
     let cap = Capability(RawCapability::from_pointer(certificate), PhantomData);
     trace!("granted {cap:?} to {grantee:?}");
     cap
-}
-
-pub fn grant_capability2<T: 'static + Sync>(
-    grantee: impl Into<Actor>,
-    handler: &'static (impl Handler<T> + Sync),
-) -> Capability<T> {
-    let local_index = HANDLERS_ALLOCATED.fetch_add(1, Ordering::Relaxed);
-    unsafe { HANDLERS[local_index] = Some(Box::leak(Box::new(TypedHandler(handler, PhantomData)))) }
-    grant_capability(grantee)
 }
 
 pub fn register_root_capability<T: 'static + Sync>(handler: &'static (impl Handler<T> + Sync)) {
