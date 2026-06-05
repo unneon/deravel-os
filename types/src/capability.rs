@@ -203,6 +203,10 @@ impl Serialize for RawCapability {
     }
 }
 
+unsafe impl Send for RawCapability {}
+
+unsafe impl Sync for RawCapability {}
+
 pub fn get_capability_certificate_page(
     actor: Actor,
 ) -> &'static [CapabilityCertificate; CAPABILITIES_PER_PAGE] {

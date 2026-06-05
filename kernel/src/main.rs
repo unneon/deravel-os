@@ -27,13 +27,14 @@ mod plic;
 mod process;
 mod ring_buffer;
 mod sbi;
+mod shared_memory;
 mod sync;
 mod uart;
 mod util;
 mod virtio;
 
 use crate::arch::{RiscvRegisters, initialize_trap_handler, switch_to_userspace_registers_only};
-use crate::capability::{CAPABILITY_PAGES, reserve_kernel_capability};
+use crate::capability::{CAPABILITY_PAGES, grant_kernel_capability, reserve_kernel_capability};
 use crate::elf::elf;
 use crate::interrupt::INTERRUPTS;
 use crate::log::{find_timebase_frequency, initialize_log, log_userspace};
@@ -414,6 +415,18 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
             } else {
                 registers.a0 = 0;
             }
+        }
+        11 => {
+            let size = registers.a0.next_multiple_of(PAGE_SIZE);
+            let memory = vec![0u8; size];
+            let memory = Vec::leak(memory);
+            let memory = shared_memory::SharedMemory {
+                physical_address: memory.as_ptr() as u64,
+                length: size as u64,
+            };
+            let cap =
+                grant_kernel_capability(ProcessId::new(current_pid), Box::leak(Box::new(memory)));
+            registers.a0 = cap.as_usize();
         }
         _ => panic!("invalid syscall number {}", registers.a6),
     }

@@ -52,3 +52,5 @@ interface input_device
 interface window
     func width() u32
     func height() u32
+    func framebuffer() shared_memory
+    func draw()

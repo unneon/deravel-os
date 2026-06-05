@@ -1,7 +1,7 @@
 mod types;
 
 use crate::capability::grant_kernel_capability;
-use crate::drvli::{DisplayServer, SharedMemoryServer};
+use crate::drvli::DisplayServer;
 use crate::interrupt::InterruptHandler;
 use crate::sync::Mutex;
 use crate::util::volatile::{Readonly, Volatile, volatile_struct};
@@ -175,7 +175,7 @@ impl DisplayServer for Mutex<VirtioGpu> {
         let self_ = self.lock();
         grant_kernel_capability(
             sender,
-            Box::leak(Box::new(Framebuffer {
+            Box::leak(Box::new(crate::shared_memory::SharedMemory {
                 physical_address: self_.framebuffer.as_ptr() as u64,
                 length: (self_.width * self_.height * 4) as u64,
             })),
@@ -209,19 +209,5 @@ impl DisplayServer for Mutex<VirtioGpu> {
         };
         self_.controlq.descriptor_readonly(0, &req, Some(1));
         self_.command::<ResponseNodata>(1).unwrap();
-    }
-}
-
-struct Framebuffer {
-    physical_address: u64,
-    length: u64,
-}
-impl SharedMemoryServer for Framebuffer {
-    fn physical_address(&self, _: ProcessId) -> u64 {
-        self.physical_address
-    }
-
-    fn length(&self, _: ProcessId) -> u64 {
-        self.length
     }
 }

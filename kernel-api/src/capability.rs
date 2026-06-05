@@ -71,6 +71,17 @@ pub fn forward_capability<T, U>(cap: Capability<T>, forwardee: Capability<U>) ->
     forwarded
 }
 
+pub fn forward_capability_by_pid<T>(cap: Capability<T>, forwardee: ProcessId) -> Capability<T> {
+    let certificate = allocate_certificate();
+    certificate.store(
+        CapabilityCertificateValue::forwarded(forwardee.into(), cap.0),
+        Ordering::Relaxed,
+    );
+    let forwarded = Capability(RawCapability::from_pointer(certificate), PhantomData);
+    trace!("forwarded {cap:?} as {forwarded:?} to {forwardee:?}");
+    forwarded
+}
+
 pub fn validate_capability(cap: RawCapability, claimer: Actor) -> RawCapability {
     trace!("validating capability {cap:?} from process {claimer:?}");
     let mut capability = cap;

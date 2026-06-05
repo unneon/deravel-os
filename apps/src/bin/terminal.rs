@@ -2,14 +2,22 @@
 #![no_main]
 
 use deravel_kernel_api::*;
-use log::debug;
 
 fn main(args: Args) {
     let window = args.windowing.create_window();
-    debug!("created window");
-    let width = window.width();
-    let height = window.height();
-    debug!("window is {width}x{height}");
+    let framebuffer = window.framebuffer();
+    let (framebuffer_ptr, framebuffer_len) = unsafe { syscall::map_shared_memory(framebuffer) };
+    let framebuffer = unsafe { core::slice::from_raw_parts_mut(framebuffer_ptr, framebuffer_len) };
+
+    for [b, g, r, a] in framebuffer.as_chunks_mut().0 {
+        *b = 5;
+        *g = 22;
+        *r = 37;
+        *a = 255;
+    }
+
+    window.draw();
+
     loop {
         yield_();
     }

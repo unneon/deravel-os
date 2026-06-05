@@ -70,6 +70,8 @@ unsafe impl<T> FromRet for *const T {}
 
 unsafe impl<T> FromRet for *mut T {}
 
+unsafe impl<T: Copy> FromRet for Capability<T> {}
+
 unsafe impl FromRet for RawCapability {}
 
 unsafe impl FromRet for ProcessId {}
@@ -143,6 +145,9 @@ syscalls! {
 
     #[no = 10]
     pub fn ipc_receive_async(args: *mut u8, args_max_len: usize) -> (RawCapability, usize, usize, ProcessId);
+
+    #[no = 11]
+    pub fn allocate_shared_memory(size: usize) -> Capability<SharedMemory>;
 }
 
 unsafe fn to_arg<T: Copy>(rust: T) -> usize {
