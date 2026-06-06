@@ -23,14 +23,14 @@ impl<T: Copy> RingBuffer<T> {
         let written = self.state.written.0.load(Ordering::Relaxed);
         let read = self.state.read.0.load(Ordering::Acquire);
         assert!(written < read + self.data.len());
-        self.data[written] = value;
+        self.data[written % (PAGE_SIZE / size_of::<T>())] = value;
         self.state.written.0.store(written + 1, Ordering::Release);
     }
 
     pub fn expose(&self) -> (*mut u8, usize, *mut RingBufferState) {
         (
             self.data.as_ptr() as *mut u8,
-            self.data.len() * size_of::<T>(),
+            self.data.len(),
             self.state.as_ref() as *const _ as *mut _,
         )
     }
