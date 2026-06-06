@@ -268,9 +268,10 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
         4 => {
             let page_count = registers.a0;
             let pages = vec![[0; PAGE_SIZE]; page_count];
-            let pages_allocated = current_proc.heap_pages_allocated;
             let page_table = unsafe { &mut *(current_proc.page_table as *mut PageTable) };
-            let virtual_addr = 0x4000000 + pages_allocated * PAGE_SIZE;
+            let virtual_addr = current_proc
+                .virtual_memory
+                .allocate(page_count * PAGE_SIZE, PAGE_SIZE);
             map_pages(
                 page_table,
                 virtual_addr,
@@ -278,7 +279,6 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                 PageFlags::readwrite().user(),
                 page_count,
             );
-            current_proc.heap_pages_allocated += page_count;
             registers.a0 = virtual_addr;
         }
         5 => {
@@ -303,10 +303,7 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                     .unwrap();
             assert!(length.is_multiple_of(PAGE_SIZE));
 
-            let pages_allocated = current_proc.heap_pages_allocated;
-            let virtual_addr = 0x4000000 + pages_allocated * PAGE_SIZE;
-            current_proc.heap_pages_allocated += length / PAGE_SIZE;
-
+            let virtual_addr = current_proc.virtual_memory.allocate(length, PAGE_SIZE);
             let page_table = unsafe { &mut *(current_proc.page_table as *mut PageTable) };
             map_pages(
                 page_table,
@@ -346,9 +343,9 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                     let (data, len, state) = handler.map_stream(stream);
 
                     let page_table = unsafe { &mut *(current_proc.page_table as *mut PageTable) };
-                    let pages_allocated = current_proc.heap_pages_allocated;
-                    let virtual_addr = 0x4000000 + pages_allocated * PAGE_SIZE;
-                    current_proc.heap_pages_allocated += 2;
+                    let virtual_addr = current_proc
+                        .virtual_memory
+                        .allocate(2 * PAGE_SIZE, PAGE_SIZE);
                     map_pages(
                         page_table,
                         virtual_addr,

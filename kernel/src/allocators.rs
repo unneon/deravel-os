@@ -10,6 +10,10 @@ impl TrivialAllocator {
         TrivialAllocator { range: 0..size }
     }
 
+    pub const fn new_range(start: usize, end: usize) -> TrivialAllocator {
+        TrivialAllocator { range: start..end }
+    }
+
     pub fn allocate(&mut self, size: usize, alignment: usize) -> usize {
         let pointer = self.range.start.next_multiple_of(alignment);
         let new_start = pointer + size;

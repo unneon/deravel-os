@@ -1,3 +1,4 @@
+use crate::allocators::TrivialAllocator;
 use crate::arch::{RiscvRegisters, switch_to_userspace_full};
 use crate::capability::CAPABILITY_PAGES;
 use crate::elf::load_elf;
@@ -30,7 +31,7 @@ pub struct Process {
     pub registers: RiscvRegisters,
     pub pc: usize,
     pub page_table: *const PageTable,
-    pub heap_pages_allocated: usize,
+    pub virtual_memory: TrivialAllocator,
     pub messages: Option<Box<VecDeque<(RawCapability, usize, Vec<u8>, ProcessId)>>>,
     #[allow(clippy::box_collection)]
     pub reply: Option<Box<Vec<u8>>>,
@@ -118,6 +119,7 @@ pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: Pro
     proc.state = ProcessState::Runnable;
     proc.pc = entry_point;
     proc.page_table = Box::leak(page_table);
+    proc.virtual_memory = TrivialAllocator::new_range(0x4000000, 0x5000000);
 }
 
 fn map_kernel_memory(page_table: &mut PageTable) {
