@@ -11,6 +11,7 @@ struct Server {
     width: u32,
     framebuffer: &'static RefCell<&'static mut [u8]>,
     cap: Capability<Display>,
+    keyboard: Capability<InputDevice>,
 }
 
 struct WindowData {
@@ -23,6 +24,7 @@ struct WindowData {
     display_width: u32,
     display_framebuffer: &'static RefCell<&'static mut [u8]>,
     display_cap: Capability<Display>,
+    input_events: RefCell<UserRingBuffer<InputEvent>>,
 }
 
 impl WindowingServer for Server {
@@ -45,6 +47,7 @@ impl WindowingServer for Server {
             display_width: self.width,
             display_framebuffer: self.framebuffer,
             display_cap: self.cap,
+            input_events: RefCell::new(self.keyboard.events()),
         }));
         grant_capability2(sender, data)
     }
@@ -79,6 +82,18 @@ impl WindowServer for WindowData {
         }
         self.display_cap.draw();
     }
+
+    fn poll_event(&self, _: ProcessId) -> InputEvent {
+        if let Some(event) = self.input_events.borrow_mut().next() {
+            event
+        } else {
+            InputEvent {
+                type_: 0,
+                code: 0,
+                value: 0,
+            }
+        }
+    }
 }
 
 unsafe impl Send for Server {}
@@ -98,19 +113,11 @@ fn main(args: Args) {
         width,
         framebuffer: Box::leak(Box::new(RefCell::new(framebuffer))),
         cap: args.display,
+        keyboard: args.keyboard,
     }));
     register_root_capability(server);
 
-    let start_time = riscv::register::time::read();
-    let timebase_frequency = unsafe { syscall::riscv_timebase_frequency() } as f64;
-    let mut keyboard = args.keyboard.events();
     loop {
-        let time = (riscv::register::time::read() - start_time) as f64 / timebase_frequency;
-        while let Some(event) = keyboard.next() {
-            if event.type_ != 0 {
-                debug!("{event:?} at time {time:.02}s");
-            }
-        }
         ipc_serve();
         yield_();
     }

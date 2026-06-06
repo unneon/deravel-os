@@ -1,6 +1,7 @@
 #![allow(non_camel_case_types, unused)]
 
 use crate::capability::{Capability, RawCapability};
+use serde::{Deserialize, Serialize};
 
 pub trait ProcessArgs {
     fn for_all(&self, f: impl FnMut(RawCapability));

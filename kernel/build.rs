@@ -1,5 +1,5 @@
 use deravel_codegen::{
-    Interface, camel_case, parse_drvli, rust_arg_type, rust_borrow_or_copy, rust_ret_type,
+    Interface, Struct, camel_case, parse_drvli, rust_arg_type, rust_borrow_or_copy, rust_ret_type,
 };
 use std::fmt::Write;
 
@@ -10,8 +10,8 @@ fn main() {
     let drvli = parse_drvli(&drvli_text);
     let mut output = String::new();
     for interface in &drvli.interfaces {
-        generate_server_trait(interface, &mut output);
-        generate_handler_impl(interface, &mut output);
+        generate_server_trait(interface, &drvli.structs, &mut output);
+        generate_handler_impl(interface, &drvli.structs, &mut output);
     }
     std::fs::write(
         format!("{}/drvli.rs", std::env::var("OUT_DIR").unwrap()),
@@ -23,7 +23,7 @@ fn main() {
     println!("cargo::rustc-link-arg=-Tkernel/kernel.ld");
 }
 
-fn generate_server_trait(interface: &Interface, out: &mut String) {
+fn generate_server_trait(interface: &Interface, structs: &[Struct], out: &mut String) {
     let name_snake = &interface.name;
     let name_camel = camel_case(name_snake);
     writeln!(out, "#[allow(dead_code)]").unwrap();
@@ -37,7 +37,7 @@ fn generate_server_trait(interface: &Interface, out: &mut String) {
         }
         write!(out, ")").unwrap();
         if let Some(return_type) = &method.return_type {
-            let return_type = rust_ret_type(return_type);
+            let return_type = rust_ret_type(return_type, structs);
             write!(out, " -> {return_type}").unwrap();
         }
         writeln!(out, ";").unwrap();
@@ -53,7 +53,7 @@ fn generate_server_trait(interface: &Interface, out: &mut String) {
     writeln!(out, "}}").unwrap();
 }
 
-fn generate_handler_impl(interface: &Interface, out: &mut String) {
+fn generate_handler_impl(interface: &Interface, structs: &[Struct], out: &mut String) {
     let name_snake = &interface.name;
     let name_camel = camel_case(name_snake);
     writeln!(
@@ -76,7 +76,7 @@ fn generate_handler_impl(interface: &Interface, out: &mut String) {
         }
         write!(out, "): (").unwrap();
         for (_, arg_type) in &method.args {
-            let arg_type = rust_ret_type(arg_type);
+            let arg_type = rust_ret_type(arg_type, structs);
             write!(out, "{arg_type},").unwrap();
         }
         writeln!(out, ") = serde_json::from_slice(_args).unwrap();").unwrap();

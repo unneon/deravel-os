@@ -11,7 +11,11 @@ fn main() {
     let mut output = String::new();
     for struct_ in &drvli.structs {
         let name_camel = camel_case(&struct_.name);
-        writeln!(&mut output, "#[derive(Clone, Copy, Debug)]").unwrap();
+        writeln!(
+            &mut output,
+            "#[derive(Clone, Copy, Debug, Deserialize, Serialize)]"
+        )
+        .unwrap();
         writeln!(&mut output, "#[repr(C)]").unwrap();
         writeln!(&mut output, "pub struct {name_camel} {{").unwrap();
         for (member_name, member_type) in &struct_.members {

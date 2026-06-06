@@ -57,13 +57,16 @@ pub fn rust_member_type(type_: &str) -> Cow<'static, str> {
     }
 }
 
-pub fn rust_ret_type(type_: &str) -> Cow<'static, str> {
+pub fn rust_ret_type(type_: &str, structs: &[Struct<'_>]) -> Cow<'static, str> {
     match type_ {
         "u8" => "u8".into(),
         "u32" => "u32".into(),
         "u64" => "u64".into(),
         "text" => "String".into(),
         "bytes" => "Vec<u8>".into(),
+        _ if let Some(struct_) = structs.iter().find(|struct_| struct_.name == type_) => {
+            camel_case(struct_.name).into()
+        }
         _ => format!("Capability<{}>", camel_case(type_)).into(),
     }
 }

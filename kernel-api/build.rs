@@ -1,5 +1,5 @@
 use deravel_codegen::{
-    Interface, camel_case, parse_drvli, rust_arg_type, rust_borrow_or_copy, rust_ret_type,
+    Interface, Struct, camel_case, parse_drvli, rust_arg_type, rust_borrow_or_copy, rust_ret_type,
     rust_stream_type,
 };
 use std::fmt::Write;
@@ -23,7 +23,7 @@ fn main() {
             }
             write!(&mut output, ")").unwrap();
             if let Some(return_type) = &method.return_type {
-                let return_type = rust_ret_type(return_type);
+                let return_type = rust_ret_type(return_type, &drvli.structs);
                 write!(&mut output, " -> {return_type}").unwrap();
             }
             writeln!(&mut output, ";").unwrap();
@@ -48,7 +48,7 @@ fn main() {
             }
             write!(&mut output, ")").unwrap();
             if let Some(return_type) = &method.return_type {
-                let return_type = rust_ret_type(return_type);
+                let return_type = rust_ret_type(return_type, &drvli.structs);
                 write!(&mut output, " -> {return_type}").unwrap();
             }
             writeln!(&mut output, ";").unwrap();
@@ -68,7 +68,7 @@ fn main() {
             }
             write!(&mut output, ")").unwrap();
             if let Some(return_type) = &method.return_type {
-                let return_type = rust_ret_type(return_type);
+                let return_type = rust_ret_type(return_type, &drvli.structs);
                 write!(&mut output, " -> {return_type}").unwrap();
             }
             writeln!(&mut output, " {{").unwrap();
@@ -123,7 +123,7 @@ fn main() {
             }
             writeln!(&mut output, "                ): (").unwrap();
             for (_, arg_type) in &method.args {
-                let arg_type = rust_ret_type(arg_type);
+                let arg_type = rust_ret_type(arg_type, &drvli.structs);
                 writeln!(&mut output, "                    {arg_type},").unwrap();
             }
             writeln!(
@@ -158,7 +158,7 @@ fn main() {
         writeln!(&mut output, "        ").unwrap();
         writeln!(&mut output, "    }}").unwrap();
         writeln!(&mut output, "}}").unwrap();
-        generate_handler_impl(interface, &mut output);
+        generate_handler_impl(interface, &drvli.structs, &mut output);
     }
     std::fs::write(
         format!("{}/drvli.rs", std::env::var("OUT_DIR").unwrap()),
@@ -168,7 +168,7 @@ fn main() {
     println!("cargo::rerun-if-changed=../interfaces.drvli");
 }
 
-fn generate_handler_impl(interface: &Interface, out: &mut String) {
+fn generate_handler_impl(interface: &Interface, structs: &[Struct], out: &mut String) {
     let name_snake = &interface.name;
     let name_camel = camel_case(name_snake);
     writeln!(
@@ -191,7 +191,7 @@ fn generate_handler_impl(interface: &Interface, out: &mut String) {
         }
         write!(out, "): (").unwrap();
         for (_, arg_type) in &method.args {
-            let arg_type = rust_ret_type(arg_type);
+            let arg_type = rust_ret_type(arg_type, structs);
             write!(out, "{arg_type},").unwrap();
         }
         writeln!(out, ") = serde_json::from_slice(_args).unwrap();").unwrap();

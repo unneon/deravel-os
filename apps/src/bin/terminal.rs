@@ -1,9 +1,11 @@
 #![no_std]
 #![no_main]
+extern crate alloc;
 
 include!(concat!(env!("OUT_DIR"), "/font.rs"));
 
 use deravel_kernel_api::*;
+use log::debug;
 use rand::{RngExt, SeedableRng};
 
 struct Renderer<'a> {
@@ -97,6 +99,10 @@ fn main(args: Args) {
         if time - last_time > 0.1 {
             renderer.render_char(rng.random_range(b'a'..=b'z'));
             last_time += 0.1;
+            let ev = window.poll_event();
+            if ev.type_ != 0 {
+                debug!("poll event: {ev:?}");
+            }
         }
 
         yield_();
