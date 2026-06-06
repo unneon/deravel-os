@@ -84,7 +84,7 @@ impl WindowServer for WindowData {
     }
 
     fn poll_event(&mut self, _: ProcessId) -> InputEvent {
-        if let Some(event) = self.input_events.next() {
+        if let Some(event) = self.input_events.poll() {
             event
         } else {
             InputEvent {

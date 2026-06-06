@@ -32,7 +32,7 @@ fn generate_server_trait(interface: &Interface, structs: &[Struct], out: &mut St
         let method_name = &method.name;
         write!(out, "    fn {method_name}(&self, sender: ProcessId").unwrap();
         for (arg_name, arg_type) in &method.args {
-            let arg_type = rust_arg_type(arg_type);
+            let arg_type = rust_arg_type(arg_type, structs);
             write!(out, ", {arg_name}: {arg_type}").unwrap();
         }
         write!(out, ")").unwrap();

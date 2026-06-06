@@ -9,7 +9,7 @@ pub struct UserRingBuffer<T> {
 }
 
 impl<T: Copy> UserRingBuffer<T> {
-    pub fn next(&mut self) -> Option<T> {
+    pub fn poll(&mut self) -> Option<T> {
         let state = unsafe { &*self.state };
         let read = state.read.0.load(Ordering::Relaxed);
         let written = state.written.0.load(Ordering::Acquire);

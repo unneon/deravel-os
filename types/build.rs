@@ -10,7 +10,7 @@ fn main() {
     let drvli = parse_drvli(&drvli_text);
     let mut output = String::new();
     for struct_ in &drvli.structs {
-        let name_camel = camel_case(&struct_.name);
+        let name_camel = camel_case(struct_.name);
         writeln!(
             &mut output,
             "#[derive(Clone, Copy, Debug, Deserialize, Serialize)]"
@@ -20,7 +20,7 @@ fn main() {
         writeln!(&mut output, "pub struct {name_camel} {{").unwrap();
         for (member_name, member_type) in &struct_.members {
             let member_name = rust_escape_name(member_name);
-            let member_type = rust_member_type(&member_type);
+            let member_type = rust_member_type(member_type, &drvli.structs);
             writeln!(&mut output, "    pub {member_name}: {member_type},").unwrap();
         }
         writeln!(&mut output, "}}").unwrap();

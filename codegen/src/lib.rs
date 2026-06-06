@@ -38,42 +38,69 @@ pub enum InterfaceDetails<'a> {
     Interface,
 }
 
-pub fn rust_arg_type(type_: &str) -> Cow<'static, str> {
+pub fn rust_arg_type(type_: &str, structs: &[Struct]) -> Cow<'static, str> {
     match type_ {
+        "i8" => "i8".into(),
+        "i16" => "i16".into(),
+        "i32" => "i32".into(),
+        "i64" => "i64".into(),
         "u8" => "u8".into(),
+        "u16" => "u16".into(),
         "u32" => "u32".into(),
         "u64" => "u64".into(),
         "text" => "&str".into(),
         "bytes" => "&[u8]".into(),
+        _ if structs.iter().any(|struct_| struct_.name == type_) => camel_case(type_).into(),
         _ => format!("Capability<{}>", camel_case(type_)).into(),
     }
 }
 
-pub fn rust_member_type(type_: &str) -> Cow<'static, str> {
+pub fn rust_member_type(type_: &str, structs: &[Struct]) -> Cow<'static, str> {
     match type_ {
+        "i8" => "i8".into(),
+        "i16" => "i16".into(),
+        "i32" => "i32".into(),
+        "i64" => "i64".into(),
+        "u8" => "u8".into(),
         "u16" => "u16".into(),
         "u32" => "u32".into(),
-        _ => unimplemented!(),
+        "u64" => "u64".into(),
+        _ if structs.iter().any(|struct_| struct_.name == type_) => camel_case(type_).into(),
+        _ => format!("Capability<{}>", camel_case(type_)).into(),
     }
 }
 
 pub fn rust_ret_type(type_: &str, structs: &[Struct<'_>]) -> Cow<'static, str> {
     match type_ {
+        "i8" => "i8".into(),
+        "i16" => "i16".into(),
+        "i32" => "i32".into(),
+        "i64" => "i64".into(),
         "u8" => "u8".into(),
+        "u16" => "u16".into(),
         "u32" => "u32".into(),
         "u64" => "u64".into(),
         "text" => "String".into(),
         "bytes" => "Vec<u8>".into(),
-        _ if let Some(struct_) = structs.iter().find(|struct_| struct_.name == type_) => {
-            camel_case(struct_.name).into()
-        }
+        _ if structs.iter().any(|struct_| struct_.name == type_) => camel_case(type_).into(),
         _ => format!("Capability<{}>", camel_case(type_)).into(),
     }
 }
 
-pub fn rust_stream_type(type_: &str) -> Cow<'static, str> {
+pub fn rust_stream_type(type_: &str, structs: &[Struct]) -> Cow<'static, str> {
     match type_ {
-        _ => camel_case(type_).into(),
+        "i8" => "i8".into(),
+        "i16" => "i16".into(),
+        "i32" => "i32".into(),
+        "i64" => "i64".into(),
+        "u8" => "u8".into(),
+        "u16" => "u16".into(),
+        "u32" => "u32".into(),
+        "u64" => "u64".into(),
+        "text" => unimplemented!(),
+        "bytes" => unimplemented!(),
+        _ if structs.iter().any(|struct_| struct_.name == type_) => camel_case(type_).into(),
+        _ => format!("Capability<{}>", camel_case(type_)).into(),
     }
 }
 

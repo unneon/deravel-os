@@ -18,7 +18,7 @@ fn main() {
             let method_name = &method.name;
             write!(&mut output, "    fn {method_name}(self").unwrap();
             for (arg_name, arg_type) in &method.args {
-                let arg_type = rust_arg_type(arg_type);
+                let arg_type = rust_arg_type(arg_type, &drvli.structs);
                 write!(&mut output, ", {arg_name}: {arg_type}").unwrap();
             }
             write!(&mut output, ")").unwrap();
@@ -30,7 +30,7 @@ fn main() {
         }
         for stream in &interface.streams {
             let stream_name = &stream.name;
-            let stream_type = rust_stream_type(&stream.type_);
+            let stream_type = rust_stream_type(stream.type_, &drvli.structs);
             writeln!(
                 &mut output,
                 "    fn {stream_name}(self) -> UserRingBuffer<{stream_type}>;"
@@ -47,7 +47,7 @@ fn main() {
             )
             .unwrap();
             for (arg_name, arg_type) in &method.args {
-                let arg_type = rust_arg_type(arg_type);
+                let arg_type = rust_arg_type(arg_type, &drvli.structs);
                 write!(&mut output, ", {arg_name}: {arg_type}").unwrap();
             }
             write!(&mut output, ")").unwrap();
@@ -67,7 +67,7 @@ fn main() {
             let name = &method.name;
             write!(&mut output, "    fn {name}(self").unwrap();
             for (arg_name, arg_type) in &method.args {
-                let arg_type = rust_arg_type(arg_type);
+                let arg_type = rust_arg_type(arg_type, &drvli.structs);
                 write!(&mut output, ", {arg_name}: {arg_type}").unwrap();
             }
             write!(&mut output, ")").unwrap();
@@ -92,7 +92,7 @@ fn main() {
         }
         for (stream_id, stream) in interface.streams.iter().enumerate() {
             let name = &stream.name;
-            let type_ = camel_case(&stream.type_);
+            let type_ = camel_case(stream.type_);
             writeln!(
                 &mut output,
                 "    fn {name}(self) -> UserRingBuffer<{type_}> {{"
