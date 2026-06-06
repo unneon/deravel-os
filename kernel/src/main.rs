@@ -260,26 +260,6 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                 }
             }
         }
-        2 => {
-            assert!(current_proc.currently_serving.is_none());
-            if let Some((cap, method, args, sender)) =
-                current_proc.messages.as_mut().and_then(|q| q.pop_front())
-            {
-                copy_to_user(&args, registers.a0 as *mut u8, registers.a1);
-                registers.a0 = cap.as_usize();
-                registers.a1 = method;
-                registers.a2 = args.len();
-                registers.a3 = sender.as_usize();
-                current_proc.currently_serving = Some(sender);
-            } else {
-                current_proc.state = ProcessState::WaitingForMessage;
-                current_proc.registers = registers.clone();
-                current_proc.pc = user_pc;
-
-                drop(current_proc);
-                schedule_and_switch_to_userspace(hart);
-            }
-        }
         3 => {
             let result = copy_from_user(registers.a0 as *const u8, registers.a1);
             let caller = current_proc.currently_serving.take().unwrap();

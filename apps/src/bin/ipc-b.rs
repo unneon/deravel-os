@@ -1,6 +1,8 @@
 #![no_std]
 #![no_main]
+extern crate alloc;
 
+use alloc::boxed::Box;
 use deravel_kernel_api::*;
 
 struct Server {
@@ -14,8 +16,12 @@ impl IpcBServer for Server {
     }
 }
 
-fn main(args: Args) {
-    ipc_serve_ipc_b(Server { c: args.c });
+fn main(Args { c }: Args) {
+    register_root_capability(Box::leak(Box::new(Server { c })));
+    loop {
+        ipc_serve();
+        yield_();
+    }
 }
 
 app! { main IpcB }

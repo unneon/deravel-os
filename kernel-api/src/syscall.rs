@@ -119,9 +119,6 @@ syscalls! {
     #[no = 1]
     pub fn ipc_call(cap: RawCapability, method: usize, args: *const u8, args_len: usize, result: *mut u8, result_max_len: usize) -> usize;
 
-    #[no = 2]
-    pub fn ipc_receive(args: *mut u8, args_max_len: usize) -> (RawCapability, usize, usize, ProcessId);
-
     #[no = 3]
     pub fn ipc_reply(result: *const u8, result_len: usize);
 
