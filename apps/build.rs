@@ -10,7 +10,13 @@ fn main() {
     let mut out = String::new();
     writeln!(
         out,
-        r#"struct Character {{
+        r#"struct Font {{
+    width: usize,
+    height: usize,
+    characters: [Character; 94],
+}}
+
+struct Character {{
     ascii: u8,
     xmin: i32,
     ymin: i32,
@@ -19,16 +25,24 @@ fn main() {
     bitmap: &'static [u8],
 }}
 
-static FONT: [Character; 94] = ["#
+static FONT: Font = Font {{
+    width: 11,
+    height: 17,
+    characters: ["#
     )
     .unwrap();
     for c in u8::MIN..=u8::MAX {
         if c.is_ascii_graphic() {
             let (metrics, bitmap) = font.rasterize(c as char, 17.0);
-            writeln!(out, "Character {{ ascii: {c}, xmin: {}, ymin: {}, width: {}, height: {}, bitmap: &{bitmap:?} }},", metrics.xmin, metrics.ymin, metrics.width, metrics.height).unwrap();
+            writeln!(out, "        Character {{ ascii: {c}, xmin: {}, ymin: {}, width: {}, height: {}, bitmap: &{bitmap:?} }},", metrics.xmin, metrics.ymin, metrics.width, metrics.height).unwrap();
         }
     }
-    writeln!(out, "];").unwrap();
+    writeln!(
+        out,
+        r#"    ],
+}};"#
+    )
+    .unwrap();
     std::fs::write(
         format!("{}/font.rs", std::env::var("OUT_DIR").unwrap()),
         out,

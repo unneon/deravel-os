@@ -23,18 +23,23 @@ struct Renderer<'a> {
 impl Renderer<'_> {
     fn render_char(&self, c: u8) {
         if c == b' ' {
-            *self.cursor_x.borrow_mut() += 10;
+            *self.cursor_x.borrow_mut() += FONT.width as i32;
             return;
         } else if c == b'\n' {
             *self.cursor_x.borrow_mut() = 0;
-            *self.cursor_y.borrow_mut() += 17;
+            *self.cursor_y.borrow_mut() += FONT.height as i32;
             return;
-        } else if let Some(glyph) = FONT.iter().find(|glyph| glyph.ascii == c) {
+        } else if let Some(glyph) = FONT
+            .characters
+            .iter()
+            .find(|character| character.ascii == c)
+        {
             for bitmap_y in 0..glyph.height as i32 {
                 for bitmap_x in 0..glyph.width as i32 {
                     let fb_x = *self.cursor_x.borrow() + bitmap_x + glyph.xmin;
-                    let fb_y =
-                        *self.cursor_y.borrow() + 17 - glyph.height as i32 + bitmap_y - glyph.ymin;
+                    let fb_y = *self.cursor_y.borrow() + FONT.height as i32 - glyph.height as i32
+                        + bitmap_y
+                        - glyph.ymin;
                     if fb_x >= 0
                         && fb_x < self.window_width
                         && fb_y >= 0
@@ -51,14 +56,14 @@ impl Renderer<'_> {
                     }
                 }
             }
-            *self.cursor_x.borrow_mut() += glyph.width as i32;
+            *self.cursor_x.borrow_mut() += FONT.width as i32;
         }
 
-        if *self.cursor_x.borrow() + 10 > self.window_width {
+        if *self.cursor_x.borrow() + FONT.width as i32 > self.window_width {
             *self.cursor_x.borrow_mut() = 0;
-            *self.cursor_y.borrow_mut() += 17;
+            *self.cursor_y.borrow_mut() += FONT.height as i32;
         }
-        if *self.cursor_y.borrow() + 17 > self.window_height {
+        if *self.cursor_y.borrow() + FONT.height as i32 > self.window_height {
             *self.cursor_x.borrow_mut() = 0;
             *self.cursor_y.borrow_mut() = 0;
             self.clear_screen();
