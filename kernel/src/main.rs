@@ -16,6 +16,7 @@ extern crate alloc;
 mod allocators;
 mod arch;
 mod capability;
+mod device_tree;
 mod drvli;
 mod elf;
 mod heap;
@@ -35,9 +36,10 @@ mod virtio;
 
 use crate::arch::{RiscvRegisters, initialize_trap_handler, switch_to_userspace_registers_only};
 use crate::capability::{CAPABILITY_PAGES, grant_kernel_capability, reserve_kernel_capability};
+use crate::device_tree::find_timebase_frequency;
 use crate::elf::elf;
 use crate::interrupt::INTERRUPTS;
-use crate::log::{find_timebase_frequency, initialize_log, log_userspace};
+use crate::log::{initialize_log, log_userspace};
 use crate::page::{PageFlags, PageTable, map_pages};
 use crate::pci::initialize_all_pci;
 use crate::plic::{initialize_plic, plic_claim, plic_complete};
@@ -56,12 +58,11 @@ use deravel_types::*;
 use fdt::Fdt;
 use riscv::interrupt::Trap;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
-use riscv::register::satp::{Mode, Satp};
+use riscv::register::satp::Mode;
 
 #[repr(align(16))]
 struct HartContext {
     current_pid: Option<ProcessId>,
-    fdt: Fdt<'static>,
 }
 
 #[repr(C, align(4096))]
@@ -72,16 +73,19 @@ struct HartStack {
 
 const STACK_SIZE: usize = 128 * 4096;
 
+static mut TIMEBASE_FREQUENCY: f64 = f64::NAN;
+
 fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     clear_bss();
 
     let device_tree = unsafe { Fdt::from_ptr(device_tree) }.unwrap();
-    initialize_log(&device_tree);
+    unsafe { TIMEBASE_FREQUENCY = find_timebase_frequency(&device_tree).unwrap() as f64 }
+    initialize_log();
     initialize_trap_handler();
     log_sbi_metadata();
     let (_virtio_blk, virtio_gpu, virtio_input) = initialize_all_pci(&device_tree);
     initialize_plic(&device_tree);
-    initialize_hart_stack(device_tree);
+    initialize_hart_stack();
     enable_interrupts();
 
     // let fs_tar = reserve_process::<TarFs>(elf!("CARGO_BIN_FILE_DERAVEL_FILESYSTEM_TAR"));
@@ -130,13 +134,10 @@ fn clear_bss() {
     bss.fill(0);
 }
 
-fn initialize_hart_stack(fdt: Fdt<'static>) {
+fn initialize_hart_stack() {
     let stack = Box::leak(Box::new(HartStack {
         data: [0; _],
-        ctx: HartContext {
-            current_pid: None,
-            fdt,
-        },
+        ctx: HartContext { current_pid: None },
     }));
     unsafe { riscv::register::sscratch::write((&raw mut stack.ctx) as usize) }
 }
@@ -394,12 +395,6 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
 
             drop(current_proc);
             schedule_and_switch_to_userspace(hart);
-        }
-        9 => {
-            let satp = riscv::register::satp::read();
-            unsafe { riscv::register::satp::write(Satp::from_bits(0)) }
-            registers.a0 = find_timebase_frequency(&hart.fdt).unwrap();
-            unsafe { riscv::register::satp::write(satp) }
         }
         10 => {
             assert!(current_proc.currently_serving.is_none());

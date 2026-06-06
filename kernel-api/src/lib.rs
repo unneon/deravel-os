@@ -146,6 +146,15 @@ pub fn set_stdio(cap: Capability<Console>) {
     STDIO.store(cap.as_usize(), Ordering::SeqCst);
 }
 
+pub fn system_time() -> f64 {
+    riscv::register::time::read() as f64
+        / unsafe {
+            (INPUTS_ADDRESS as *const ProcessInputs<Hello>)
+                .read()
+                .riscv_timebase_frequency
+        }
+}
+
 pub fn yield_() {
     unsafe { syscall::yield_() }
 }

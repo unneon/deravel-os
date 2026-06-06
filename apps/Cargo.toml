@@ -6,7 +6,6 @@ edition = "2024"
 [dependencies]
 deravel-kernel-api = { path = "../kernel-api" }
 log = "0.4"
-riscv = "0.16"
 
 [build-dependencies]
 fontdue = "0.9"

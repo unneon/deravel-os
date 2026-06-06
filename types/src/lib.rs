@@ -19,6 +19,7 @@ pub struct ProcessId(usize);
 #[repr(C)]
 pub struct ProcessInputs<T: ProcessTag> {
     pub id: ProcessId,
+    pub riscv_timebase_frequency: f64,
     pub args: T::Args,
 }
 

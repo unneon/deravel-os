@@ -5,7 +5,7 @@ use crate::heap::log_heap_statistics;
 use crate::page::{PageFlags, PageTable, map_pages};
 use crate::sbi::{ResetReason, ResetType};
 use crate::sync::Mutex;
-use crate::{HartContext, sbi};
+use crate::{HartContext, TIMEBASE_FREQUENCY, sbi};
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
@@ -69,7 +69,15 @@ impl Process {
 
 impl<T: ProcessTag> ProcessReservation<T> {
     pub fn spawn(self, args: T::Args) {
-        create_process::<T>(T::NAME, self.elf, ProcessInputs { id: self.id, args })
+        create_process::<T>(
+            T::NAME,
+            self.elf,
+            ProcessInputs {
+                id: self.id,
+                riscv_timebase_frequency: unsafe { TIMEBASE_FREQUENCY },
+                args,
+            },
+        )
     }
 }
 

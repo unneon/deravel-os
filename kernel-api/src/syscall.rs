@@ -140,9 +140,6 @@ syscalls! {
     #[no = 8]
     pub fn yield_();
 
-    #[no = 9]
-    pub fn riscv_timebase_frequency() -> usize;
-
     #[no = 10]
     pub fn ipc_receive_async(args: *mut u8, args_max_len: usize) -> (RawCapability, usize, usize, ProcessId);
 

@@ -1,11 +1,9 @@
-use crate::sbi;
+use crate::{TIMEBASE_FREQUENCY, sbi};
 use alloc::boxed::Box;
-use fdt::Fdt;
-use log::{Level, LevelFilter, Metadata, Record, info};
+use log::{Level, LevelFilter, Metadata, Record};
 
 struct Logger {
     start_time: u64,
-    timebase_frequency: usize,
 }
 
 struct PrettyLogLevel(Level);
@@ -25,7 +23,7 @@ impl log::Log for Logger {
                 _ => "",
             };
             let time = (riscv::register::time::read64() - self.start_time) as f64
-                / self.timebase_frequency as f64;
+                / unsafe { TIMEBASE_FREQUENCY };
             let level = PrettyLogLevel(record.level());
             let message = record.args();
             if record.module_path().is_some() {
@@ -77,15 +75,12 @@ impl core::fmt::Display for PrettyModulePath<'_> {
     }
 }
 
-pub fn initialize_log(device_tree: &Fdt) {
-    let timebase_frequency = find_timebase_frequency(device_tree).unwrap();
+pub fn initialize_log() {
     let logger = Logger {
         start_time: riscv::register::time::read64(),
-        timebase_frequency,
     };
     log::set_logger(Box::leak(Box::new(logger))).unwrap();
     log::set_max_level(LevelFilter::Debug);
-    info!("timebase frequency is {timebase_frequency}");
 }
 
 pub fn log_userspace(level: Level, process_name: &str, message: &str) {
@@ -96,11 +91,4 @@ pub fn log_userspace(level: Level, process_name: &str, message: &str) {
         .target(process_name)
         .build();
     log::logger().log(&record);
-}
-
-pub fn find_timebase_frequency(device_tree: &Fdt) -> Option<usize> {
-    device_tree
-        .find_node("/cpus")?
-        .property("timebase-frequency")?
-        .as_usize()
 }

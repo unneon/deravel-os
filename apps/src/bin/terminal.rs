@@ -17,9 +17,7 @@ struct Renderer<'a> {
     window_height: i32,
     framebuffer: RefCell<&'a mut [u8]>,
     window: Capability<Window>,
-    start_time: usize,
     last_polled_event: RefCell<f64>,
-    timebase_frequency: f64,
 }
 
 impl Renderer<'_> {
@@ -84,8 +82,7 @@ impl ConsoleServer for Renderer<'_> {
             let event = self.window.poll_event();
             if event.type_ == 0 {
                 loop {
-                    let time = (riscv::register::time::read() - self.start_time) as f64
-                        / self.timebase_frequency;
+                    let time = system_time();
                     if time > *self.last_polled_event.borrow() + 0.1 {
                         *self.last_polled_event.borrow_mut() = time;
                         break;
@@ -159,9 +156,7 @@ fn main(args: Args) {
         window_height: window.height() as i32,
         framebuffer: RefCell::new(framebuffer),
         window,
-        start_time: riscv::register::time::read(),
         last_polled_event: RefCell::new(f64::NEG_INFINITY),
-        timebase_frequency: unsafe { syscall::riscv_timebase_frequency() } as f64,
     };
 
     renderer.clear_screen();
