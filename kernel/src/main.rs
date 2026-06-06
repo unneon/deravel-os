@@ -89,7 +89,7 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     // let ipc_b = reserve_process::<IpcB>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-b"));
     // let ipc_c = reserve_process::<IpcC>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-c"));
     // let hello = reserve_process::<Hello>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_hello"));
-    // let shell = reserve_process::<Shell>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_shell"));
+    let shell = reserve_process::<Shell>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_shell"));
     let terminal = reserve_process::<Terminal>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_terminal"));
     let windowing = reserve_process::<Windowing>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_windowing"));
 
@@ -105,9 +105,9 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     // hello.spawn(HelloArgs {
     //     console: reserve_kernel_capability(&SbiConsole),
     // });
-    // shell.spawn(ShellArgs {
-    //     console: reserve_kernel_capability(&SbiConsole),
-    // });
+    shell.spawn(ShellArgs {
+        console: terminal.export,
+    });
     terminal.spawn(TerminalArgs {
         windowing: windowing.export,
     });

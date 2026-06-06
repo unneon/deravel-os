@@ -1,8 +1,10 @@
+#![feature(decl_macro)]
 #![no_std]
 
 mod align;
 mod capability;
 mod drvli;
+pub mod input;
 mod ring_buffer;
 
 pub use align::CacheLineAligned;

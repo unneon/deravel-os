@@ -15,7 +15,7 @@ app tar_fs(drive drive) implements filesystem
 app windowing(display display, keyboard input_device)
     func create_window() window
 
-app terminal(windowing windowing)
+app terminal(windowing windowing) implements console
 
 interface filesystem
     func read(path text) bytes
