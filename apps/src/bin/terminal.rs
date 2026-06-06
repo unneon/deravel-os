@@ -5,29 +5,28 @@ extern crate alloc;
 include!(concat!(env!("OUT_DIR"), "/font.rs"));
 
 use alloc::boxed::Box;
-use core::cell::RefCell;
 use deravel_kernel_api::input::*;
 use deravel_kernel_api::*;
 use log::warn;
 
 struct Renderer<'a> {
-    cursor_x: RefCell<i32>,
-    cursor_y: RefCell<i32>,
+    cursor_x: i32,
+    cursor_y: i32,
     window_width: i32,
     window_height: i32,
-    framebuffer: RefCell<&'a mut [u8]>,
+    framebuffer: &'a mut [u8],
     window: Capability<Window>,
-    last_polled_event: RefCell<f64>,
+    last_polled_event: f64,
 }
 
 impl Renderer<'_> {
-    fn render_char(&self, c: u8) {
+    fn render_char(&mut self, c: u8) {
         if c == b' ' {
-            *self.cursor_x.borrow_mut() += FONT.width as i32;
+            self.cursor_x += FONT.width as i32;
             return;
         } else if c == b'\n' {
-            *self.cursor_x.borrow_mut() = 0;
-            *self.cursor_y.borrow_mut() += FONT.height as i32;
+            self.cursor_x = 0;
+            self.cursor_y += FONT.height as i32;
             return;
         } else if let Some(glyph) = FONT
             .characters
@@ -36,17 +35,15 @@ impl Renderer<'_> {
         {
             for bitmap_y in 0..glyph.height as i32 {
                 for bitmap_x in 0..glyph.width as i32 {
-                    let fb_x = *self.cursor_x.borrow() + bitmap_x + glyph.xmin;
-                    let fb_y = *self.cursor_y.borrow() + FONT.height as i32 - glyph.height as i32
-                        + bitmap_y
+                    let fb_x = self.cursor_x + bitmap_x + glyph.xmin;
+                    let fb_y = self.cursor_y + FONT.height as i32 - glyph.height as i32 + bitmap_y
                         - glyph.ymin;
                     if fb_x >= 0
                         && fb_x < self.window_width
                         && fb_y >= 0
                         && fb_y < self.window_height
                     {
-                        let mut framebuffer = self.framebuffer.borrow_mut();
-                        let [b, g, r, _] = &mut framebuffer.as_chunks_mut().0
+                        let [b, g, r, _] = &mut self.framebuffer.as_chunks_mut().0
                             [fb_y as usize * self.window_width as usize + fb_x as usize];
                         let color =
                             glyph.bitmap[bitmap_y as usize * glyph.width + bitmap_x as usize];
@@ -56,23 +53,23 @@ impl Renderer<'_> {
                     }
                 }
             }
-            *self.cursor_x.borrow_mut() += FONT.width as i32;
+            self.cursor_x += FONT.width as i32;
         }
 
-        if *self.cursor_x.borrow() + FONT.width as i32 > self.window_width {
-            *self.cursor_x.borrow_mut() = 0;
-            *self.cursor_y.borrow_mut() += FONT.height as i32;
+        if self.cursor_x + FONT.width as i32 > self.window_width {
+            self.cursor_x = 0;
+            self.cursor_y += FONT.height as i32;
         }
-        if *self.cursor_y.borrow() + FONT.height as i32 > self.window_height {
-            *self.cursor_x.borrow_mut() = 0;
-            *self.cursor_y.borrow_mut() = 0;
+        if self.cursor_y + FONT.height as i32 > self.window_height {
+            self.cursor_x = 0;
+            self.cursor_y = 0;
             self.clear_screen();
         }
         self.window.draw();
     }
 
-    fn clear_screen(&self) {
-        for [b, g, r, a] in self.framebuffer.borrow_mut().as_chunks_mut().0 {
+    fn clear_screen(&mut self) {
+        for [b, g, r, a] in self.framebuffer.as_chunks_mut().0 {
             *b = 0;
             *g = 0;
             *r = 0;
@@ -82,14 +79,14 @@ impl Renderer<'_> {
 }
 
 impl ConsoleServer for Renderer<'_> {
-    fn getchar(&self, _: ProcessId) -> u8 {
+    fn getchar(&mut self, _: ProcessId) -> u8 {
         loop {
             let event = self.window.poll_event();
             if event.type_ == 0 {
                 loop {
                     let time = system_time();
-                    if time > *self.last_polled_event.borrow() + 0.1 {
-                        *self.last_polled_event.borrow_mut() = time;
+                    if time > self.last_polled_event + 0.1 {
+                        self.last_polled_event = time;
                         break;
                     }
                     yield_();
@@ -141,7 +138,7 @@ impl ConsoleServer for Renderer<'_> {
         }
     }
 
-    fn putchar(&self, _: ProcessId, c: u8) {
+    fn putchar(&mut self, _: ProcessId, c: u8) {
         self.render_char(c);
     }
 }
@@ -154,14 +151,14 @@ fn main(args: Args) {
     let framebuffer = window.framebuffer();
     let (framebuffer_ptr, framebuffer_len) = unsafe { syscall::map_shared_memory(framebuffer) };
     let framebuffer = unsafe { core::slice::from_raw_parts_mut(framebuffer_ptr, framebuffer_len) };
-    let renderer = Renderer {
-        cursor_x: RefCell::new(0),
-        cursor_y: RefCell::new(0),
+    let mut renderer = Renderer {
+        cursor_x: 0,
+        cursor_y: 0,
         window_width: window.width() as i32,
         window_height: window.height() as i32,
-        framebuffer: RefCell::new(framebuffer),
+        framebuffer,
         window,
-        last_polled_event: RefCell::new(f64::NEG_INFINITY),
+        last_polled_event: f64::NEG_INFINITY,
     };
 
     renderer.clear_screen();

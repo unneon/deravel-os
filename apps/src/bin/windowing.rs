@@ -24,11 +24,11 @@ struct WindowData {
     display_width: u32,
     display_framebuffer: &'static RefCell<&'static mut [u8]>,
     display_cap: Capability<Display>,
-    input_events: RefCell<UserRingBuffer<InputEvent>>,
+    input_events: UserRingBuffer<InputEvent>,
 }
 
 impl WindowingServer for Server {
-    fn create_window(&self, sender: ProcessId) -> Capability<Window> {
+    fn create_window(&mut self, sender: ProcessId) -> Capability<Window> {
         let width = 400;
         let height = 300;
         let window_framebuffer_cap =
@@ -47,26 +47,26 @@ impl WindowingServer for Server {
             display_width: self.width,
             display_framebuffer: self.framebuffer,
             display_cap: self.cap,
-            input_events: RefCell::new(self.keyboard.events()),
+            input_events: self.keyboard.events(),
         }));
         grant_capability2(sender, data)
     }
 }
 
 impl WindowServer for WindowData {
-    fn width(&self, _: ProcessId) -> u32 {
+    fn width(&mut self, _: ProcessId) -> u32 {
         self.width
     }
 
-    fn height(&self, _: ProcessId) -> u32 {
+    fn height(&mut self, _: ProcessId) -> u32 {
         self.height
     }
 
-    fn framebuffer(&self, sender: ProcessId) -> Capability<SharedMemory> {
+    fn framebuffer(&mut self, sender: ProcessId) -> Capability<SharedMemory> {
         forward_capability_by_pid(self.window_framebuffer_cap, sender)
     }
 
-    fn draw(&self, _: ProcessId) {
+    fn draw(&mut self, _: ProcessId) {
         let mut display_framebuffer = self.display_framebuffer.borrow_mut();
         for window_y in 0..self.height as usize {
             let display_y = self.y as usize + window_y;
@@ -83,8 +83,8 @@ impl WindowServer for WindowData {
         self.display_cap.draw();
     }
 
-    fn poll_event(&self, _: ProcessId) -> InputEvent {
-        if let Some(event) = self.input_events.borrow_mut().next() {
+    fn poll_event(&mut self, _: ProcessId) -> InputEvent {
+        if let Some(event) = self.input_events.next() {
             event
         } else {
             InputEvent {

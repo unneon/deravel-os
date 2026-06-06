@@ -132,7 +132,7 @@ pub fn ipc_serve() {
         if cap.as_usize() == 0 {
             break;
         }
-        let handler = unsafe { HANDLERS[cap.local_index()].as_ref().unwrap() };
+        let handler = unsafe { HANDLERS[cap.local_index()].as_mut().unwrap() };
         let result = handler.call_method(method, &buf[..args_len], sender);
         unsafe { syscall::ipc_reply(result.as_ptr(), result.len()) }
     }

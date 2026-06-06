@@ -11,33 +11,33 @@ use deravel_types::{
 use log::trace;
 
 pub trait Handler<T> {
-    fn call_method(&self, method: usize, args: &[u8], sender: ProcessId) -> Vec<u8>;
+    fn call_method(&mut self, method: usize, args: &[u8], sender: ProcessId) -> Vec<u8>;
 }
 
 pub trait RawHandler {
-    fn call_method(&self, method: usize, args: &[u8], sender: ProcessId) -> Vec<u8>;
+    fn call_method(&mut self, method: usize, args: &[u8], sender: ProcessId) -> Vec<u8>;
 }
 
-struct TypedHandler<T, H: 'static>(&'static H, PhantomData<T>);
+struct TypedHandler<T, H: 'static>(&'static mut H, PhantomData<T>);
 
 // TODO: Unify the allocation counts.
 
 static CAPABILITIES_ALLOCATED: AtomicUsize = AtomicUsize::new(0);
 
-pub static mut HANDLERS: [Option<&'static (dyn RawHandler + Sync)>;
-    PAGE_SIZE / size_of::<CapabilityCertificateValue>()] = [None; _];
+pub static mut HANDLERS: [Option<&'static mut (dyn RawHandler + Sync)>;
+    PAGE_SIZE / size_of::<CapabilityCertificateValue>()] = [const { None }; _];
 
 static HANDLERS_ALLOCATED: AtomicUsize = AtomicUsize::new(1);
 
 impl<T, H: Handler<T>> RawHandler for TypedHandler<T, H> {
-    fn call_method(&self, method: usize, args: &[u8], sender: ProcessId) -> Vec<u8> {
+    fn call_method(&mut self, method: usize, args: &[u8], sender: ProcessId) -> Vec<u8> {
         self.0.call_method(method, args, sender)
     }
 }
 
 pub fn grant_capability2<T: 'static + Sync>(
     grantee: impl Into<Actor>,
-    handler: &'static (impl Handler<T> + Sync),
+    handler: &'static mut (impl Handler<T> + Sync),
 ) -> Capability<T> {
     let grantee = grantee.into();
     let local_index = HANDLERS_ALLOCATED.fetch_add(1, Ordering::Relaxed);
@@ -52,7 +52,7 @@ pub fn grant_capability2<T: 'static + Sync>(
     cap
 }
 
-pub fn register_root_capability<T: 'static + Sync>(handler: &'static (impl Handler<T> + Sync)) {
+pub fn register_root_capability<T: 'static + Sync>(handler: &'static mut (impl Handler<T> + Sync)) {
     unsafe { HANDLERS[0] = Some(Box::leak(Box::new(TypedHandler(handler, PhantomData)))) }
 }
 

@@ -8,7 +8,7 @@ struct Server {
 }
 
 impl IpcBServer for Server {
-    fn foo(&self, _: ProcessId, fs: Capability<Filesystem>) {
+    fn foo(&mut self, _: ProcessId, fs: Capability<Filesystem>) {
         let fs = forward_capability(fs, self.c);
         self.c.bar(fs);
     }

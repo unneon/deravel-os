@@ -7,7 +7,7 @@ use log::debug;
 struct Server;
 
 impl IpcCServer for Server {
-    fn bar(&self, _: ProcessId, fs: Capability<Filesystem>) {
+    fn bar(&mut self, _: ProcessId, fs: Capability<Filesystem>) {
         let data = fs.read("secret.txt");
         let text = str::from_utf8(&data).unwrap();
         debug!("read {text:?} from file");

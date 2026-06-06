@@ -41,7 +41,11 @@ fn main() {
         writeln!(&mut output, "pub trait {name_camel}Server {{").unwrap();
         for method in &interface.methods {
             let method_name = &method.name;
-            write!(&mut output, "    fn {method_name}(&self, sender: ProcessId").unwrap();
+            write!(
+                &mut output,
+                "    fn {method_name}(&mut self, sender: ProcessId"
+            )
+            .unwrap();
             for (arg_name, arg_type) in &method.args {
                 let arg_type = rust_arg_type(arg_type);
                 write!(&mut output, ", {arg_name}: {arg_type}").unwrap();
@@ -178,7 +182,7 @@ fn generate_handler_impl(interface: &Interface, structs: &[Struct], out: &mut St
     .unwrap();
     writeln!(
         out,
-        "    fn call_method(&self, method: usize, _args: &[u8], _sender: ProcessId) -> Vec<u8> {{"
+        "    fn call_method(&mut self, method: usize, _args: &[u8], _sender: ProcessId) -> Vec<u8> {{"
     )
     .unwrap();
     writeln!(out, "        match method {{").unwrap();

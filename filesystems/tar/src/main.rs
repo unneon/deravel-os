@@ -64,7 +64,7 @@ union TarHeaderBuf {
 const SECTOR_SIZE: usize = 512;
 
 impl FilesystemServer for CapabilityRoot {
-    fn read(&self, _: ProcessId, path_suffix: &str) -> Vec<u8> {
+    fn read(&mut self, _: ProcessId, path_suffix: &str) -> Vec<u8> {
         let path = concat_path(&self.path, path_suffix);
         let server = self.server.borrow();
         let file = server.files.iter().find(|file| file.name == path);
@@ -74,7 +74,7 @@ impl FilesystemServer for CapabilityRoot {
         file.data[..file.size].to_owned()
     }
 
-    fn write(&self, _: ProcessId, path_suffix: &str, data: &[u8]) {
+    fn write(&mut self, _: ProcessId, path_suffix: &str, data: &[u8]) {
         let path = concat_path(&self.path, path_suffix);
         let mut server = self.server.borrow_mut();
         let file = server.files.iter().find(|file| file.name == path);
@@ -92,7 +92,7 @@ impl FilesystemServer for CapabilityRoot {
         serialize_archive(&server.files, server.drive);
     }
 
-    fn subcapability(&self, sender: ProcessId, path_suffix: &str) -> Capability<Filesystem> {
+    fn subcapability(&mut self, sender: ProcessId, path_suffix: &str) -> Capability<Filesystem> {
         let path = concat_path(&self.path, path_suffix);
         grant_capability2(
             sender,
