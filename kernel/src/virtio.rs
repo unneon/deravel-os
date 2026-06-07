@@ -114,8 +114,7 @@ pub fn initialize_net(
     bars: &[AllocatedRange; 6],
 ) -> &'static VirtioNet {
     let caps = extract_capabilities(config, bars);
-    let mut virtio_net = VirtioNet::new(caps);
-    virtio_net.demo();
+    let virtio_net = VirtioNet::new(caps);
     Box::leak(Box::new(virtio_net))
 }
 

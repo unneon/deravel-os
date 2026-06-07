@@ -1,10 +1,14 @@
+use crate::drvli::NetworkServer;
 use crate::interrupt::InterruptHandler;
+use crate::sync::Mutex;
 use crate::util::volatile::{Readonly, Volatile, volatile_struct};
 use crate::virtio::Capabilities;
 use crate::virtio::queue::{QUEUE_SIZE, Queue};
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, features};
 use alloc::boxed::Box;
-use log::{debug, error};
+use alloc::string::{String, ToString};
+use deravel_types::ProcessId;
+use riscv::register::satp::Satp;
 use smoltcp::iface::{Interface, SocketSet, SocketStorage};
 use smoltcp::phy::{DeviceCapabilities, Medium};
 use smoltcp::socket::dns;
@@ -47,6 +51,10 @@ pub struct PacketTransmitToken<'a>(&'a mut Queue<1>, &'a mut [Packet<[u8; 1514]>
 pub struct VirtioNet {
     isr: Volatile<u8, Readonly>,
     device: Volatile<Config>,
+    state: Mutex<State>,
+}
+
+struct State {
     rx_queue: Queue<0>,
     tx_queue: Queue<1>,
     rx_buffers: Box<[Packet<[u8; 1514]>; QUEUE_SIZE]>,
@@ -80,17 +88,24 @@ impl VirtioNet {
         VirtioNet {
             isr: caps.isr,
             device: caps.device,
-            rx_queue,
-            tx_queue,
-            rx_buffers,
-            tx_buffers,
+            state: Mutex::new(State {
+                rx_queue,
+                tx_queue,
+                rx_buffers,
+                tx_buffers,
+            }),
         }
     }
+}
 
-    pub fn demo(&mut self) {
+impl NetworkServer for VirtioNet {
+    fn dns(&self, _: ProcessId, domain: &str) -> String {
+        let satp = riscv::register::satp::read();
+        unsafe { riscv::register::satp::write(Satp::from_bits(0)) }
+        let mut state = self.state.lock();
         let mut iface = Interface::new(
             smoltcp::iface::Config::new(HardwareAddress::Ethernet(self.device.mac().read())),
-            self,
+            &mut *state,
             Instant::from_secs(0),
         );
         iface.update_ip_addrs(|ip_addrs| {
@@ -109,26 +124,25 @@ impl VirtioNet {
         let mut sockets = SocketSet::new(sockets_storage.as_mut_slice());
         let dns_handle = sockets.add(socket);
         let socket = sockets.get_mut::<dns::Socket>(dns_handle);
-        let domain = "cegla.net";
         let query = socket
             .start_query(iface.context(), domain, DnsQueryType::A)
             .unwrap();
         loop {
             let timestamp = Instant::from_secs(0);
-            iface.poll(timestamp, self, &mut sockets);
+            iface.poll(timestamp, &mut *state, &mut sockets);
 
             match sockets
                 .get_mut::<dns::Socket>(dns_handle)
                 .get_query_result(query)
             {
                 Ok(addrs) => {
-                    debug!("dns query of {domain} resolved with {addrs:?}");
-                    break;
+                    let address = addrs[0].to_string();
+                    unsafe { riscv::register::satp::write(satp) }
+                    break address;
                 }
                 Err(GetQueryResultError::Pending) => {}
                 Err(e) => {
-                    error!("dns query failed: {e:?}");
-                    break;
+                    panic!("dns query failed: {e:?}");
                 }
             }
         }
@@ -141,7 +155,7 @@ impl InterruptHandler for VirtioNet {
     }
 }
 
-impl smoltcp::phy::Device for VirtioNet {
+impl smoltcp::phy::Device for State {
     type RxToken<'a> = PacketReceiveToken<'a>;
     type TxToken<'a> = PacketTransmitToken<'a>;
 

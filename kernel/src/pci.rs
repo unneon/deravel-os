@@ -11,6 +11,7 @@ use crate::virtio;
 use crate::virtio::blk::VirtioBlk;
 use crate::virtio::gpu::VirtioGpu;
 use crate::virtio::input::VirtioInput;
+use crate::virtio::net::VirtioNet;
 use fdt::Fdt;
 use fdt::node::FdtNode;
 use log::warn;
@@ -38,6 +39,7 @@ pub fn initialize_all_pci(
     device_tree: &Fdt,
 ) -> (
     &'static VirtioBlk,
+    &'static VirtioNet,
     &'static Mutex<VirtioGpu>,
     &'static VirtioInput,
 ) {
@@ -52,6 +54,7 @@ pub fn initialize_all_pci(
     let configs = configs..configs.wrapping_byte_add(region.size.unwrap());
     let configs = unsafe { core::slice::from_mut_ptr_range(configs) };
     let mut virtio_blk_slot = None;
+    let mut virtio_net_slot = None;
     let mut virtio_gpu_slot = None;
     let mut virtio_input_slot = None;
     for (config_index, config) in configs.iter_mut().enumerate() {
@@ -73,6 +76,7 @@ pub fn initialize_all_pci(
             let virtio_net = virtio::initialize_net(config, &bars);
             let plic = pci_interrupt_to_plic(device_tree, config_index, config);
             register_interrupt(plic, virtio_net);
+            virtio_net_slot = Some(virtio_net);
         } else if config.vendor_id == 0x1AF4 && config.device_id == 0x1042 {
             let config = config.as_general_device().unwrap();
             let bars = allocate_all_bars(config, &pci_ranges, &mut io, &mut mem32, &mut mem64);
@@ -108,6 +112,7 @@ pub fn initialize_all_pci(
     }
     (
         virtio_blk_slot.unwrap(),
+        virtio_net_slot.unwrap(),
         virtio_gpu_slot.unwrap(),
         virtio_input_slot.unwrap(),
     )

@@ -8,7 +8,7 @@ app ipc_b(c ipc_c)
 app ipc_c
     func bar(fs filesystem)
 
-app shell(console console, fs filesystem)
+app shell(console console, fs filesystem, net network)
 
 app tar_fs(drive drive) implements filesystem
 
@@ -55,3 +55,6 @@ interface window
     func framebuffer() shared_memory
     func draw()
     stream events input_event
+
+interface network
+    func dns(domain text) text

@@ -25,6 +25,9 @@ fn main(args: Args) {
                 continue;
             };
             args.fs.write(file_name, file.as_bytes());
+        } else if let Some(domain) = cmdline.strip_prefix("dns ") {
+            let ip = args.net.dns(domain);
+            println!("{ip}");
         } else if cmdline == "exit" {
             break;
         } else {

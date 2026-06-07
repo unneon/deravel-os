@@ -82,7 +82,7 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     initialize_log();
     initialize_trap_handler();
     log_sbi_metadata();
-    let (_virtio_blk, virtio_gpu, virtio_input) = initialize_all_pci(&device_tree);
+    let (virtio_blk, virtio_net, virtio_gpu, virtio_input) = initialize_all_pci(&device_tree);
     initialize_plic(&device_tree);
     initialize_hart_stack();
     enable_interrupts();
@@ -108,9 +108,10 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     shell.spawn(ShellArgs {
         console: terminal.export,
         fs: fs_tar.export,
+        net: reserve_kernel_capability(virtio_net),
     });
     fs_tar.spawn(TarFsArgs {
-        drive: reserve_kernel_capability(_virtio_blk),
+        drive: reserve_kernel_capability(virtio_blk),
     });
     terminal.spawn(TerminalArgs {
         windowing: windowing.export,
