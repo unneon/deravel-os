@@ -33,7 +33,7 @@ fn main() {
             let stream_type = rust_stream_type(stream.type_, &drvli.structs);
             writeln!(
                 &mut output,
-                "    fn {stream_name}(self) -> UserRingBuffer<{stream_type}>;"
+                "    fn {stream_name}(self) -> &'static RingBuffer<{stream_type}>;"
             )
             .unwrap();
         }
@@ -95,12 +95,24 @@ fn main() {
             let type_ = camel_case(stream.type_);
             writeln!(
                 &mut output,
-                "    fn {name}(self) -> UserRingBuffer<{type_}> {{"
+                "    fn {name}(self) -> &'static RingBuffer<{type_}> {{"
             )
             .unwrap();
-            writeln!(&mut output, "        let (data, len, state) = unsafe {{ ipc_map_ring_buffer(self.0, {stream_id}) }};").unwrap();
-            writeln!(&mut output, "        let data = data as *mut {type_};").unwrap();
-            writeln!(&mut output, "        UserRingBuffer {{ data, len, state }}").unwrap();
+            writeln!(
+                &mut output,
+                "        let (ring_buffer, byte_count) = unsafe {{ ipc_map_ring_buffer(self.0, {stream_id}) }};"
+            )
+            .unwrap();
+            writeln!(
+                &mut output,
+                "        let ring_buffer = unsafe {{ &*core::ptr::from_raw_parts::<UntypedRingBuffer>(ring_buffer, byte_count) }};"
+            )
+                .unwrap();
+            writeln!(
+                &mut output,
+                "        unsafe {{ ring_buffer.cast::<{type_}>() }}"
+            )
+            .unwrap();
             writeln!(&mut output, "    }}").unwrap();
         }
         writeln!(&mut output, "}}").unwrap();

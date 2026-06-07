@@ -13,7 +13,7 @@ fn main() {
         let name_camel = camel_case(struct_.name);
         writeln!(
             &mut output,
-            "#[derive(Clone, Copy, Debug, Deserialize, Serialize)]"
+            "#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]"
         )
         .unwrap();
         writeln!(&mut output, "#[repr(C)]").unwrap();

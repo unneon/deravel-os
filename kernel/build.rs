@@ -1,5 +1,6 @@
 use deravel_codegen::{
-    Interface, Struct, camel_case, parse_drvli, rust_arg_type, rust_borrow_or_copy, rust_ret_type,
+    Interface, Struct, camel_case, parse_drvli, rust_arg_type, rust_borrow_or_copy,
+    rust_member_type, rust_ret_type,
 };
 use std::fmt::Write;
 
@@ -44,9 +45,10 @@ fn generate_server_trait(interface: &Interface, structs: &[Struct], out: &mut St
     }
     for stream in &interface.streams {
         let stream_name = &stream.name;
+        let type_ = rust_member_type(stream.type_, structs);
         writeln!(
             out,
-            "    fn {stream_name}(&self) -> (*mut u8, usize, *mut RingBufferState);"
+            "    fn {stream_name}(&self) -> &'static RingBuffer<{type_}>;"
         )
         .unwrap();
     }
@@ -98,13 +100,17 @@ fn generate_handler_impl(interface: &Interface, structs: &[Struct], out: &mut St
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn map_stream(&self, stream: usize) -> (*mut u8, usize, *mut RingBufferState) {{"
+        "    fn map_stream(&self, stream: usize) -> &'static UntypedRingBuffer {{"
     )
     .unwrap();
     writeln!(out, "        match stream {{").unwrap();
     for (stream_index, stream) in interface.streams.iter().enumerate() {
         let stream_name = &stream.name;
-        writeln!(out, "            {stream_index} => self.{stream_name}(),").unwrap();
+        writeln!(
+            out,
+            "            {stream_index} => self.{stream_name}().untype(),"
+        )
+        .unwrap();
     }
     writeln!(out, "            _ => unreachable!(),").unwrap();
     writeln!(out, "        }}").unwrap();

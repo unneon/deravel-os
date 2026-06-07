@@ -26,7 +26,6 @@ mod page;
 mod pci;
 mod plic;
 mod process;
-mod ring_buffer;
 mod sbi;
 mod shared_memory;
 mod sync;
@@ -340,29 +339,22 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                 Actor::Userspace(_) => unimplemented!(),
                 Actor::Kernel => {
                     let handler = capability::get_handler(original.local_index());
-                    let (data, len, state) = handler.map_stream(stream);
+                    let ring_buffer = handler.map_stream(stream);
+                    let ring_buffer_size = size_of_val(ring_buffer);
 
                     let page_table = unsafe { &mut *(current_proc.page_table as *mut PageTable) };
                     let virtual_addr = current_proc
                         .virtual_memory
-                        .allocate(2 * PAGE_SIZE, PAGE_SIZE);
+                        .allocate(ring_buffer_size, PAGE_SIZE);
                     map_pages(
                         page_table,
                         virtual_addr,
-                        data as usize,
-                        PageFlags::readonly().user(),
-                        1,
-                    );
-                    map_pages(
-                        page_table,
-                        virtual_addr + PAGE_SIZE,
-                        state as usize,
+                        ring_buffer as *const _ as *const u8 as usize,
                         PageFlags::readwrite().user(),
                         1,
                     );
                     registers.a0 = virtual_addr;
-                    registers.a1 = len;
-                    registers.a2 = virtual_addr + PAGE_SIZE;
+                    registers.a1 = ring_buffer.0.data.0.len();
                 }
             }
         }

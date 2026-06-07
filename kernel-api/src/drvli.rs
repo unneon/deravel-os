@@ -6,7 +6,7 @@
 )]
 
 use crate::syscall::*;
-use crate::{Handler, UserRingBuffer};
+use crate::{Handler, RingBuffer};
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::marker::PhantomData;

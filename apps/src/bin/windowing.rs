@@ -24,7 +24,7 @@ struct WindowData {
     display_width: u32,
     display_framebuffer: &'static RefCell<&'static mut [u8]>,
     display_cap: Capability<Display>,
-    input_events: UserRingBuffer<InputEvent>,
+    input_events: &'static RingBuffer<InputEvent>,
 }
 
 impl WindowingServer for Server {

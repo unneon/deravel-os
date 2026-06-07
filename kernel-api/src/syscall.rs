@@ -1,7 +1,7 @@
 #![allow(clippy::missing_safety_doc)]
 
 use core::arch::asm;
-use deravel_types::{Capability, ProcessId, RawCapability, RingBufferState, SharedMemory};
+use deravel_types::{Capability, ProcessId, RawCapability, SharedMemory};
 
 macro syscalls(
     $(#[no = $no:literal] pub fn $name:ident(
@@ -66,9 +66,11 @@ unsafe impl FromRet for u8 {}
 
 unsafe impl FromRet for usize {}
 
-unsafe impl<T> FromRet for *const T {}
+unsafe impl<T: ?Sized> FromRet for &T {}
 
-unsafe impl<T> FromRet for *mut T {}
+unsafe impl<T: ?Sized> FromRet for *const T {}
+
+unsafe impl<T: ?Sized> FromRet for *mut T {}
 
 unsafe impl<T: Copy> FromRet for Capability<T> {}
 
@@ -132,7 +134,7 @@ syscalls! {
     pub fn log(text: *const u8, text_len: usize, level: usize);
 
     #[no = 7]
-    pub fn ipc_map_ring_buffer(cap: RawCapability, stream: usize) -> (*mut u8, usize, *mut RingBufferState);
+    pub fn ipc_map_ring_buffer(cap: RawCapability, stream: usize) -> (*const (), usize);
 
     #[no = 8]
     pub fn yield_();

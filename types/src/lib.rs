@@ -1,5 +1,7 @@
 #![feature(decl_macro)]
+#![feature(ptr_metadata)]
 #![no_std]
+extern crate alloc;
 
 mod align;
 mod capability;
@@ -10,7 +12,7 @@ mod ring_buffer;
 pub use align::CacheLineAligned;
 pub use capability::*;
 pub use drvli::*;
-pub use ring_buffer::RingBufferState;
+pub use ring_buffer::{RingBuffer, UntypedRingBuffer};
 
 #[repr(transparent)]
 #[derive(Clone, Copy, Eq, PartialEq)]

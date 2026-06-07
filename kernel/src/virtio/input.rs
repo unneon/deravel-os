@@ -3,7 +3,6 @@ mod types;
 
 use crate::drvli::InputDeviceServer;
 use crate::interrupt::InterruptHandler;
-use crate::ring_buffer::RingBuffer;
 use crate::sync::Mutex;
 use crate::util::volatile::{Readonly, Volatile};
 use crate::virtio::Capabilities;
@@ -11,19 +10,20 @@ use crate::virtio::input::config::{Config, config_str};
 use crate::virtio::input::types::ConfigSelect;
 use crate::virtio::queue::Queue;
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK};
+use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
-use deravel_types::{InputEvent, RingBufferState};
+use deravel_types::{InputEvent, RingBuffer};
 use log::info;
 
 struct State {
     eventq: Queue<0>,
     buffers: Vec<InputEvent>,
-    ring: RingBuffer<InputEvent>,
 }
 
 pub struct VirtioInput {
     isr: Volatile<u8, Readonly>,
+    ring: &'static RingBuffer<InputEvent>,
     state: Mutex<State>,
 }
 
@@ -55,16 +55,13 @@ impl VirtioInput {
         let name = config_str(caps.device, ConfigSelect::IdName, 0);
         info!("found {name}");
 
-        let ring = RingBuffer::new();
+        let ring = Box::leak(RingBuffer::new_single_page());
 
         common.device_status().write_bitor(STATUS_DRIVER_OK as u8);
         VirtioInput {
             isr: caps.isr,
-            state: Mutex::new(State {
-                eventq,
-                buffers,
-                ring,
-            }),
+            ring,
+            state: Mutex::new(State { eventq, buffers }),
         }
     }
 }
@@ -78,7 +75,7 @@ impl InterruptHandler for VirtioInput {
         riscv::asm::fence();
         for used_index in used_start..used_end {
             let event = state.buffers[used_index as usize % QUEUE_SIZE];
-            state.ring.push(event);
+            self.ring.push(event);
         }
         riscv::asm::fence();
         unsafe {
@@ -88,7 +85,7 @@ impl InterruptHandler for VirtioInput {
 }
 
 impl InputDeviceServer for VirtioInput {
-    fn events(&self) -> (*mut u8, usize, *mut RingBufferState) {
-        self.state.lock().ring.expose()
+    fn events(&self) -> &'static RingBuffer<InputEvent> {
+        self.ring
     }
 }
