@@ -2,7 +2,6 @@
 #![no_main]
 extern crate alloc;
 
-use alloc::boxed::Box;
 use deravel_kernel_api::*;
 
 struct Server {
@@ -10,16 +9,16 @@ struct Server {
 }
 
 impl IpcBServer for Server {
-    fn foo(&mut self, _: ProcessId, fs: Capability<Filesystem>) {
-        let fs = forward_capability(fs, self.c);
+    fn foo(&mut self, _: &mut Ctx<Self>, _: (), fs: Capability<Filesystem>) {
+        let fs = forward_capability_by_cap(fs, self.c);
         self.c.bar(fs);
     }
 }
 
 fn main(Args { c }: Args) {
-    register_root_capability(Box::leak(Box::new(Server { c })));
+    let mut dispatch = Dispatch::new(Server { c });
     loop {
-        ipc_serve();
+        ipc_serve(&mut dispatch);
         yield_();
     }
 }

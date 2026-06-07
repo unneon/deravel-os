@@ -10,18 +10,11 @@ mod serialize;
 use crate::deserialize::deserialize_archive;
 use crate::serialize::serialize_archive;
 use alloc::borrow::{Cow, ToOwned};
-use alloc::boxed::Box;
-use alloc::format;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::vec::Vec;
-use core::cell::RefCell;
+use alloc::{format, vec};
 use deravel_kernel_api::*;
 use log::error;
-
-struct CapabilityRoot {
-    path: String,
-    server: &'static RefCell<Server>,
-}
 
 struct File {
     name: String,
@@ -32,6 +25,7 @@ struct File {
 struct Server {
     drive: Capability<Drive>,
     files: Vec<File>,
+    caps: Vec<String>,
 }
 
 #[repr(C, packed)]
@@ -63,63 +57,56 @@ union TarHeaderBuf {
 
 const SECTOR_SIZE: usize = 512;
 
-impl FilesystemServer for CapabilityRoot {
-    fn read(&mut self, _: ProcessId, path_suffix: &str) -> Vec<u8> {
-        let path = concat_path(&self.path, path_suffix);
-        let server = self.server.borrow();
-        let file = server.files.iter().find(|file| file.name == path);
+impl FilesystemServer<usize> for Server {
+    fn read(&mut self, _: &mut Ctx<Self>, cap: usize, path_suffix: &str) -> Vec<u8> {
+        let path = concat_path(&self.caps[cap], path_suffix);
+        let file = self.files.iter().find(|file| file.name == path);
         let Some(file) = file else {
             panic!("file {path:?} not found")
         };
         file.data[..file.size].to_owned()
     }
 
-    fn write(&mut self, _: ProcessId, path_suffix: &str, data: &[u8]) {
-        let path = concat_path(&self.path, path_suffix);
-        let mut server = self.server.borrow_mut();
-        let file = server.files.iter().find(|file| file.name == path);
+    fn write(&mut self, _: &mut Ctx<Self>, cap: usize, path_suffix: &str, data: &[u8]) {
+        let path = concat_path(&self.caps[cap], path_suffix);
+        let file = self.files.iter().find(|file| file.name == path);
         if file.is_some() {
             error!("file {path:?} already exists");
         }
         let size = data.len();
         let mut data = data.to_owned();
         data.resize(size.next_multiple_of(SECTOR_SIZE), 0);
-        server.files.push(File {
+        self.files.push(File {
             name: path.into_owned(),
             data,
             size,
         });
-        serialize_archive(&server.files, server.drive);
+        serialize_archive(&self.files, self.drive);
     }
 
-    fn subcapability(&mut self, sender: ProcessId, path_suffix: &str) -> Capability<Filesystem> {
-        let path = concat_path(&self.path, path_suffix);
-        grant_capability2(
-            sender,
-            Box::leak(Box::new(CapabilityRoot {
-                path: path.to_string(),
-                server: self.server,
-            })),
-        )
+    fn subcapability(
+        &mut self,
+        ctx: &mut Ctx<Self>,
+        cap: usize,
+        path_suffix: &str,
+    ) -> Capability<Filesystem> {
+        let path = concat_path(&self.caps[cap], path_suffix);
+        let new_cap = self.caps.len();
+        self.caps.push(path.into_owned());
+        ctx.grant_capability(new_cap)
     }
 }
 
-unsafe impl Send for CapabilityRoot {}
-
-unsafe impl Sync for CapabilityRoot {}
-
 fn main(args: Args) {
     let files = deserialize_archive(args.drive);
-    let server = Box::leak(Box::new(RefCell::new(Server {
+    let server = Server {
         drive: args.drive,
         files,
-    })));
-    register_root_capability(Box::leak(Box::new(CapabilityRoot {
-        path: String::new(),
-        server,
-    })));
+        caps: vec![String::new()],
+    };
+    let mut dispatch = Dispatch::new_object(server, 0);
     loop {
-        ipc_serve();
+        ipc_serve(&mut dispatch);
         yield_();
     }
 }

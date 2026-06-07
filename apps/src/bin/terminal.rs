@@ -4,7 +4,6 @@ extern crate alloc;
 
 include!(concat!(env!("OUT_DIR"), "/font.rs"));
 
-use alloc::boxed::Box;
 use deravel_kernel_api::input::*;
 use deravel_kernel_api::*;
 use log::warn;
@@ -77,7 +76,7 @@ impl Renderer<'_> {
 }
 
 impl ConsoleServer for Renderer<'_> {
-    fn getchar(&mut self, _: ProcessId) -> u8 {
+    fn getchar(&mut self, _: &mut Ctx<Self>, _: ()) -> u8 {
         loop {
             let Some(event) = self.events.poll() else {
                 yield_();
@@ -130,7 +129,7 @@ impl ConsoleServer for Renderer<'_> {
         }
     }
 
-    fn putchar(&mut self, _: ProcessId, c: u8) {
+    fn putchar(&mut self, _: &mut Ctx<Self>, _: (), c: u8) {
         self.render_char(c);
     }
 }
@@ -154,9 +153,10 @@ fn main(args: Args) {
     };
 
     renderer.clear_screen();
-    register_root_capability(Box::leak(Box::new(renderer)));
+
+    let mut dispatch = Dispatch::new(renderer);
     loop {
-        ipc_serve();
+        ipc_serve(&mut dispatch);
         yield_();
     }
 }

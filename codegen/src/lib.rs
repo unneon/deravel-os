@@ -70,7 +70,7 @@ pub fn rust_member_type(type_: &str, structs: &[Struct]) -> Cow<'static, str> {
     }
 }
 
-pub fn rust_ret_type(type_: &str, structs: &[Struct<'_>]) -> Cow<'static, str> {
+pub fn rust_normal_ret_type(type_: &str, structs: &[Struct<'_>]) -> Cow<'static, str> {
     match type_ {
         "i8" => "i8".into(),
         "i16" => "i16".into(),
@@ -84,6 +84,40 @@ pub fn rust_ret_type(type_: &str, structs: &[Struct<'_>]) -> Cow<'static, str> {
         "bytes" => "Vec<u8>".into(),
         _ if structs.iter().any(|struct_| struct_.name == type_) => camel_case(type_).into(),
         _ => format!("Capability<{}>", camel_case(type_)).into(),
+    }
+}
+
+pub fn rust_grantable_ret_type(type_: &str, structs: &[Struct<'_>]) -> Cow<'static, str> {
+    match type_ {
+        "i8" => "i8".into(),
+        "i16" => "i16".into(),
+        "i32" => "i32".into(),
+        "i64" => "i64".into(),
+        "u8" => "u8".into(),
+        "u16" => "u16".into(),
+        "u32" => "u32".into(),
+        "u64" => "u64".into(),
+        "text" => "String".into(),
+        "bytes" => "Vec<u8>".into(),
+        _ if structs.iter().any(|struct_| struct_.name == type_) => camel_case(type_).into(),
+        _ => format!("Capability<{}>", camel_case(type_)).into(),
+    }
+}
+
+pub fn is_capability(type_: &str, structs: &[Struct<'_>]) -> bool {
+    match type_ {
+        "i8" => false,
+        "i16" => false,
+        "i32" => false,
+        "i64" => false,
+        "u8" => false,
+        "u16" => false,
+        "u32" => false,
+        "u64" => false,
+        "text" => false,
+        "bytes" => false,
+        _ if structs.iter().any(|struct_| struct_.name == type_) => false,
+        _ => true,
     }
 }
 

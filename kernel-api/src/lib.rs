@@ -123,7 +123,7 @@ pub fn getchar() -> u8 {
     stdio().getchar()
 }
 
-pub fn ipc_serve() {
+pub fn ipc_serve<S>(dispatch: &mut Dispatch<S>) {
     loop {
         let mut buf = [0u8; 4096];
         let (cap, method, args_len, sender) =
@@ -131,8 +131,7 @@ pub fn ipc_serve() {
         if cap.as_usize() == 0 {
             break;
         }
-        let handler = unsafe { HANDLERS[cap.local_index()].as_mut().unwrap() };
-        let result = handler.call_method(method, &buf[..args_len], sender);
+        let result = dispatch.dispatch(cap, method, &buf[..args_len], sender);
         unsafe { syscall::ipc_reply(result.as_ptr(), result.len()) }
     }
 }

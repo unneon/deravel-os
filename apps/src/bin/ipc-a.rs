@@ -7,7 +7,7 @@ fn main(Args { fs, b }: Args) {
     fs.write("secret.txt", b"admin secret");
     fs.write("user/secret.txt", b"user secret");
     let user = fs.subcapability("user");
-    let user = forward_capability(user, b);
+    let user = forward_capability_by_cap(user, b);
     b.foo(user);
 }
 

@@ -1,63 +1,145 @@
 use crate::current_pid;
 use alloc::boxed::Box;
+use alloc::vec;
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use deravel_types::{
     Actor, Capability, CapabilityCertificate, CapabilityCertificateUnpacked,
-    CapabilityCertificateValue, Interface, PAGE_SIZE, ProcessId, RawCapability,
+    CapabilityCertificateValue, Interface, ProcessId, RawCapability,
     get_capability_certificate_page,
 };
 use log::trace;
 
-pub trait Handler<T> {
-    fn call_method(&mut self, method: usize, args: &[u8], sender: ProcessId) -> Vec<u8>;
+pub trait Handler<T, O: Copy> {
+    fn call_method(
+        &mut self,
+        ctx: &mut Ctx<Self>,
+        method: usize,
+        args: &[u8],
+        object: O,
+        sender: ProcessId,
+    ) -> Vec<u8>;
 }
 
-pub trait RawHandler {
-    fn call_method(&mut self, method: usize, args: &[u8], sender: ProcessId) -> Vec<u8>;
+pub trait RawHandler<S: ?Sized> {
+    fn call_method(
+        &mut self,
+        server: &mut S,
+        method: usize,
+        args: &[u8],
+        sender: ProcessId,
+    ) -> (Vec<u8>, Vec<HandlerEntry<S>>);
 }
 
-struct TypedHandler<T, H: 'static>(&'static mut H, PhantomData<T>);
+pub struct Ctx<'a, S: ?Sized> {
+    sender: ProcessId,
+    new_handlers: &'a mut Vec<HandlerEntry<S>>,
+}
 
-// TODO: Unify the allocation counts.
+pub struct Dispatch<S> {
+    server: S,
+    handlers: Vec<Option<Box<dyn RawHandler<S>>>>,
+}
 
-static CAPABILITIES_ALLOCATED: AtomicUsize = AtomicUsize::new(0);
+pub struct HandlerEntry<S: ?Sized> {
+    local_index: usize,
+    handler: Box<dyn RawHandler<S>>,
+}
 
-pub static mut HANDLERS: [Option<&'static mut (dyn RawHandler + Sync)>;
-    PAGE_SIZE / size_of::<CapabilityCertificateValue>()] = [const { None }; _];
+struct TypedHandler<T, O>(O, PhantomData<T>);
 
-static HANDLERS_ALLOCATED: AtomicUsize = AtomicUsize::new(1);
-
-impl<T, H: Handler<T>> RawHandler for TypedHandler<T, H> {
-    fn call_method(&mut self, method: usize, args: &[u8], sender: ProcessId) -> Vec<u8> {
-        self.0.call_method(method, args, sender)
+impl<S: ?Sized + Handler<T, O>, T, O: Copy> RawHandler<S> for TypedHandler<T, O> {
+    fn call_method(
+        &mut self,
+        server: &mut S,
+        method: usize,
+        args: &[u8],
+        sender: ProcessId,
+    ) -> (Vec<u8>, Vec<HandlerEntry<S>>) {
+        let mut new_handlers = Vec::new();
+        let mut ctx = Ctx {
+            sender,
+            new_handlers: &mut new_handlers,
+        };
+        let result = server.call_method(&mut ctx, method, args, self.0, sender);
+        (result, new_handlers)
     }
 }
 
-pub fn grant_capability2<T: 'static + Interface + Sync>(
-    grantee: impl Into<Actor>,
-    handler: &'static mut (impl Handler<T> + Sync),
-) -> Capability<T> {
-    let grantee = grantee.into();
-    let local_index = HANDLERS_ALLOCATED.fetch_add(1, Ordering::Relaxed);
-    unsafe { HANDLERS[local_index] = Some(Box::leak(Box::new(TypedHandler(handler, PhantomData)))) }
-    let certificate = allocate_certificate();
-    certificate.store(
-        CapabilityCertificateValue::granted(grantee),
-        Ordering::Relaxed,
-    );
-    let cap = Capability(RawCapability::from_pointer(certificate), PhantomData);
-    let t_name = T::NAME;
-    trace!("granted {cap:?} {t_name} to {grantee:?}");
-    cap
+static CAPABILITIES_ALLOCATED: AtomicUsize = AtomicUsize::new(1);
+
+impl<S: ?Sized> Ctx<'_, S> {
+    pub fn grant_capability<T: Interface + 'static, O: Copy + 'static>(
+        &mut self,
+        object: O,
+    ) -> Capability<T>
+    where
+        S: Handler<T, O>,
+    {
+        let certificate = allocate_certificate();
+        certificate.store(
+            CapabilityCertificateValue::granted(self.sender),
+            Ordering::Relaxed,
+        );
+        let cap = Capability(RawCapability::from_pointer(certificate), PhantomData);
+        let t_name = T::NAME;
+        trace!("granted {cap:?} {t_name} to {:?}", self.sender);
+
+        self.new_handlers.push(HandlerEntry {
+            local_index: cap.local_index(),
+            handler: Box::new(TypedHandler(object, PhantomData)),
+        });
+
+        cap
+    }
+
+    pub fn forward_capability<T: Interface>(&mut self, cap: Capability<T>) -> Capability<T> {
+        forward_capability_by_pid(cap, self.sender)
+    }
 }
 
-pub fn register_root_capability<T: 'static + Sync>(handler: &'static mut (impl Handler<T> + Sync)) {
-    unsafe { HANDLERS[0] = Some(Box::leak(Box::new(TypedHandler(handler, PhantomData)))) }
+impl<S> Dispatch<S> {
+    pub fn new<T: 'static>(server: S) -> Dispatch<S>
+    where
+        S: Handler<T, ()>,
+    {
+        Dispatch::new_object(server, ())
+    }
+
+    pub fn new_object<T: 'static, O: Copy + 'static>(server: S, object: O) -> Dispatch<S>
+    where
+        S: Handler<T, O>,
+    {
+        let handlers = vec![Some(
+            Box::new(TypedHandler(object, PhantomData)) as Box<dyn RawHandler<S> + 'static>
+        )];
+        Dispatch { server, handlers }
+    }
 }
 
-pub fn forward_capability<T: Interface, U: Interface>(
+impl<S> Dispatch<S> {
+    pub fn dispatch(
+        &mut self,
+        cap: RawCapability,
+        method: usize,
+        args: &[u8],
+        sender: ProcessId,
+    ) -> Vec<u8> {
+        let (result, new_handlers) = self.handlers[cap.local_index()]
+            .as_mut()
+            .unwrap()
+            .call_method(&mut self.server, method, args, sender);
+        self.handlers
+            .resize_with(CAPABILITIES_ALLOCATED.load(Ordering::Relaxed), || None);
+        for new_handler in new_handlers {
+            self.handlers[new_handler.local_index] = Some(new_handler.handler);
+        }
+        result
+    }
+}
+
+pub fn forward_capability_by_cap<T: Interface, U: Interface>(
     cap: Capability<T>,
     forwardee: Capability<U>,
 ) -> Capability<T> {
@@ -117,7 +199,7 @@ fn read_certificate(cap: RawCapability) -> CapabilityCertificateValue {
 }
 
 fn allocate_certificate() -> &'static CapabilityCertificate {
-    let index = CAPABILITIES_ALLOCATED.fetch_add(1, Ordering::Relaxed) + 1;
+    let index = CAPABILITIES_ALLOCATED.fetch_add(1, Ordering::Relaxed);
     assert!(
         index < 4096 / size_of::<CapabilityCertificateValue>(),
         "out of capability certificate slots"
