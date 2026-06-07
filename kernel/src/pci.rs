@@ -42,6 +42,7 @@ pub fn initialize_all_pci(
     &'static VirtioNet,
     &'static Mutex<VirtioGpu>,
     &'static VirtioInput,
+    &'static VirtioInput,
 ) {
     let soc = device_tree.find_node("/soc").unwrap();
     let pci = device_tree.find_node("/soc/pci").unwrap();
@@ -56,7 +57,8 @@ pub fn initialize_all_pci(
     let mut virtio_blk_slot = None;
     let mut virtio_net_slot = None;
     let mut virtio_gpu_slot = None;
-    let mut virtio_input_slot = None;
+    let mut virtio_keyboard_slot = None;
+    let mut virtio_mouse_slot = None;
     for (config_index, config) in configs.iter_mut().enumerate() {
         if config.vendor_id == 0xFFFF {
             continue;
@@ -100,7 +102,11 @@ pub fn initialize_all_pci(
             let virtio_input = virtio::initialize_input(config, &bars);
             let plic = pci_interrupt_to_plic(device_tree, config_index, config);
             register_interrupt(plic, virtio_input);
-            virtio_input_slot = Some(virtio_input);
+            if virtio_input.is_keyboard() {
+                virtio_keyboard_slot = Some(virtio_input);
+            } else if virtio_input.is_mouse() {
+                virtio_mouse_slot = Some(virtio_input);
+            }
         } else if config.vendor_id == 0x1B36 && config.device_id == 0x0008 {
             // TODO: Use this to scan the space more efficiently?
         } else {
@@ -114,7 +120,8 @@ pub fn initialize_all_pci(
         virtio_blk_slot.unwrap(),
         virtio_net_slot.unwrap(),
         virtio_gpu_slot.unwrap(),
-        virtio_input_slot.unwrap(),
+        virtio_keyboard_slot.unwrap(),
+        virtio_mouse_slot.unwrap(),
     )
 }
 

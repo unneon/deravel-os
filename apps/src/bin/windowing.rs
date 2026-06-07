@@ -1,3 +1,4 @@
+#![allow(clippy::collapsible_if)]
 #![no_std]
 #![no_main]
 extern crate alloc;
@@ -11,6 +12,7 @@ struct Server {
     display_width: u32,
     display_framebuffer: &'static mut [u8],
     windows: Vec<WindowData>,
+    active_window: Option<usize>,
 }
 
 struct WindowData {
@@ -39,6 +41,7 @@ impl WindowingServer for Server {
             memory,
             event_ring: None,
         });
+        self.active_window = Some(window_id);
         ctx.grant_capability(window_id)
     }
 }
@@ -91,19 +94,22 @@ fn main(args: Args) {
         display_framebuffer: framebuffer,
         display: args.display,
         windows: Vec::new(),
+        active_window: None,
     };
 
     let keyboard = args.keyboard.events();
+    let mouse = args.mouse.events();
     let mut dispatch = Dispatch::new(server);
     loop {
         ipc_serve(&mut dispatch);
         while let Some(event) = keyboard.poll() {
-            for window in &dispatch.server.windows {
-                if let Some(event_ring) = window.event_ring {
+            if let Some(window_id) = dispatch.server.active_window {
+                if let Some(event_ring) = dispatch.server.windows[window_id].event_ring {
                     event_ring.push(event);
                 }
             }
         }
+        while let Some(_event) = mouse.poll() {}
         yield_();
     }
 }

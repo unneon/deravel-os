@@ -82,7 +82,8 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     initialize_log();
     initialize_trap_handler();
     log_sbi_metadata();
-    let (virtio_blk, virtio_net, virtio_gpu, virtio_input) = initialize_all_pci(&device_tree);
+    let (virtio_blk, virtio_net, virtio_gpu, virtio_keyboard, virtio_mouse) =
+        initialize_all_pci(&device_tree);
     initialize_plic(&device_tree);
     initialize_hart_stack();
     enable_interrupts();
@@ -118,7 +119,8 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     });
     windowing.spawn(WindowingArgs {
         display: reserve_kernel_capability(virtio_gpu),
-        keyboard: reserve_kernel_capability(virtio_input),
+        keyboard: reserve_kernel_capability(virtio_keyboard),
+        mouse: reserve_kernel_capability(virtio_mouse),
     });
 
     // TODO: initialize_hart_stack should take a callback and pass this with the correct lifetime.

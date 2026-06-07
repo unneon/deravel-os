@@ -26,7 +26,7 @@ pub union ConfigU {
 
 impl ConfigString {
     pub fn as_str(&self) -> &str {
-        unsafe { str::from_utf8_unchecked(&self.u.string[..self.len as usize]) }
+        unsafe { str::from_utf8_unchecked(&self.u.string[..self.len as usize - 1]) }
     }
 }
 

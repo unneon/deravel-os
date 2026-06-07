@@ -12,7 +12,7 @@ app shell(console console, fs filesystem, net network)
 
 app tar_fs(drive drive) implements filesystem
 
-app windowing(display display, keyboard input_device)
+app windowing(display display, keyboard input_device, mouse input_device)
     func create_window() window
 
 app terminal(windowing windowing) implements console

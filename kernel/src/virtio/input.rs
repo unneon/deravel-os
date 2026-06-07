@@ -23,6 +23,7 @@ struct State {
 
 pub struct VirtioInput {
     isr: Volatile<u8, Readonly>,
+    device: Volatile<Config>,
     ring: &'static RingBuffer<InputEvent>,
     state: Mutex<State>,
 }
@@ -60,9 +61,18 @@ impl VirtioInput {
         common.device_status().write_bitor(STATUS_DRIVER_OK as u8);
         VirtioInput {
             isr: caps.isr,
+            device: caps.device,
             ring,
             state: Mutex::new(State { eventq, buffers }),
         }
+    }
+
+    pub fn is_keyboard(&self) -> bool {
+        config_str(self.device, ConfigSelect::IdName, 0).as_str() == "QEMU Virtio Keyboard"
+    }
+
+    pub fn is_mouse(&self) -> bool {
+        config_str(self.device, ConfigSelect::IdName, 0).as_str() == "QEMU Virtio Mouse"
     }
 }
 
