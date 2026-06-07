@@ -67,15 +67,12 @@ impl WindowServer<usize> for Server {
         let window = &mut self.windows[window_id];
         for window_y in 0..window.height as usize {
             let display_y = window.y as usize + window_y;
-            for window_x in 0..window.width as usize {
-                let display_x = window.x as usize + window_x;
-                for channel in 0..4 {
-                    self.display_framebuffer
-                        [display_y * 4 * self.display_width as usize + display_x * 4 + channel] =
-                        window.framebuffer
-                            [window_y * 4 * window.width as usize + window_x * 4 + channel];
-                }
-            }
+            let display_offset =
+                4 * display_y * self.display_width as usize + 4 * window.x as usize;
+            let window_offset = 4 * window_y * window.width as usize;
+            let size = 4 * window.width as usize;
+            self.display_framebuffer[display_offset..display_offset + size]
+                .copy_from_slice(&window.framebuffer[window_offset..window_offset + size]);
         }
         self.display.draw();
     }
@@ -89,11 +86,6 @@ impl WindowServer<usize> for Server {
         (cap, ring.untype().0.data.0.len())
     }
 }
-
-unsafe impl Send for Server {}
-unsafe impl Sync for Server {}
-unsafe impl Send for WindowData {}
-unsafe impl Sync for WindowData {}
 
 fn main(args: Args) {
     let width = args.display.width();
