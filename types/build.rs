@@ -30,6 +30,13 @@ fn main() {
         let name_camel = camel_case(name_snake);
         writeln!(&mut output, "#[derive(Clone, Copy)]").unwrap();
         writeln!(&mut output, "pub struct {name_camel};").unwrap();
+        writeln!(&mut output, "impl Interface for {name_camel} {{").unwrap();
+        writeln!(
+            &mut output,
+            "    const NAME: &'static str = \"{name_snake}\";"
+        )
+        .unwrap();
+        writeln!(&mut output, "}}").unwrap();
         if let InterfaceDetails::App { args, implements } = &interface.details {
             writeln!(&mut output, "#[repr(C)]").unwrap();
             writeln!(&mut output, "pub struct {name_camel}Args {{").unwrap();

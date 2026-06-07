@@ -5,7 +5,7 @@ use core::marker::PhantomData;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use deravel_types::{
     Actor, Capability, CapabilityCertificate, CapabilityCertificateUnpacked,
-    CapabilityCertificateValue, PAGE_SIZE, ProcessId, RawCapability,
+    CapabilityCertificateValue, Interface, PAGE_SIZE, ProcessId, RawCapability,
     get_capability_certificate_page,
 };
 use log::trace;
@@ -35,7 +35,7 @@ impl<T, H: Handler<T>> RawHandler for TypedHandler<T, H> {
     }
 }
 
-pub fn grant_capability2<T: 'static + Sync>(
+pub fn grant_capability2<T: 'static + Interface + Sync>(
     grantee: impl Into<Actor>,
     handler: &'static mut (impl Handler<T> + Sync),
 ) -> Capability<T> {
@@ -48,7 +48,8 @@ pub fn grant_capability2<T: 'static + Sync>(
         Ordering::Relaxed,
     );
     let cap = Capability(RawCapability::from_pointer(certificate), PhantomData);
-    trace!("granted {cap:?} to {grantee:?}");
+    let t_name = T::NAME;
+    trace!("granted {cap:?} {t_name} to {grantee:?}");
     cap
 }
 
@@ -56,25 +57,34 @@ pub fn register_root_capability<T: 'static + Sync>(handler: &'static mut (impl H
     unsafe { HANDLERS[0] = Some(Box::leak(Box::new(TypedHandler(handler, PhantomData)))) }
 }
 
-pub fn forward_capability<T, U>(cap: Capability<T>, forwardee: Capability<U>) -> Capability<T> {
+pub fn forward_capability<T: Interface, U: Interface>(
+    cap: Capability<T>,
+    forwardee: Capability<U>,
+) -> Capability<T> {
     let certificate = allocate_certificate();
     certificate.store(
         CapabilityCertificateValue::forwarded(forwardee.certifier(), cap.0),
         Ordering::Relaxed,
     );
     let forwarded = Capability(RawCapability::from_pointer(certificate), PhantomData);
-    trace!("forwarded {cap:?} as {forwarded:?} to {forwardee:?}");
+    let t_name = T::NAME;
+    let u_name = U::NAME;
+    trace!("forwarded {cap:?} {t_name} as {forwarded:?} to {forwardee:?} {u_name}");
     forwarded
 }
 
-pub fn forward_capability_by_pid<T>(cap: Capability<T>, forwardee: ProcessId) -> Capability<T> {
+pub fn forward_capability_by_pid<T: Interface>(
+    cap: Capability<T>,
+    forwardee: ProcessId,
+) -> Capability<T> {
     let certificate = allocate_certificate();
     certificate.store(
         CapabilityCertificateValue::forwarded(forwardee.into(), cap.0),
         Ordering::Relaxed,
     );
     let forwarded = Capability(RawCapability::from_pointer(certificate), PhantomData);
-    trace!("forwarded {cap:?} as {forwarded:?} to {forwardee:?}");
+    let t_name = T::NAME;
+    trace!("forwarded {cap:?} {t_name} as {forwarded:?} to {forwardee:?}");
     forwarded
 }
 
