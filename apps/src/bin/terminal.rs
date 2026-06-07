@@ -23,11 +23,9 @@ impl Renderer<'_> {
     fn render_char(&mut self, c: u8) {
         if c == b' ' {
             self.cursor_x += FONT.width as i32;
-            return;
         } else if c == b'\n' {
             self.cursor_x = 0;
             self.cursor_y += FONT.height as i32;
-            return;
         } else if let Some(glyph) = FONT
             .characters
             .iter()
@@ -121,6 +119,8 @@ impl ConsoleServer for Renderer<'_> {
                     KEY_Y => b'y',
                     KEY_Z => b'z',
                     KEY_ENTER => b'\r',
+                    KEY_DOT => b'.',
+                    KEY_SPACE => b' ',
                     _ => {
                         warn!("unrecognized {event:?}");
                         continue;

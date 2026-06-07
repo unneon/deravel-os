@@ -8,7 +8,7 @@ app ipc_b(c ipc_c)
 app ipc_c
     func bar(fs filesystem)
 
-app shell(console console)
+app shell(console console, fs filesystem)
 
 app tar_fs(drive drive) implements filesystem
 
