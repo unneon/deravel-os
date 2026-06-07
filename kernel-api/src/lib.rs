@@ -115,6 +115,10 @@ unsafe extern "C" fn __deravel_entry() -> ! {
     )
 }
 
+pub fn allocate_shared_memory(size: usize) -> Capability<SharedMemory> {
+    unsafe { syscall::allocate_shared_memory(size) }
+}
+
 pub fn exit() -> ! {
     unsafe { syscall::exit() }
 }
@@ -134,6 +138,11 @@ pub fn ipc_serve<S>(dispatch: &mut Dispatch<S>) {
         let result = dispatch.dispatch(cap, method, &buf[..args_len], sender);
         unsafe { syscall::ipc_reply(result.as_ptr(), result.len()) }
     }
+}
+
+pub fn map_shared_memory(cap: Capability<SharedMemory>) -> *mut [u8] {
+    let (pointer, size) = unsafe { syscall::map_shared_memory(cap) };
+    core::ptr::from_raw_parts_mut(pointer, size)
 }
 
 pub fn putchar(ch: u8) {

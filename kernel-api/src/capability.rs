@@ -38,7 +38,7 @@ pub struct Ctx<'a, S: ?Sized> {
 }
 
 pub struct Dispatch<S> {
-    server: S,
+    pub server: S,
     handlers: Vec<Option<Box<dyn RawHandler<S>>>>,
 }
 

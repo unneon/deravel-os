@@ -95,8 +95,7 @@ pub fn initialize_gpu(
     bars: &[AllocatedRange; 6],
 ) -> &'static Mutex<VirtioGpu> {
     let caps = extract_capabilities(config, bars);
-    let mut virtio_gpu = VirtioGpu::new(caps);
-    virtio_gpu.demo();
+    let virtio_gpu = VirtioGpu::new(caps);
     Box::leak(Box::new(Mutex::new(virtio_gpu)))
 }
 

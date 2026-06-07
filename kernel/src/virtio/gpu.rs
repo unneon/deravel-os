@@ -60,27 +60,15 @@ impl VirtioGpu {
         let resp: ResponseDisplayInfo = gpu.command(1).unwrap();
         let pmode = &resp.pmodes[0];
         assert_eq!(pmode.enabled, 1);
-        assert_eq!(pmode.r.x, 0);
-        assert_eq!(pmode.r.y, 0);
-        let width = pmode.r.width;
-        let height = pmode.r.height;
+        let r = pmode.r;
+        assert_eq!(r.x, 0);
+        assert_eq!(r.y, 0);
+        let width = r.width;
+        let height = r.height;
         gpu.width = width;
         gpu.height = height;
         gpu.framebuffer = vec![0u8; width as usize * height as usize * 4];
         info!("detected a {width}x{height} display");
-
-        gpu
-    }
-
-    pub fn demo(&mut self) {
-        let width = self.width;
-        let height = self.height;
-        let r = Rect {
-            x: 0,
-            y: 0,
-            width,
-            height,
-        };
 
         let req = ResourceCreate2D {
             hdr: CtrlType::CmdResourceCreate2D.header(),
@@ -89,8 +77,8 @@ impl VirtioGpu {
             width,
             height,
         };
-        self.controlq.descriptor_readonly(0, &req, Some(1));
-        self.command::<ResponseNodata>(1).unwrap();
+        gpu.controlq.descriptor_readonly(0, &req, Some(1));
+        gpu.command::<ResponseNodata>(1).unwrap();
 
         let req = ResourceAttachBacking {
             hdr: CtrlType::CmdResourceAttachBacking.header(),
@@ -98,13 +86,13 @@ impl VirtioGpu {
             nr_entries: 1,
         };
         let mem_entry = MemEntry {
-            addr: self.framebuffer.as_ptr() as u64,
-            length: self.framebuffer.len() as u32,
+            addr: gpu.framebuffer.as_ptr() as u64,
+            length: gpu.framebuffer.len() as u32,
             padding: 0,
         };
-        self.controlq.descriptor_readonly(0, &req, Some(1));
-        self.controlq.descriptor_readonly(1, &mem_entry, Some(2));
-        self.command::<ResponseNodata>(2).unwrap();
+        gpu.controlq.descriptor_readonly(0, &req, Some(1));
+        gpu.controlq.descriptor_readonly(1, &mem_entry, Some(2));
+        gpu.command::<ResponseNodata>(2).unwrap();
 
         let req = SetScanout {
             hdr: CtrlType::CmdSetScanout.header(),
@@ -112,34 +100,10 @@ impl VirtioGpu {
             scanout_id: 0,
             resource_id: 1,
         };
-        self.controlq.descriptor_readonly(0, &req, Some(1));
-        self.command::<ResponseNodata>(1).unwrap();
+        gpu.controlq.descriptor_readonly(0, &req, Some(1));
+        gpu.command::<ResponseNodata>(1).unwrap();
 
-        for [b, g, r, a] in self.framebuffer.as_chunks_mut().0 {
-            *b = 255;
-            *g = 0;
-            *r = 255;
-            *a = 255;
-        }
-
-        let req = TransferToHost2D {
-            hdr: CtrlType::CmdTransferToHost2D.header(),
-            r,
-            offset: 0,
-            resource_id: 1,
-            padding: 0,
-        };
-        self.controlq.descriptor_readonly(0, &req, Some(1));
-        self.command::<ResponseNodata>(1).unwrap();
-
-        let req = ResourceFlush {
-            hdr: CtrlType::CmdResourceFlush.header(),
-            r,
-            resource_id: 1,
-            padding: 0,
-        };
-        self.controlq.descriptor_readonly(0, &req, Some(1));
-        self.command::<ResponseNodata>(1).unwrap();
+        gpu
     }
 
     fn command<T: Response>(&mut self, input_descriptors: usize) -> Result<T, Error> {

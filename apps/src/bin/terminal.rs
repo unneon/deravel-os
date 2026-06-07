@@ -134,14 +134,9 @@ impl ConsoleServer for Renderer<'_> {
     }
 }
 
-unsafe impl Send for Renderer<'_> {}
-unsafe impl Sync for Renderer<'_> {}
-
 fn main(args: Args) {
     let window = args.windowing.create_window();
-    let framebuffer = window.framebuffer();
-    let (framebuffer_ptr, framebuffer_len) = unsafe { syscall::map_shared_memory(framebuffer) };
-    let framebuffer = unsafe { core::slice::from_raw_parts_mut(framebuffer_ptr, framebuffer_len) };
+    let framebuffer = unsafe { &mut *map_shared_memory(window.framebuffer()) };
     let mut renderer = Renderer {
         cursor_x: 0,
         cursor_y: 0,

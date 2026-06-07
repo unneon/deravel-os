@@ -46,9 +46,10 @@ impl<T: Copy + Default> RingBuffer<T> {
     /// # Safety
     ///
     /// Allocation must be valid for 'static and at least page-sized.
-    pub unsafe fn new_in_single_page(page_pointer: *mut u8) -> &'static RingBuffer<T> {
+    pub unsafe fn new_in_single_page(page_pointer: *mut [u8]) -> &'static RingBuffer<T> {
+        assert_eq!(page_pointer.len(), PAGE_SIZE);
         let element_count = (PAGE_SIZE - 2 * CACHE_LINE_SIZE) / size_of::<T>();
-        unsafe { &*RingBuffer::new_in(element_count, page_pointer) }
+        unsafe { &*RingBuffer::new_in(element_count, page_pointer as *mut u8) }
     }
 }
 
