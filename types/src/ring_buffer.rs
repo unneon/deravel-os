@@ -26,8 +26,13 @@ impl<T: Copy + Default> RingBuffer<T> {
         if thin.is_null() {
             handle_alloc_error(layout);
         }
+        unsafe { Box::from_raw(RingBuffer::new_in(element_count, thin)) }
+    }
+
+    fn new_in(element_count: usize, thin: *mut u8) -> *mut RingBuffer<T> {
+        assert!(element_count > 0);
         let fat = core::ptr::from_raw_parts_mut::<RingBuffer<T>>(thin, element_count);
-        let mut ring_buffer = unsafe { Box::from_raw(fat) };
+        let ring_buffer = unsafe { &mut *fat };
         for element in &mut ring_buffer.data.0 {
             *element.get_mut() = T::default();
         }
@@ -36,6 +41,14 @@ impl<T: Copy + Default> RingBuffer<T> {
 
     pub fn new_single_page() -> Box<RingBuffer<T>> {
         RingBuffer::new((PAGE_SIZE - 2 * CACHE_LINE_SIZE) / size_of::<T>())
+    }
+
+    /// # Safety
+    ///
+    /// Allocation must be valid for 'static and at least page-sized.
+    pub unsafe fn new_in_single_page(page_pointer: *mut u8) -> &'static RingBuffer<T> {
+        let element_count = (PAGE_SIZE - 2 * CACHE_LINE_SIZE) / size_of::<T>();
+        unsafe { &*RingBuffer::new_in(element_count, page_pointer) }
     }
 }
 

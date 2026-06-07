@@ -57,6 +57,14 @@ fn main() {
             }
             writeln!(&mut output, ";").unwrap();
         }
+        for stream in &interface.streams {
+            let stream_name = &stream.name;
+            writeln!(
+                &mut output,
+                "    fn {stream_name}(&mut self, sender: ProcessId) -> (Capability<SharedMemory>, usize);"
+            )
+            .unwrap();
+        }
         writeln!(&mut output, "}}").unwrap();
         writeln!(
             &mut output,
@@ -166,7 +174,23 @@ fn generate_handler_impl(interface: &Interface, structs: &[Struct], out: &mut St
         writeln!(out, "                serde_json::to_vec(&result).unwrap()").unwrap();
         writeln!(out, "            }}").unwrap();
     }
-    writeln!(out, "            _ => unreachable!(),").unwrap();
+    for (stream_index, stream) in interface.streams.iter().enumerate() {
+        let stream_name = &stream.name;
+        let pseudo_method_index = stream_index + 1000;
+        writeln!(out, "            {pseudo_method_index} => {{").unwrap();
+        writeln!(
+            out,
+            "                let result = self.{stream_name}(_sender);"
+        )
+        .unwrap();
+        writeln!(out, "                serde_json::to_vec(&result).unwrap()").unwrap();
+        writeln!(out, "            }}").unwrap();
+    }
+    writeln!(
+        out,
+        "            _ => unreachable!(\"unknown method {{method}}\"),"
+    )
+    .unwrap();
     writeln!(out, "        }}").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out, "}}").unwrap();

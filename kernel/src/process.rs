@@ -23,6 +23,7 @@ pub enum ProcessState {
     WaitingForMessage,
     Reserved,
     WaitingForReply,
+    WaitingForStreamMap,
 }
 
 pub struct Process {
@@ -35,6 +36,7 @@ pub struct Process {
     pub messages: Option<Box<VecDeque<(RawCapability, usize, Vec<u8>, ProcessId)>>>,
     #[allow(clippy::box_collection)]
     pub reply: Option<Box<Vec<u8>>>,
+    pub stream_map: Option<(RawCapability, usize)>,
     pub currently_serving: Option<ProcessId>,
 }
 unsafe impl Send for Process {}
@@ -211,7 +213,8 @@ pub fn find_runnable_process(hart: &HartContext) -> Option<ProcessId> {
         if process.state == ProcessState::Runnable
             || (process.state == ProcessState::WaitingForMessage
                 && process.messages.as_ref().is_some_and(|q| !q.is_empty()))
-            || (process.state == ProcessState::WaitingForReply && process.reply.as_ref().is_some())
+            || (process.state == ProcessState::WaitingForReply && process.reply.is_some())
+            || (process.state == ProcessState::WaitingForStreamMap && process.stream_map.is_some())
         {
             return Some(ProcessId::new(scan_index));
         }

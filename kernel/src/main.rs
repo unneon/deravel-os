@@ -262,7 +262,14 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
         3 => {
             let result = copy_from_user(registers.a0 as *const u8, registers.a1);
             let caller = current_proc.currently_serving.take().unwrap();
-            PROCESSES[caller.as_usize()].lock().reply = Some(result.into());
+            let mut caller = PROCESSES[caller.as_usize()].lock();
+            if caller.state == ProcessState::WaitingForReply {
+                caller.reply = Some(result.into());
+            } else if caller.state == ProcessState::WaitingForStreamMap {
+                caller.stream_map = Some(serde_json::from_slice(&result).unwrap());
+            } else {
+                unimplemented!()
+            }
         }
         4 => {
             let page_count = registers.a0;
@@ -336,7 +343,63 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
 
             let original = validate_untrusted_capability(farthest_cap, current_pid);
             match original.certifier() {
-                Actor::Userspace(_) => unimplemented!(),
+                Actor::Userspace(original_pid) => {
+                    if current_proc.state == ProcessState::WaitingForStreamMap {
+                        let (ring, declared_size) = current_proc.stream_map.take().unwrap();
+                        let ring = validate_untrusted_capability(ring, original_pid.as_usize());
+                        assert_eq!(ring.certifier(), Actor::Kernel);
+
+                        let handler = capability::get_handler(ring.local_index());
+                        let physical_address = String::from_utf8(handler.call_method(
+                            0,
+                            b"null",
+                            ProcessId::new(current_pid),
+                        ))
+                        .unwrap()
+                        .parse::<usize>()
+                        .unwrap();
+                        let length = String::from_utf8(handler.call_method(
+                            1,
+                            b"null",
+                            ProcessId::new(current_pid),
+                        ))
+                        .unwrap()
+                        .parse::<usize>()
+                        .unwrap();
+                        assert!(length.is_multiple_of(PAGE_SIZE));
+                        assert!(length >= 2 * CACHE_LINE_SIZE + declared_size);
+
+                        let virtual_addr = current_proc.virtual_memory.allocate(length, PAGE_SIZE);
+                        let page_table =
+                            unsafe { &mut *(current_proc.page_table as *mut PageTable) };
+                        map_pages(
+                            page_table,
+                            virtual_addr,
+                            physical_address,
+                            PageFlags::readwrite().user(),
+                            length / PAGE_SIZE,
+                        );
+
+                        registers.a0 = virtual_addr;
+                        registers.a1 = declared_size;
+                        current_proc.state = ProcessState::Runnable;
+                    } else {
+                        current_proc.state = ProcessState::WaitingForStreamMap;
+                        current_proc.registers = registers.clone();
+                        current_proc.pc = user_pc;
+                        let mut dest = PROCESSES[original_pid.as_usize()].lock();
+                        dest.messages.get_or_insert_default().push_back((
+                            original,
+                            1000 + stream,
+                            Vec::new(),
+                            ProcessId::new(current_pid),
+                        ));
+
+                        drop(current_proc);
+                        drop(dest);
+                        schedule_and_switch_to_userspace(hart);
+                    }
+                }
                 Actor::Kernel => {
                     let handler = capability::get_handler(original.local_index());
                     let ring_buffer = handler.map_stream(stream);

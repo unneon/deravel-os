@@ -54,4 +54,4 @@ interface window
     func height() u32
     func framebuffer() shared_memory
     func draw()
-    func poll_event() input_event
+    stream events input_event

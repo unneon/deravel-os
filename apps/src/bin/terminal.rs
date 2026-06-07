@@ -16,7 +16,7 @@ struct Renderer<'a> {
     window_height: i32,
     framebuffer: &'a mut [u8],
     window: Capability<Window>,
-    last_polled_event: f64,
+    events: &'static RingBuffer<InputEvent>,
 }
 
 impl Renderer<'_> {
@@ -81,21 +81,13 @@ impl Renderer<'_> {
 impl ConsoleServer for Renderer<'_> {
     fn getchar(&mut self, _: ProcessId) -> u8 {
         loop {
-            let event = self.window.poll_event();
-            if event.type_ == 0 {
-                loop {
-                    let time = system_time();
-                    if time > self.last_polled_event + 0.1 {
-                        self.last_polled_event = time;
-                        break;
-                    }
-                    yield_();
-                }
+            let Some(event) = self.events.poll() else {
+                yield_();
                 continue;
             };
 
-            loop {
-                let following_event = self.window.poll_event();
+            // TODO: This assumes the entire sequence is always inserted at once.
+            while let Some(following_event) = self.events.poll() {
                 if following_event.type_ == 0 {
                     break;
                 }
@@ -158,7 +150,7 @@ fn main(args: Args) {
         window_height: window.height() as i32,
         framebuffer,
         window,
-        last_polled_event: f64::NEG_INFINITY,
+        events: window.events(),
     };
 
     renderer.clear_screen();

@@ -3,6 +3,7 @@
 extern crate alloc;
 
 use alloc::boxed::Box;
+use alloc::vec::Vec;
 use core::cell::RefCell;
 use deravel_kernel_api::*;
 use log::debug;
@@ -11,7 +12,7 @@ struct Server {
     width: u32,
     framebuffer: &'static RefCell<&'static mut [u8]>,
     cap: Capability<Display>,
-    keyboard: Capability<InputDevice>,
+    event_receivers: &'static RefCell<Vec<&'static RingBuffer<InputEvent>>>,
 }
 
 struct WindowData {
@@ -24,7 +25,8 @@ struct WindowData {
     display_width: u32,
     display_framebuffer: &'static RefCell<&'static mut [u8]>,
     display_cap: Capability<Display>,
-    input_events: &'static RingBuffer<InputEvent>,
+    event_ring: Option<&'static RingBuffer<InputEvent>>,
+    event_receivers: &'static RefCell<Vec<&'static RingBuffer<InputEvent>>>,
 }
 
 impl WindowingServer for Server {
@@ -47,7 +49,8 @@ impl WindowingServer for Server {
             display_width: self.width,
             display_framebuffer: self.framebuffer,
             display_cap: self.cap,
-            input_events: self.keyboard.events(),
+            event_ring: None,
+            event_receivers: self.event_receivers,
         }));
         grant_capability2(sender, data)
     }
@@ -83,16 +86,14 @@ impl WindowServer for WindowData {
         self.display_cap.draw();
     }
 
-    fn poll_event(&mut self, _: ProcessId) -> InputEvent {
-        if let Some(event) = self.input_events.poll() {
-            event
-        } else {
-            InputEvent {
-                type_: 0,
-                code: 0,
-                value: 0,
-            }
-        }
+    fn events(&mut self, _: ProcessId) -> (Capability<SharedMemory>, usize) {
+        debug!("setting up window events ring");
+        let cap = unsafe { syscall::allocate_shared_memory(PAGE_SIZE) };
+        let memory = unsafe { syscall::map_shared_memory(cap).0 };
+        let ring = unsafe { RingBuffer::new_in_single_page(memory) };
+        self.event_ring = Some(ring);
+        self.event_receivers.borrow_mut().push(ring);
+        (cap, ring.untype().0.data.0.len())
     }
 }
 
@@ -109,16 +110,26 @@ fn main(args: Args) {
     let (framebuffer, framebuffer_len) = unsafe { syscall::map_shared_memory(framebuffer) };
     let framebuffer = unsafe { core::slice::from_raw_parts_mut(framebuffer, framebuffer_len) };
     fill_screen(191, 215, 234, framebuffer, &args);
+
+    let event_receivers = Box::leak(Box::new(RefCell::new(Vec::new())));
     let server = Box::leak(Box::new(Server {
         width,
         framebuffer: Box::leak(Box::new(RefCell::new(framebuffer))),
         cap: args.display,
-        keyboard: args.keyboard,
+        event_receivers,
     }));
     register_root_capability(server);
 
+    let keyboard = args.keyboard.events();
     loop {
         ipc_serve();
+
+        while let Some(event) = keyboard.poll() {
+            for event_receiver in event_receivers.borrow().as_slice() {
+                event_receiver.push(event);
+            }
+        }
+
         yield_();
     }
 }

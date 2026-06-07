@@ -9,7 +9,7 @@ mod drvli;
 pub mod input;
 mod ring_buffer;
 
-pub use align::CacheLineAligned;
+pub use align::{CACHE_LINE_SIZE, CacheLineAligned};
 pub use capability::*;
 pub use drvli::*;
 pub use ring_buffer::{RingBuffer, UntypedRingBuffer};
