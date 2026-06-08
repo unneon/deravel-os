@@ -13,6 +13,7 @@ fn main() {
         r#"struct Font {{
     width: usize,
     height: usize,
+    leftpad: usize,
     characters: [Character; 94],
 }}
 
@@ -26,20 +27,32 @@ struct Character {{
 }}
 
 static FONT: Font = Font {{
-    width: 11,
-    height: 17,
     characters: ["#
     )
     .unwrap();
+    let mut min_xmin = 0;
+    let mut min_ymin = 0;
+    let mut max_xmax = 0;
+    let mut max_ymax = 0;
     for c in u8::MIN..=u8::MAX {
         if c.is_ascii_graphic() {
             let (metrics, bitmap) = font.rasterize(c as char, 17.0);
             writeln!(out, "        Character {{ ascii: {c}, xmin: {}, ymin: {}, width: {}, height: {}, bitmap: &{bitmap:?} }},", metrics.xmin, metrics.ymin, metrics.width, metrics.height).unwrap();
+            min_xmin = min_xmin.min(metrics.xmin);
+            min_ymin = min_ymin.min(metrics.ymin);
+            max_xmax = max_xmax.max(metrics.xmin + metrics.width as i32);
+            max_ymax = max_ymax.max(metrics.ymin + metrics.height as i32);
         }
     }
+    let max_width = (-min_xmin).max(0) + max_xmax;
+    let max_height = (-min_ymin).max(0) + max_ymax;
+    let max_leftpad = (-min_xmin).max(0);
     writeln!(
         out,
         r#"    ],
+    width: {max_width},
+    height: {max_height},
+    leftpad: {max_leftpad},
 }};"#
     )
     .unwrap();

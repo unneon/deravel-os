@@ -23,7 +23,7 @@ impl Renderer<'_> {
         if c == b' ' {
             self.cursor_x += FONT.width as i32;
         } else if c == b'\n' {
-            self.cursor_x = 0;
+            self.cursor_x = FONT.leftpad as i32;
             self.cursor_y += FONT.height as i32;
         } else if let Some(glyph) = FONT
             .characters
@@ -54,12 +54,12 @@ impl Renderer<'_> {
         }
 
         if self.cursor_x + FONT.width as i32 > self.window_width {
-            self.cursor_x = 0;
+            self.cursor_x = FONT.leftpad as i32;
             self.cursor_y += FONT.height as i32;
         }
         if self.cursor_y + FONT.height as i32 > self.window_height {
             self.scroll_up();
-            self.cursor_x = 0;
+            self.cursor_x = FONT.leftpad as i32;
             self.cursor_y -= FONT.height as i32;
         }
         self.window.draw();
@@ -144,7 +144,7 @@ fn main(args: Args) {
     let window = args.windowing.create_window();
     let framebuffer = unsafe { &mut *map_shared_memory(window.framebuffer()) };
     let mut renderer = Renderer {
-        cursor_x: 0,
+        cursor_x: FONT.leftpad as i32,
         cursor_y: 0,
         window_width: window.width() as i32,
         window_height: window.height() as i32,
