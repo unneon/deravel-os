@@ -67,8 +67,8 @@ impl WindowServer<usize> for Server {
                 4 * display_y * self.display_width as usize + 4 * window.x as usize;
             let window_offset = 4 * window_y * window.width as usize;
             let size = 4 * window.width as usize;
-            self.display_framebuffer[display_offset..display_offset + size]
-                .copy_from_slice(&window.framebuffer[window_offset..window_offset + size]);
+            self.display_framebuffer[display_offset..][..size]
+                .copy_from_slice(&window.framebuffer[window_offset..][..size]);
         }
         self.display.draw();
     }
