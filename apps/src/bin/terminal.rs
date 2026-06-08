@@ -58,20 +58,26 @@ impl Renderer<'_> {
             self.cursor_y += FONT.height as i32;
         }
         if self.cursor_y + FONT.height as i32 > self.window_height {
+            self.scroll_up();
             self.cursor_x = 0;
-            self.cursor_y = 0;
-            self.clear_screen();
+            self.cursor_y -= FONT.height as i32;
         }
         self.window.draw();
     }
 
+    fn scroll_up(&mut self) {
+        let row_size = 4 * self.window_width as usize;
+        let scroll_start = FONT.height * row_size;
+        let clear_start = self.framebuffer.len() - scroll_start;
+        self.framebuffer.copy_within(scroll_start.., 0);
+        self.framebuffer[clear_start..]
+            .as_chunks_mut()
+            .0
+            .fill([0, 0, 0, 255]);
+    }
+
     fn clear_screen(&mut self) {
-        for [b, g, r, a] in self.framebuffer.as_chunks_mut().0 {
-            *b = 0;
-            *g = 0;
-            *r = 0;
-            *a = 255;
-        }
+        self.framebuffer.as_chunks_mut().0.fill([0, 0, 0, 255]);
     }
 }
 
