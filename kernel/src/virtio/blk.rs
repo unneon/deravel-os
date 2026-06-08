@@ -1,5 +1,6 @@
 use crate::drvli::DriveServer;
 use crate::interrupt::InterruptHandler;
+use crate::sync::Mutex;
 use crate::util::volatile::{Readonly, Volatile, volatile_struct};
 use crate::virtio::Capabilities;
 use crate::virtio::queue::{QUEUE_SIZE, Queue};
@@ -24,6 +25,10 @@ struct Header {
 pub struct VirtioBlk {
     isr: Volatile<u8, Readonly>,
     device: Volatile<VirtioBlkConfig>,
+    state: Mutex<State>,
+}
+
+struct State {
     queue: Queue<0>,
 }
 
@@ -49,37 +54,37 @@ impl VirtioBlk {
         VirtioBlk {
             isr: caps.isr,
             device: caps.device,
-            queue,
+            state: Mutex::new(State { queue }),
         }
     }
 
-    #[allow(dead_code)]
-    pub fn read(&mut self, sector: u64, buf: &mut [u8; 512]) -> Result<(), VirtioBlkError> {
+    pub fn read(&self, sector: u64, buf: &mut [u8; 512]) -> Result<(), VirtioBlkError> {
         let header = Header {
             type_: VIRTIO_BLK_T_IN,
             reserved: 0,
             sector,
         };
+        let mut state = self.state.lock();
         let mut status: u8 = 0;
-        self.queue.descriptor_readonly(0, &header, Some(1));
-        self.queue.descriptor_writeonly(1, buf, Some(2));
-        self.queue.descriptor_writeonly(2, &mut status, None);
-        self.queue.send_and_recv(0);
+        state.queue.descriptor_readonly(0, &header, Some(1));
+        state.queue.descriptor_writeonly(1, buf, Some(2));
+        state.queue.descriptor_writeonly(2, &mut status, None);
+        state.queue.send_and_recv(0);
         result_from_status(status)
     }
 
-    #[allow(dead_code)]
-    pub fn write(&mut self, sector: u64, buf: &[u8; 512]) -> Result<(), VirtioBlkError> {
+    pub fn write(&self, sector: u64, buf: &[u8; 512]) -> Result<(), VirtioBlkError> {
         let header = Header {
             type_: VIRTIO_BLK_T_OUT,
             reserved: 0,
             sector,
         };
+        let mut state = self.state.lock();
         let mut status: u8 = 0;
-        self.queue.descriptor_readonly(0, &header, Some(1));
-        self.queue.descriptor_readonly(1, buf, Some(2));
-        self.queue.descriptor_writeonly(2, &mut status, None);
-        self.queue.send_and_recv(0);
+        state.queue.descriptor_readonly(0, &header, Some(1));
+        state.queue.descriptor_readonly(1, buf, Some(2));
+        state.queue.descriptor_writeonly(2, &mut status, None);
+        state.queue.send_and_recv(0);
         result_from_status(status)
     }
 
@@ -100,19 +105,13 @@ impl InterruptHandler for VirtioBlk {
 
 impl DriveServer for VirtioBlk {
     fn read(&self, _: ProcessId, sector: u64) -> Vec<u8> {
-        // TODO: Use a mutex here.
-        #[allow(invalid_reference_casting)]
-        let this = unsafe { &mut *(self as *const _ as *mut VirtioBlk) };
         let mut buf = Box::new([0u8; 512]);
-        this.read(sector, &mut buf).unwrap();
+        self.read(sector, &mut buf).unwrap();
         Vec::from(buf as Box<[u8]>)
     }
 
     fn write(&self, _: ProcessId, sector: u64, data: &[u8]) {
-        // TODO: Use a mutex here.
-        #[allow(invalid_reference_casting)]
-        let this = unsafe { &mut *(self as *const _ as *mut VirtioBlk) };
-        this.write(sector, data.try_into().unwrap()).unwrap()
+        self.write(sector, data.try_into().unwrap()).unwrap()
     }
 
     fn capacity(&self, _: ProcessId) -> u64 {
