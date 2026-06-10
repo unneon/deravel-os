@@ -4,8 +4,14 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
+use deravel_kernel_api::input::{EV_KEY, KEY_ESC, KEY_LEFTALT};
 use deravel_kernel_api::*;
 use log::debug;
+
+enum Shortcut {
+    NotStarted,
+    Alt,
+}
 
 struct Server {
     display: Capability<Display>,
@@ -13,6 +19,7 @@ struct Server {
     display_framebuffer: &'static mut [u8],
     windows: Vec<WindowData>,
     active_window: Option<usize>,
+    global_shortcut: Shortcut,
 }
 
 struct WindowData {
@@ -84,6 +91,15 @@ impl WindowServer<usize> for Server {
 
 impl Observer<InputEvent, ()> for Server {
     fn observe(&mut self, event: InputEvent, _: ()) {
+        if event.type_ == EV_KEY {
+            match (&mut self.global_shortcut, event.code, event.value) {
+                (Shortcut::NotStarted, KEY_LEFTALT, 1) => self.global_shortcut = Shortcut::Alt,
+                (Shortcut::Alt, KEY_ESC, 1) => exit(),
+                (Shortcut::Alt, KEY_LEFTALT, 0) => self.global_shortcut = Shortcut::NotStarted,
+                (Shortcut::Alt, _, 1) => self.global_shortcut = Shortcut::NotStarted,
+                _ => {}
+            }
+        }
         if let Some(window_id) = self.active_window {
             if let Some(event_ring) = self.windows[window_id].event_ring {
                 event_ring.push(event);
@@ -105,6 +121,7 @@ fn main(args: Args) {
         display: args.display,
         windows: Vec::new(),
         active_window: None,
+        global_shortcut: Shortcut::NotStarted,
     };
 
     let mut dispatch = Dispatch::new(server);
