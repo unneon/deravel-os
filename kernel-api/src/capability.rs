@@ -6,7 +6,7 @@ use core::marker::PhantomData;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use deravel_types::{
     Actor, Capability, CapabilityCertificate, CapabilityCertificateUnpacked,
-    CapabilityCertificateValue, Interface, ProcessId, RawCapability,
+    CapabilityCertificateValue, Interface, ProcessId, RawCapability, RingBuffer,
     get_capability_certificate_page,
 };
 use log::trace;
@@ -22,6 +22,10 @@ pub trait Handler<T, O: Copy> {
     ) -> Vec<u8>;
 }
 
+pub trait Observer<T, O: Copy> {
+    fn observe(&mut self, value: T, object: O);
+}
+
 pub trait RawHandler<S: ?Sized> {
     fn call_method(
         &mut self,
@@ -32,6 +36,10 @@ pub trait RawHandler<S: ?Sized> {
     ) -> (Vec<u8>, Vec<HandlerEntry<S>>);
 }
 
+pub trait RawObserver<S: ?Sized> {
+    fn observe(&mut self, server: &mut S);
+}
+
 pub struct Ctx<'a, S: ?Sized> {
     sender: ProcessId,
     new_handlers: &'a mut Vec<HandlerEntry<S>>,
@@ -40,6 +48,7 @@ pub struct Ctx<'a, S: ?Sized> {
 pub struct Dispatch<S> {
     pub server: S,
     handlers: Vec<Option<Box<dyn RawHandler<S>>>>,
+    observers: Vec<Box<dyn RawObserver<S>>>,
 }
 
 pub struct HandlerEntry<S: ?Sized> {
@@ -48,6 +57,8 @@ pub struct HandlerEntry<S: ?Sized> {
 }
 
 struct TypedHandler<T, O>(O, PhantomData<T>);
+
+struct TypedObserver<T: 'static, O>(O, &'static RingBuffer<T>);
 
 impl<S: ?Sized + Handler<T, O>, T, O: Copy> RawHandler<S> for TypedHandler<T, O> {
     fn call_method(
@@ -64,6 +75,14 @@ impl<S: ?Sized + Handler<T, O>, T, O: Copy> RawHandler<S> for TypedHandler<T, O>
         };
         let result = server.call_method(&mut ctx, method, args, self.0, sender);
         (result, new_handlers)
+    }
+}
+
+impl<S: ?Sized + Observer<T, O>, T: Copy, O: Copy> RawObserver<S> for TypedObserver<T, O> {
+    fn observe(&mut self, server: &mut S) {
+        while let Some(value) = self.1.poll() {
+            server.observe(value, self.0);
+        }
     }
 }
 
@@ -114,7 +133,21 @@ impl<S> Dispatch<S> {
         let handlers = vec![Some(
             Box::new(TypedHandler(object, PhantomData)) as Box<dyn RawHandler<S> + 'static>
         )];
-        Dispatch { server, handlers }
+        Dispatch {
+            server,
+            handlers,
+            observers: Vec::new(),
+        }
+    }
+
+    pub fn observe<T: Copy + 'static, O: Copy + 'static>(
+        &mut self,
+        object: O,
+        ring: &'static RingBuffer<T>,
+    ) where
+        S: Observer<T, O>,
+    {
+        self.observers.push(Box::new(TypedObserver(object, ring)));
     }
 }
 
@@ -136,6 +169,12 @@ impl<S> Dispatch<S> {
             self.handlers[new_handler.local_index] = Some(new_handler.handler);
         }
         result
+    }
+
+    pub fn run_observables(&mut self) {
+        for observable in &mut self.observers {
+            observable.observe(&mut self.server);
+        }
     }
 }
 

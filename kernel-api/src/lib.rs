@@ -138,6 +138,7 @@ pub fn ipc_serve<S>(dispatch: &mut Dispatch<S>) {
         let result = dispatch.dispatch(cap, method, &buf[..args_len], sender);
         unsafe { syscall::ipc_reply(result.as_ptr(), result.len()) }
     }
+    dispatch.run_observables();
 }
 
 pub fn map_shared_memory(cap: Capability<SharedMemory>) -> *mut [u8] {

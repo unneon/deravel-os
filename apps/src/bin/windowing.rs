@@ -82,6 +82,16 @@ impl WindowServer<usize> for Server {
     }
 }
 
+impl Observer<InputEvent, ()> for Server {
+    fn observe(&mut self, event: InputEvent, _: ()) {
+        if let Some(window_id) = self.active_window {
+            if let Some(event_ring) = self.windows[window_id].event_ring {
+                event_ring.push(event);
+            }
+        }
+    }
+}
+
 fn main(args: Args) {
     let width = args.display.width();
     let height = args.display.height();
@@ -97,19 +107,10 @@ fn main(args: Args) {
         active_window: None,
     };
 
-    let keyboard = args.keyboard.events();
-    let mouse = args.mouse.events();
     let mut dispatch = Dispatch::new(server);
+    dispatch.observe((), args.keyboard.events());
     loop {
         ipc_serve(&mut dispatch);
-        while let Some(event) = keyboard.poll() {
-            if let Some(window_id) = dispatch.server.active_window {
-                if let Some(event_ring) = dispatch.server.windows[window_id].event_ring {
-                    event_ring.push(event);
-                }
-            }
-        }
-        while let Some(_event) = mouse.poll() {}
         yield_();
     }
 }
