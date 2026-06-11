@@ -4,7 +4,7 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
-use deravel_kernel_api::input::{EV_KEY, KEY_ESC, KEY_LEFTALT};
+use deravel_kernel_api::input::{EV_KEY, EV_REL, EV_SYN, KEY_ESC, KEY_LEFTALT, REL_X, REL_Y};
 use deravel_kernel_api::*;
 use log::debug;
 
@@ -16,9 +16,12 @@ enum Shortcut {
 struct Server {
     display: Capability<Display>,
     display_width: u32,
+    display_height: u32,
     display_framebuffer: &'static mut [u8],
     windows: Vec<WindowData>,
     active_window: Option<usize>,
+    cursor_x: u32,
+    cursor_y: u32,
     global_shortcut: Shortcut,
 }
 
@@ -31,6 +34,12 @@ struct WindowData {
     memory: Capability<SharedMemory>,
     event_ring: Option<&'static RingBuffer<InputEvent>>,
 }
+
+#[derive(Clone, Copy)]
+struct KeyboardTag;
+
+#[derive(Clone, Copy)]
+struct MouseTag;
 
 impl WindowingServer for Server {
     fn create_window(&mut self, ctx: &mut Ctx<Self>, _: ()) -> Capability<Window> {
@@ -89,8 +98,8 @@ impl WindowServer<usize> for Server {
     }
 }
 
-impl Observer<InputEvent, ()> for Server {
-    fn observe(&mut self, event: InputEvent, _: ()) {
+impl Observer<InputEvent, KeyboardTag> for Server {
+    fn observe(&mut self, event: InputEvent, _: KeyboardTag) {
         if event.type_ == EV_KEY {
             match (&mut self.global_shortcut, event.code, event.value) {
                 (Shortcut::NotStarted, KEY_LEFTALT, 1) => self.global_shortcut = Shortcut::Alt,
@@ -108,6 +117,37 @@ impl Observer<InputEvent, ()> for Server {
     }
 }
 
+impl Observer<InputEvent, MouseTag> for Server {
+    fn observe(&mut self, event: InputEvent, _: MouseTag) {
+        if event.type_ == EV_REL {
+            let delta = event.value as i32;
+            if event.code == REL_X {
+                self.cursor_x = self
+                    .cursor_x
+                    .saturating_add_signed(delta)
+                    .min(self.display_width);
+            } else if event.code == REL_Y {
+                self.cursor_y = self
+                    .cursor_y
+                    .saturating_add_signed(delta)
+                    .min(self.display_height);
+            }
+        } else if event.type_ == EV_SYN {
+            for dy in 0..5 {
+                for dx in 0..5 {
+                    self.display_framebuffer
+                        .as_chunks_mut()
+                        .0
+                        .chunks_mut(self.display_width as usize)
+                        .nth(self.cursor_y as usize + dy)
+                        .unwrap()[self.cursor_x as usize + dx] = [0, 0, 255, 255];
+                }
+            }
+            self.display.draw();
+        }
+    }
+}
+
 fn main(args: Args) {
     let width = args.display.width();
     let height = args.display.height();
@@ -117,15 +157,19 @@ fn main(args: Args) {
 
     let server = Server {
         display_width: width,
+        display_height: height,
         display_framebuffer: framebuffer,
         display: args.display,
         windows: Vec::new(),
         active_window: None,
+        cursor_x: width / 2,
+        cursor_y: height / 2,
         global_shortcut: Shortcut::NotStarted,
     };
 
     let mut dispatch = Dispatch::new(server);
-    dispatch.observe((), args.keyboard.events());
+    dispatch.observe(KeyboardTag, args.keyboard.events());
+    dispatch.observe(MouseTag, args.mouse.events());
     loop {
         ipc_serve(&mut dispatch);
         yield_();

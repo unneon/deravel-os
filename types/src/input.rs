@@ -105,3 +105,19 @@ defines! {
     #define KEY_KP0			82
     #define KEY_KPDOT		83
 }
+
+defines! {
+    #define REL_X			0x00
+    #define REL_Y			0x01
+    #define REL_Z			0x02
+    #define REL_RX			0x03
+    #define REL_RY			0x04
+    #define REL_RZ			0x05
+    #define REL_HWHEEL		0x06
+    #define REL_DIAL		0x07
+    #define REL_WHEEL		0x08
+    #define REL_MISC		0x09
+    #define REL_RESERVED		0x0a
+    #define REL_WHEEL_HI_RES	0x0b
+    #define REL_HWHEEL_HI_RES	0x0c
+}
