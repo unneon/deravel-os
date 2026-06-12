@@ -10,7 +10,7 @@ unsafe extern "C" {
 }
 
 #[repr(C)]
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct RiscvRegisters {
     pub ra: usize,
     pub sp: usize,
@@ -62,7 +62,7 @@ pub fn initialize_trap_handler() {
     unsafe { riscv::register::stvec::write(Stvec::new(address, TrapMode::Direct)) }
 }
 
-pub fn switch_to_userspace_full(next: MutexGuard<Process>) -> ! {
+pub fn switch_to_userspace_full(mut next: MutexGuard<Process>) -> ! {
     riscv::asm::sfence_vma_all();
     unsafe { riscv::register::satp::write(next.satp()) };
     riscv::asm::sfence_vma_all();
@@ -71,7 +71,8 @@ pub fn switch_to_userspace_full(next: MutexGuard<Process>) -> ! {
     status.set_spie(true);
     status.set_sum(true);
     unsafe { riscv::register::sstatus::write(status) };
-    let registers = &next.registers as *const _;
+    let registers = next.registers.take().unwrap();
+    let registers = &registers as *const _;
     drop(next);
     switch_to_userspace_registers_only(registers)
 }

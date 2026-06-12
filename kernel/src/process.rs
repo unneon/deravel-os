@@ -30,7 +30,7 @@ pub enum ProcessState {
 pub struct Process {
     pub name: Option<&'static str>,
     pub state: ProcessState,
-    pub registers: RiscvRegisters,
+    pub registers: Option<RiscvRegisters>,
     pub pc: usize,
     pub page_table: *const PageTable,
     pub virtual_memory: TrivialAllocator,
@@ -120,6 +120,7 @@ pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: Pro
     let mut proc = PROCESSES[pid].lock();
     proc.name = Some(name);
     proc.state = ProcessState::Runnable;
+    proc.registers = Some(RiscvRegisters::default());
     proc.pc = entry_point;
     proc.page_table = Box::leak(page_table);
     proc.virtual_memory = TrivialAllocator::new_range(0x4000000, 0x5000000);
