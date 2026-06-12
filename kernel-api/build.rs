@@ -1,8 +1,10 @@
 use deravel_codegen::{
     Drvli, Interface, camel_case, parse_drvli, rust_arg_type, rust_borrow_or_copy,
-    rust_grantable_ret_type, rust_normal_ret_type, rust_stream_type,
+    rust_escape_name, rust_grantable_ret_type, rust_normal_ret_type, rust_stream_type,
+    rust_syscall_arg_type, rust_syscall_ret_type,
 };
 use std::fmt::Write;
+use std::iter::once;
 
 fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -16,6 +18,7 @@ fn main() {
         generate_server_trait(interface, &drvli, &mut out);
         generate_server_handler_impl(interface, &drvli, &mut out);
     }
+    generate_syscalls(&drvli, &mut out);
     let out_path = format!("{}/drvli.rs", std::env::var("OUT_DIR").unwrap());
     std::fs::write(out_path, out).unwrap();
     println!("cargo::rerun-if-changed=../interfaces.drvli");
@@ -47,7 +50,7 @@ fn generate_client_impl(interface: &Interface, drvli: &Drvli, out: &mut String) 
         }
         writeln!(out, "        )).unwrap();").unwrap();
         writeln!(out, "        let mut buf = [0u8; 4096];").unwrap();
-        writeln!( out, "        let result_len = unsafe {{ ipc_call(self.0, {method_id}, data.as_ptr(), data.len(), buf.as_mut_ptr(), buf.len()) }};").unwrap();
+        writeln!( out, "        let result_len = unsafe {{ syscall2::ipc_call(self.0, {method_id}, data.as_ptr(), data.len(), buf.as_mut_ptr(), buf.len()) }};").unwrap();
         writeln!(
             out,
             "        serde_json::from_slice(&buf[..result_len]).unwrap()"
@@ -65,7 +68,7 @@ fn generate_client_impl(interface: &Interface, drvli: &Drvli, out: &mut String) 
         .unwrap();
         writeln!(
              out,
-            "        let (ring_buffer, byte_count) = unsafe {{ ipc_map_ring_buffer(self.0, {stream_id}) }};"
+            "        let (ring_buffer, byte_count) = unsafe {{ syscall2::ipc_map_ring_buffer(self.0, {stream_id}) }};"
         )
             .unwrap();
         writeln!(
@@ -203,5 +206,128 @@ fn generate_server_handler_impl(interface: &Interface, drvli: &Drvli, out: &mut 
     .unwrap();
     writeln!(out, "        }}").unwrap();
     writeln!(out, "    }}").unwrap();
+    writeln!(out, "}}").unwrap();
+}
+
+fn split_syscall_arg(type_: &str) -> impl Iterator<Item = (&'static str, &str)> {
+    match type_ {
+        "array u8" => Box::new([("_ptr", "ptr u8"), ("_size", "usize")].into_iter())
+            as Box<dyn Iterator<Item = (&'static str, &str)>>,
+        "const_array u8" => Box::new([("_ptr", "const_ptr u8"), ("_size", "usize")].into_iter()),
+        _ => Box::new(once(("", type_))),
+    }
+}
+
+fn split_syscall_ret(type_: &str) -> impl Iterator<Item = &str> {
+    match type_ {
+        "array u8" => Box::new(["ptr u8", "usize"].into_iter()) as Box<dyn Iterator<Item = &str>>,
+        "const_array u8" => Box::new(["const_ptr u8", "usize"].into_iter()),
+        "ptr u8, usize" => Box::new(["ptr u8", "usize"].into_iter()),
+        "ptr, usize" => Box::new(["ptr", "usize"].into_iter()),
+        "capability, usize, usize, pid" => {
+            Box::new(["capability", "usize", "usize", "pid"].into_iter())
+        }
+        _ => Box::new(once(type_)),
+    }
+}
+
+fn generate_syscalls(drvli: &Drvli, out: &mut String) {
+    writeln!(out, "pub mod syscall2 {{").unwrap();
+    writeln!(out, "    #![allow(clippy::missing_safety_doc)]").unwrap();
+    writeln!(out, "    use crate::syscall::{{from_reg, to_reg}};").unwrap();
+    writeln!(out, "    use deravel_types::*;").unwrap();
+    for (syscall_number, syscall) in drvli.syscalls.iter().enumerate() {
+        let syscall_name = rust_escape_name(syscall.name);
+        write!(out, "    pub unsafe fn {syscall_name}(").unwrap();
+        for (arg_name, arg_suffix, arg_type) in syscall.args.iter().flat_map(|(name, type_)| {
+            split_syscall_arg(type_).map(move |(suffix, type_)| (name, suffix, type_))
+        }) {
+            let arg_type = rust_syscall_arg_type(arg_type, &drvli.structs);
+            write!(out, "{arg_name}{arg_suffix}: {arg_type}, ").unwrap();
+        }
+        write!(out, ")").unwrap();
+        if let Some(return_type) = syscall.return_type {
+            if syscall
+                .return_type
+                .into_iter()
+                .flat_map(split_syscall_ret)
+                .count()
+                == 1
+            {
+                let return_type = rust_syscall_ret_type(return_type, &drvli.structs);
+                write!(out, " -> {return_type}").unwrap();
+            } else {
+                write!(out, " -> (").unwrap();
+                for ret_type in split_syscall_ret(return_type) {
+                    let ret_type = rust_syscall_ret_type(ret_type, &drvli.structs);
+                    write!(out, "{ret_type}, ").unwrap();
+                }
+                writeln!(out, "            )").unwrap();
+            }
+        }
+        writeln!(out, " {{").unwrap();
+        for (ret_index, _) in syscall
+            .return_type
+            .into_iter()
+            .flat_map(split_syscall_ret)
+            .enumerate()
+        {
+            writeln!(out, "        let a{ret_index}: usize;").unwrap();
+        }
+        writeln!(out, "        unsafe {{").unwrap();
+        writeln!(out, "            core::arch::asm!(").unwrap();
+        writeln!(out, "                \"ecall\",").unwrap();
+        for (arg_index, (arg_name, arg_suffix, _)) in syscall
+            .args
+            .iter()
+            .flat_map(|(name, type_)| {
+                split_syscall_arg(type_).map(move |(suffix, type_)| (name, suffix, type_))
+            })
+            .enumerate()
+        {
+            writeln!(
+                out,
+                "                in(\"a{arg_index}\") to_reg({arg_name}{arg_suffix}),"
+            )
+            .unwrap();
+        }
+        writeln!(out, "                in(\"a6\") {syscall_number},").unwrap();
+        for (ret_index, _) in syscall
+            .return_type
+            .into_iter()
+            .flat_map(split_syscall_ret)
+            .enumerate()
+        {
+            writeln!(
+                out,
+                "                lateout(\"a{ret_index}\") a{ret_index},"
+            )
+            .unwrap();
+        }
+        writeln!(out, "            );").unwrap();
+        if syscall.return_type.is_none() {
+        } else if syscall
+            .return_type
+            .into_iter()
+            .flat_map(split_syscall_ret)
+            .count()
+            == 1
+        {
+            writeln!(out, "            from_reg(a0)").unwrap();
+        } else {
+            write!(out, "            (").unwrap();
+            for (ret_index, _) in syscall
+                .return_type
+                .into_iter()
+                .flat_map(split_syscall_ret)
+                .enumerate()
+            {
+                write!(out, "from_reg(a{ret_index}), ").unwrap();
+            }
+            writeln!(out, "            )").unwrap();
+        }
+        writeln!(out, "        }}").unwrap();
+        writeln!(out, "    }}").unwrap();
+    }
     writeln!(out, "}}").unwrap();
 }

@@ -1,53 +1,8 @@
 #![allow(clippy::missing_safety_doc)]
 
-use core::arch::asm;
-use deravel_types::{Capability, ProcessId, RawCapability, SharedMemory};
+use deravel_types::{Capability, ProcessId, RawCapability};
 
-macro syscalls(
-    $(#[no = $no:literal] pub fn $name:ident(
-        $($a0name:ident: $a0type:ty
-        $(, $a1name:ident: $a1type:ty
-        $(, $a2name:ident: $a2type:ty
-        $(, $a3name:ident: $a3type:ty
-        $(, $a4name:ident: $a4type:ty
-        $(, $a5name:ident: $a5type:ty
-        )?)?)?)?)?)?
-    ) $(-> $return_type:ty)?;)*
-) {
-    $(pub unsafe fn $name(
-        $($a0name: $a0type
-        $(, $a1name: $a1type
-        $(, $a2name: $a2type
-        $(, $a3name: $a3type
-        $(, $a4name: $a4type
-        $(, $a5name: $a5type
-    )?)?)?)?)?)?) $(-> $return_type)? {
-        let a0: usize;
-        let a1: usize;
-        let a2: usize;
-        let a3: usize;
-        unsafe {
-            asm!(
-                "ecall",
-                $(in("a0") to_arg($a0name),
-                $(in("a1") to_arg($a1name),
-                $(in("a2") to_arg($a2name),
-                $(in("a3") to_arg($a3name),
-                $(in("a4") to_arg($a4name),
-                $(in("a5") to_arg($a5name),
-                )?)?)?)?)?)?
-                in("a6") $no,
-                lateout("a0") a0,
-                lateout("a1") a1,
-                lateout("a2") a2,
-                lateout("a3") a3,
-            );
-            FromRet::from_ret(a0, a1, a2, a3)
-        }
-    })*
-}
-
-unsafe trait FromRet: Copy + Sized {
+pub unsafe trait SyscallAbi: Copy + Sized {
     unsafe fn from_ret(register: usize, _: usize, _: usize, _: usize) -> Self {
         unsafe { Register { register }.rust }
     }
@@ -58,94 +13,32 @@ union Register<T: Copy> {
     register: usize,
 }
 
-unsafe impl FromRet for ! {}
+unsafe impl SyscallAbi for ! {}
 
-unsafe impl FromRet for () {}
+unsafe impl SyscallAbi for () {}
 
-unsafe impl FromRet for u8 {}
+unsafe impl SyscallAbi for u8 {}
 
-unsafe impl FromRet for usize {}
+unsafe impl SyscallAbi for u64 {}
 
-unsafe impl<T: ?Sized> FromRet for &T {}
+unsafe impl SyscallAbi for usize {}
 
-unsafe impl<T: ?Sized> FromRet for *const T {}
+unsafe impl<T: ?Sized> SyscallAbi for &T {}
 
-unsafe impl<T: ?Sized> FromRet for *mut T {}
+unsafe impl<T: ?Sized> SyscallAbi for *const T {}
 
-unsafe impl<T> FromRet for Capability<T> {}
+unsafe impl<T: ?Sized> SyscallAbi for *mut T {}
 
-unsafe impl FromRet for RawCapability {}
+unsafe impl<T> SyscallAbi for Capability<T> {}
 
-unsafe impl FromRet for ProcessId {}
+unsafe impl SyscallAbi for RawCapability {}
 
-unsafe impl<A: FromRet, B: FromRet> FromRet for (A, B) {
-    unsafe fn from_ret(a0: usize, a1: usize, _: usize, _: usize) -> (A, B) {
-        unsafe {
-            (
-                FromRet::from_ret(a0, 0, 0, 0),
-                FromRet::from_ret(a1, 0, 0, 0),
-            )
-        }
-    }
+unsafe impl SyscallAbi for ProcessId {}
+
+pub unsafe fn from_reg<T: SyscallAbi>(register: usize) -> T {
+    unsafe { Register { register }.rust }
 }
 
-unsafe impl<A: FromRet, B: FromRet, C: FromRet> FromRet for (A, B, C) {
-    unsafe fn from_ret(a0: usize, a1: usize, a2: usize, _: usize) -> (A, B, C) {
-        unsafe {
-            (
-                FromRet::from_ret(a0, 0, 0, 0),
-                FromRet::from_ret(a1, 0, 0, 0),
-                FromRet::from_ret(a2, 0, 0, 0),
-            )
-        }
-    }
-}
-
-unsafe impl<A: FromRet, B: FromRet, C: FromRet, D: FromRet> FromRet for (A, B, C, D) {
-    unsafe fn from_ret(a0: usize, a1: usize, a2: usize, a3: usize) -> (A, B, C, D) {
-        unsafe {
-            (
-                FromRet::from_ret(a0, 0, 0, 0),
-                FromRet::from_ret(a1, 0, 0, 0),
-                FromRet::from_ret(a2, 0, 0, 0),
-                FromRet::from_ret(a3, 0, 0, 0),
-            )
-        }
-    }
-}
-
-syscalls! {
-    #[no = 0]
-    pub fn exit() -> !;
-
-    #[no = 1]
-    pub fn ipc_call(cap: RawCapability, method: usize, args: *const u8, args_len: usize, result: *mut u8, result_max_len: usize) -> usize;
-
-    #[no = 3]
-    pub fn ipc_reply(result: *const u8, result_len: usize);
-
-    #[no = 4]
-    pub fn allocate_pages(count: usize) -> *mut u8;
-
-    #[no = 5]
-    pub fn map_shared_memory(cap: Capability<SharedMemory>) -> (*mut u8, usize);
-
-    #[no = 6]
-    pub fn log(text: *const u8, text_len: usize, level: usize);
-
-    #[no = 7]
-    pub fn ipc_map_ring_buffer(cap: RawCapability, stream: usize) -> (*const (), usize);
-
-    #[no = 8]
-    pub fn yield_();
-
-    #[no = 10]
-    pub fn ipc_receive_async(args: *mut u8, args_max_len: usize) -> (RawCapability, usize, usize, ProcessId);
-
-    #[no = 11]
-    pub fn allocate_shared_memory(size: usize) -> Capability<SharedMemory>;
-}
-
-unsafe fn to_arg<T: Copy>(rust: T) -> usize {
+pub unsafe fn to_reg<T: Copy>(rust: T) -> usize {
     unsafe { Register { rust }.register }
 }

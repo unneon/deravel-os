@@ -5,6 +5,7 @@ use std::str::Lines;
 pub struct Drvli<'a> {
     pub interfaces: Vec<Interface<'a>>,
     pub structs: Vec<Struct<'a>>,
+    pub syscalls: Vec<Syscall<'a>>,
 }
 
 pub struct Struct<'a> {
@@ -36,6 +37,12 @@ pub enum InterfaceDetails<'a> {
         implements: Option<&'a str>,
     },
     Interface,
+}
+
+pub struct Syscall<'a> {
+    pub name: &'a str,
+    pub args: Vec<(&'a str, &'a str)>,
+    pub return_type: Option<&'a str>,
 }
 
 pub fn rust_arg_type(type_: &str, structs: &[Struct]) -> Cow<'static, str> {
@@ -104,6 +111,54 @@ pub fn rust_grantable_ret_type(type_: &str, structs: &[Struct<'_>]) -> Cow<'stat
     }
 }
 
+pub fn rust_syscall_arg_type(type_: &str, structs: &[Struct<'_>]) -> Cow<'static, str> {
+    match type_ {
+        "i8" => "i8".into(),
+        "i16" => "i16".into(),
+        "i32" => "i32".into(),
+        "i64" => "i64".into(),
+        "capability" => "RawCapability".into(),
+        "u8" => "u8".into(),
+        "u16" => "u16".into(),
+        "u32" => "u32".into(),
+        "u64" => "u64".into(),
+        "usize" => "usize".into(),
+        "const_ptr u8" => "*const u8".into(),
+        "ptr u8" => "*mut u8".into(),
+        // "text" => "String".into(),
+        // "bytes" => "Vec<u8>".into(),
+        _ if structs.iter().any(|struct_| struct_.name == type_) => camel_case(type_).into(),
+        _ => format!("Capability<{}>", camel_case(type_)).into(),
+    }
+}
+
+pub fn rust_syscall_ret_type(type_: &str, structs: &[Struct<'_>]) -> Cow<'static, str> {
+    match type_ {
+        "i8" => "i8".into(),
+        "i16" => "i16".into(),
+        "i32" => "i32".into(),
+        "i64" => "i64".into(),
+        "never" => "!".into(),
+        "const_ptr u8" => "*const u8".into(),
+        "ptr" => "*mut ()".into(),
+        "ptr u8" => "*mut u8".into(),
+        "ptr u8, u64" => "(*mut u8, u64)".into(),
+        "ptr, u64" => "(*mut (), u64)".into(),
+        "capability" => "RawCapability".into(),
+        "capability, u64, u64, pid" => "(RawCapability, u64, u64, ProcessId)".into(),
+        "u8" => "u8".into(),
+        "u16" => "u16".into(),
+        "u32" => "u32".into(),
+        "u64" => "u64".into(),
+        "usize" => "usize".into(),
+        "pid" => "ProcessId".into(),
+        // "text" => "String".into(),
+        // "bytes" => "Vec<u8>".into(),
+        _ if structs.iter().any(|struct_| struct_.name == type_) => camel_case(type_).into(),
+        _ => format!("Capability<{}>", camel_case(type_)).into(),
+    }
+}
+
 pub fn is_capability(type_: &str, structs: &[Struct<'_>]) -> bool {
     match type_ {
         "i8" => false,
@@ -149,6 +204,7 @@ pub fn rust_borrow_or_copy(type_: &str) -> &'static str {
 pub fn rust_escape_name(name: &str) -> &str {
     match name {
         "type" => "type_",
+        "yield" => "yield_",
         _ => name,
     }
 }
@@ -157,6 +213,7 @@ pub fn parse_drvli(text: &str) -> Drvli<'_> {
     let mut lines = text.lines().peekable();
     let mut structs = Vec::new();
     let mut interfaces = Vec::new();
+    let mut syscalls = Vec::new();
     while let Some(line) = lines.next() {
         if let Some(name) = line.strip_prefix("struct ") {
             let mut members = Vec::new();
@@ -190,11 +247,14 @@ pub fn parse_drvli(text: &str) -> Drvli<'_> {
         } else if let Some(name) = line.strip_prefix("interface ") {
             let interface = parse_interface(name, &mut lines, InterfaceDetails::Interface);
             interfaces.push(interface);
+        } else if let Some(line) = line.strip_prefix("syscall ") {
+            syscalls.push(parse_syscall(line));
         }
     }
     Drvli {
         interfaces,
         structs,
+        syscalls,
     }
 }
 
@@ -232,6 +292,22 @@ pub fn parse_interface<'a>(
         methods,
         streams,
         details,
+    }
+}
+
+fn parse_syscall(line: &str) -> Syscall<'_> {
+    let (name, line) = line.split_once('(').unwrap();
+    let (args, return_type) = line.split_once(')').unwrap();
+    let args = args
+        .split(", ")
+        .filter(|arg| !arg.is_empty())
+        .map(|arg| arg.split_once(' ').unwrap())
+        .collect();
+    let return_type = return_type.strip_prefix(' ');
+    Syscall {
+        name,
+        args,
+        return_type,
     }
 }
 

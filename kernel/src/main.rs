@@ -263,7 +263,7 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                 }
             }
         }
-        3 => {
+        2 => {
             let result = copy_from_user(registers.a0 as *const u8, registers.a1);
             let caller = current_proc.currently_serving.take().unwrap();
             let mut caller = PROCESSES[caller.as_usize()].lock();
@@ -275,7 +275,7 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                 unimplemented!()
             }
         }
-        4 => {
+        3 => {
             let page_count = registers.a0;
             let pages = vec![[0; PAGE_SIZE]; page_count];
             let page_table = unsafe { &mut *(current_proc.page_table as *mut PageTable) };
@@ -291,7 +291,7 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
             );
             registers.a0 = virtual_addr;
         }
-        5 => {
+        4 => {
             let farthest_cap =
                 RawCapability::from_pointer(registers.a0 as *mut CapabilityCertificate);
             let original = validate_untrusted_capability(farthest_cap, current_pid);
@@ -317,7 +317,7 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
             registers.a0 = virtual_addr;
             registers.a1 = length;
         }
-        6 => {
+        5 => {
             let text = copy_from_user(registers.a0 as *const u8, registers.a1);
             let text = String::from_utf8(text).unwrap();
             let level = registers.a2;
@@ -331,7 +331,7 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
             };
             log_userspace(level, current_proc.name.unwrap(), &text);
         }
-        7 => {
+        6 => {
             let farthest_cap =
                 RawCapability::from_pointer(registers.a0 as *mut CapabilityCertificate);
             let stream = registers.a1;
@@ -401,14 +401,14 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                 }
             }
         }
-        8 => {
+        7 => {
             current_proc.registers = registers.clone();
             current_proc.pc = user_pc + 4;
 
             drop(current_proc);
             schedule_and_switch_to_userspace(hart);
         }
-        10 => {
+        8 => {
             assert!(current_proc.currently_serving.is_none());
             if let Some((cap, method, args, sender)) =
                 current_proc.messages.as_mut().and_then(|q| q.pop_front())
@@ -423,7 +423,7 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                 registers.a0 = 0;
             }
         }
-        11 => {
+        9 => {
             let size = registers.a0.next_multiple_of(PAGE_SIZE);
             let memory = vec![0u8; size];
             let memory = Vec::leak(memory);
