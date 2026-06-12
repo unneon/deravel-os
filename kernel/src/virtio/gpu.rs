@@ -140,8 +140,8 @@ impl DisplayServer for Mutex<VirtioGpu> {
         grant_kernel_capability(
             sender,
             Box::leak(Box::new(crate::shared_memory::SharedMemory {
-                physical_address: self_.framebuffer.as_ptr() as u64,
-                length: (self_.width * self_.height * 4) as u64,
+                physical_address: self_.framebuffer.as_ptr() as usize,
+                size: (self_.width * self_.height * 4) as usize,
             })),
         )
     }

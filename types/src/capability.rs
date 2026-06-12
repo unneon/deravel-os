@@ -3,7 +3,7 @@ use core::marker::PhantomData;
 use core::sync::atomic::{AtomicU64, Ordering};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-#[derive(Clone, Copy, Deserialize, Serialize)]
+#[derive(Deserialize, Serialize)]
 #[repr(transparent)]
 #[serde(transparent)]
 pub struct Capability<T>(pub RawCapability, pub PhantomData<T>);
@@ -159,6 +159,14 @@ impl<T> From<Capability<T>> for RawCapability {
         cap.0
     }
 }
+
+impl<T> Clone for Capability<T> {
+    fn clone(&self) -> Capability<T> {
+        *self
+    }
+}
+
+impl<T> Copy for Capability<T> {}
 
 impl<T> core::ops::Deref for Capability<T> {
     type Target = RawCapability;

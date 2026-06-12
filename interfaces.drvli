@@ -37,10 +37,6 @@ interface display
     func framebuffer() shared_memory
     func draw()
 
-interface shared_memory
-    func physical_address() u64
-    func length() u64
-
 struct input_event
     type u16
     code u16

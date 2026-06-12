@@ -13,12 +13,16 @@ pub trait Handler<T> {
     fn call_method(&self, method: usize, args: &[u8], sender: ProcessId) -> Vec<u8>;
 
     fn map_stream(&self, stream: usize) -> &'static UntypedRingBuffer;
+
+    fn shared_memory(&self) -> (usize, usize);
 }
 
 pub trait RawHandler {
     fn call_method(&self, method: usize, args: &[u8], sender: ProcessId) -> Vec<u8>;
 
     fn map_stream(&self, stream: usize) -> &'static UntypedRingBuffer;
+
+    fn shared_memory(&self) -> (usize, usize);
 }
 
 struct TypedHandler<T, H: 'static>(&'static H, PhantomData<T>);
@@ -37,6 +41,10 @@ impl<T, H: Handler<T>> RawHandler for TypedHandler<T, H> {
 
     fn map_stream(&self, stream: usize) -> &'static UntypedRingBuffer {
         self.0.map_stream(stream)
+    }
+
+    fn shared_memory(&self) -> (usize, usize) {
+        self.0.shared_memory()
     }
 }
 

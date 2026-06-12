@@ -72,7 +72,7 @@ unsafe impl<T: ?Sized> FromRet for *const T {}
 
 unsafe impl<T: ?Sized> FromRet for *mut T {}
 
-unsafe impl<T: Copy> FromRet for Capability<T> {}
+unsafe impl<T> FromRet for Capability<T> {}
 
 unsafe impl FromRet for RawCapability {}
 

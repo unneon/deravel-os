@@ -301,16 +301,7 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                 "shared memory capabilities can only be created by the kernel"
             );
             let handler = capability::get_handler(original.local_index());
-            let physical_address =
-                String::from_utf8(handler.call_method(0, b"null", ProcessId::new(current_pid)))
-                    .unwrap()
-                    .parse::<usize>()
-                    .unwrap();
-            let length =
-                String::from_utf8(handler.call_method(1, b"null", ProcessId::new(current_pid)))
-                    .unwrap()
-                    .parse::<usize>()
-                    .unwrap();
+            let (physical_address, length) = handler.shared_memory();
             assert!(length.is_multiple_of(PAGE_SIZE));
 
             let virtual_addr = current_proc.virtual_memory.allocate(length, PAGE_SIZE);
@@ -354,22 +345,7 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
                         assert_eq!(ring.certifier(), Actor::Kernel);
 
                         let handler = capability::get_handler(ring.local_index());
-                        let physical_address = String::from_utf8(handler.call_method(
-                            0,
-                            b"null",
-                            ProcessId::new(current_pid),
-                        ))
-                        .unwrap()
-                        .parse::<usize>()
-                        .unwrap();
-                        let length = String::from_utf8(handler.call_method(
-                            1,
-                            b"null",
-                            ProcessId::new(current_pid),
-                        ))
-                        .unwrap()
-                        .parse::<usize>()
-                        .unwrap();
+                        let (physical_address, length) = handler.shared_memory();
                         assert!(length.is_multiple_of(PAGE_SIZE));
                         assert!(length >= 2 * CACHE_LINE_SIZE + declared_size);
 
@@ -452,8 +428,8 @@ fn handle_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut Har
             let memory = vec![0u8; size];
             let memory = Vec::leak(memory);
             let memory = shared_memory::SharedMemory {
-                physical_address: memory.as_ptr() as u64,
-                length: size as u64,
+                physical_address: memory.as_ptr() as usize,
+                size,
             };
             let cap =
                 grant_kernel_capability(ProcessId::new(current_pid), Box::leak(Box::new(memory)));

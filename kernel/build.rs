@@ -115,5 +115,8 @@ fn generate_handler_impl(interface: &Interface, structs: &[Struct], out: &mut St
     writeln!(out, "            _ => unreachable!(),").unwrap();
     writeln!(out, "        }}").unwrap();
     writeln!(out, "    }}").unwrap();
+    writeln!(out, "    fn shared_memory(&self) -> (usize, usize) {{").unwrap();
+    writeln!(out, "        unreachable!()").unwrap();
+    writeln!(out, "    }}").unwrap();
     writeln!(out, "}}").unwrap();
 }
