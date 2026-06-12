@@ -1,6 +1,4 @@
-#![allow(clippy::missing_safety_doc)]
-
-use deravel_types::{Capability, ProcessId, RawCapability};
+use crate::{Capability, ProcessId, RawCapability};
 
 pub unsafe trait SyscallAbi: Copy + Sized {
     unsafe fn from_ret(register: usize, _: usize, _: usize, _: usize) -> Self {

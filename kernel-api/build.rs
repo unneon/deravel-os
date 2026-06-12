@@ -1,10 +1,9 @@
 use deravel_codegen::{
     Drvli, Interface, camel_case, parse_drvli, rust_arg_type, rust_borrow_or_copy,
     rust_escape_name, rust_grantable_ret_type, rust_normal_ret_type, rust_stream_type,
-    rust_syscall_arg_type, rust_syscall_ret_type,
+    rust_syscall_arg_type, rust_syscall_ret_type, split_syscall_arg, split_syscall_ret,
 };
 use std::fmt::Write;
-use std::iter::once;
 
 fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -207,28 +206,6 @@ fn generate_server_handler_impl(interface: &Interface, drvli: &Drvli, out: &mut 
     writeln!(out, "        }}").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out, "}}").unwrap();
-}
-
-fn split_syscall_arg(type_: &str) -> impl Iterator<Item = (&'static str, &str)> {
-    match type_ {
-        "array u8" => Box::new([("_ptr", "ptr u8"), ("_size", "usize")].into_iter())
-            as Box<dyn Iterator<Item = (&'static str, &str)>>,
-        "const_array u8" => Box::new([("_ptr", "const_ptr u8"), ("_size", "usize")].into_iter()),
-        _ => Box::new(once(("", type_))),
-    }
-}
-
-fn split_syscall_ret(type_: &str) -> impl Iterator<Item = &str> {
-    match type_ {
-        "array u8" => Box::new(["ptr u8", "usize"].into_iter()) as Box<dyn Iterator<Item = &str>>,
-        "const_array u8" => Box::new(["const_ptr u8", "usize"].into_iter()),
-        "ptr u8, usize" => Box::new(["ptr u8", "usize"].into_iter()),
-        "ptr, usize" => Box::new(["ptr", "usize"].into_iter()),
-        "capability, usize, usize, pid" => {
-            Box::new(["capability", "usize", "usize", "pid"].into_iter())
-        }
-        _ => Box::new(once(type_)),
-    }
 }
 
 fn generate_syscalls(drvli: &Drvli, out: &mut String) {

@@ -2,11 +2,12 @@ use crate::allocators::TrivialAllocator;
 use crate::arch::{RiscvRegisters, switch_to_userspace_full};
 use crate::capability::CAPABILITY_PAGES;
 use crate::elf::load_elf;
+use crate::hart::HartContext;
 use crate::heap::log_heap_statistics;
 use crate::page::{PageFlags, PageTable, map_pages};
 use crate::sbi::{ResetReason, ResetType};
 use crate::sync::Mutex;
-use crate::{HartContext, TIMEBASE_FREQUENCY, sbi};
+use crate::{TIMEBASE_FREQUENCY, sbi};
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
@@ -196,13 +197,13 @@ pub fn schedule_and_switch_to_userspace(hart: &mut HartContext) -> ! {
         sbi::system_reset(ResetType::Shutdown, ResetReason::NoReason).unwrap()
     };
     let next = PROCESSES[next_pid.as_usize()].lock();
-    hart.current_pid = Some(next_pid);
+    hart.set_current_pid(next_pid);
 
     switch_to_userspace_full(next);
 }
 
 pub fn find_runnable_process(hart: &HartContext) -> Option<ProcessId> {
-    let scan_start = match hart.current_pid {
+    let scan_start = match hart.try_current_pid() {
         Some(current) => current.as_usize() + 1,
         None => 0,
     };

@@ -1,5 +1,7 @@
 #![feature(decl_macro)]
+#![feature(never_type)]
 #![feature(ptr_metadata)]
+#![allow(clippy::missing_safety_doc)]
 #![no_std]
 extern crate alloc;
 
@@ -8,6 +10,7 @@ mod capability;
 mod drvli;
 pub mod input;
 mod ring_buffer;
+pub mod syscall;
 
 pub use align::{CACHE_LINE_SIZE, CacheLineAligned};
 pub use capability::*;

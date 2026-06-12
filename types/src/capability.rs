@@ -64,7 +64,7 @@ impl RawCapability {
     }
 
     pub fn from_pointer(pointer: *const CapabilityCertificate) -> RawCapability {
-        assert!(is_capability_pointer_valid(pointer));
+        // assert!(is_capability_pointer_valid(pointer));
         RawCapability(pointer)
     }
 

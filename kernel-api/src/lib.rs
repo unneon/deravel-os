@@ -1,5 +1,5 @@
 #![feature(decl_macro)]
-#![feature(never_type)]
+// #![feature(never_type)]
 #![feature(ptr_metadata)]
 #![no_std]
 
@@ -7,7 +7,6 @@ extern crate alloc;
 
 mod capability;
 pub mod drvli;
-pub mod syscall;
 
 pub use capability::*;
 pub use deravel_types::*;

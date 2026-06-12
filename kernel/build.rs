@@ -1,6 +1,9 @@
+extern crate core;
+
 use deravel_codegen::{
-    Interface, Struct, camel_case, parse_drvli, rust_arg_type, rust_borrow_or_copy,
-    rust_member_type, rust_normal_ret_type,
+    Drvli, Interface, Struct, camel_case, parse_drvli, rust_arg_type, rust_borrow_or_copy,
+    rust_escape_name, rust_member_type, rust_normal_ret_type, rust_syscall_kernel_arg_type,
+    rust_syscall_ret_type, split_syscall_arg, split_syscall_ret,
 };
 use std::fmt::Write;
 
@@ -14,6 +17,8 @@ fn main() {
         generate_server_trait(interface, &drvli.structs, &mut output);
         generate_handler_impl(interface, &drvli.structs, &mut output);
     }
+    generate_syscall_trait(&drvli, &mut output);
+    generate_syscall_dispatch(&drvli, &mut output);
     std::fs::write(
         format!("{}/drvli.rs", std::env::var("OUT_DIR").unwrap()),
         output,
@@ -118,5 +123,117 @@ fn generate_handler_impl(interface: &Interface, structs: &[Struct], out: &mut St
     writeln!(out, "    fn shared_memory(&self) -> (usize, usize) {{").unwrap();
     writeln!(out, "        unreachable!()").unwrap();
     writeln!(out, "    }}").unwrap();
+    writeln!(out, "}}").unwrap();
+}
+
+fn generate_syscall_trait(drvli: &Drvli, out: &mut String) {
+    writeln!(out, "pub trait SyscallHandler {{").unwrap();
+    for syscall in &drvli.syscalls {
+        let syscall_name = rust_escape_name(syscall.name);
+        write!(out, "    fn {syscall_name}(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut HartContext").unwrap();
+        for (arg_name, arg_type) in &syscall.args {
+            let arg_type = rust_syscall_kernel_arg_type(arg_type, &drvli.structs);
+            write!(out, ", {arg_name}: {arg_type}").unwrap();
+        }
+        write!(out, ")").unwrap();
+        if let Some(return_type) = syscall.return_type {
+            if syscall
+                .return_type
+                .into_iter()
+                .flat_map(split_syscall_ret)
+                .count()
+                == 1
+            {
+                let return_type = rust_syscall_ret_type(return_type, &drvli.structs);
+                write!(out, " -> {return_type}").unwrap();
+            } else {
+                write!(out, " -> (").unwrap();
+                for ret_type in split_syscall_ret(return_type) {
+                    let ret_type = rust_syscall_ret_type(ret_type, &drvli.structs);
+                    write!(out, "{ret_type}, ").unwrap();
+                }
+                writeln!(out, "            )").unwrap();
+            }
+        }
+        writeln!(out, ";").unwrap();
+    }
+    writeln!(out, "}}").unwrap();
+}
+
+fn generate_syscall_dispatch(drvli: &Drvli, out: &mut String) {
+    writeln!(out, "pub fn dispatch_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut HartContext) -> ! {{").unwrap();
+    writeln!(out, "    #![allow(clippy::diverging_sub_expression)]").unwrap();
+    writeln!(out, "    match registers.a6 {{").unwrap();
+    for (syscall_number, syscall) in drvli.syscalls.iter().enumerate() {
+        let syscall_name = rust_escape_name(syscall.name);
+        writeln!(out, "        {syscall_number} => {{").unwrap();
+        write!(
+            out,
+            "            let _result = <() as SyscallHandler>::{syscall_name}(user_pc, registers, hart").unwrap();
+        let mut used_arg_registers = 0;
+        for (arg_name, arg_type) in &syscall.args {
+            let value = match *arg_type {
+                "capability" => format!(
+                    "RawCapability::from_pointer(registers.a{used_arg_registers} as *mut CapabilityCertificate)"
+                ),
+                "shared_memory" => format!(
+                    "Capability(RawCapability::from_pointer(registers.a{used_arg_registers} as *mut CapabilityCertificate), PhantomData)"
+                ),
+                "u64" => format!("registers.a{used_arg_registers} as u64"),
+                "usize" => format!("registers.a{used_arg_registers}"),
+                "array u8" | "const_array u8" => {
+                    let ap = format!("registers.a{used_arg_registers}");
+                    let as_ = format!("registers.a{}", used_arg_registers + 1);
+                    format!("unsafe {{ core::slice::from_raw_parts_mut({ap} as *mut u8, {as_}) }}")
+                }
+                _ => unimplemented!("syscall argument {arg_name:?} {arg_type:?}"),
+            };
+            used_arg_registers += split_syscall_arg(arg_type).count();
+            write!(out, ", {value}").unwrap();
+        }
+        writeln!(out, ");").unwrap();
+        if let Some(return_type) = syscall.return_type
+            && return_type != "never"
+        {
+            if syscall
+                .return_type
+                .into_iter()
+                .flat_map(split_syscall_ret)
+                .count()
+                == 1
+            {
+                writeln!(
+                    out,
+                    "            registers.a0 = unsafe {{ to_reg(_result) }};"
+                )
+                .unwrap();
+            } else {
+                for (ret_register, _ret_type) in split_syscall_ret(return_type).enumerate() {
+                    writeln!(
+                        out,
+                        "            registers.a{ret_register} = unsafe {{ to_reg(_result.{ret_register}) }};"
+                    )
+                    .unwrap();
+                }
+            }
+        }
+        writeln!(out, "        }}").unwrap();
+    }
+    writeln!(
+        out,
+        "        _ => core::panic!(\"invalid syscall number {{}}\", registers.a6),"
+    )
+    .unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    unsafe {{ riscv::register::sepc::write(user_pc + 4) }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    crate::arch::switch_to_userspace_registers_only(registers);"
+    )
+    .unwrap();
     writeln!(out, "}}").unwrap();
 }
