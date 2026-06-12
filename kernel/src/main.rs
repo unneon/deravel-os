@@ -36,7 +36,7 @@ mod virtio;
 
 use crate::arch::{RiscvRegisters, initialize_trap_handler, switch_to_userspace_registers_only};
 use crate::capability::{CAPABILITY_PAGES, grant_kernel_capability, reserve_kernel_capability};
-use crate::device_tree::find_timebase_frequency;
+use crate::device_tree::initialize_timebase_frequency;
 use crate::drvli::{SyscallHandler, dispatch_syscall};
 use crate::elf::elf;
 use crate::hart::{HartContext, HartStack};
@@ -64,13 +64,11 @@ use riscv::register::satp::Mode;
 
 const STACK_SIZE: usize = 128 * 4096;
 
-static mut TIMEBASE_FREQUENCY: f64 = f64::NAN;
-
 fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     clear_bss();
 
     let device_tree = unsafe { Fdt::from_ptr(device_tree) }.unwrap();
-    unsafe { TIMEBASE_FREQUENCY = find_timebase_frequency(&device_tree).unwrap() as f64 }
+    initialize_timebase_frequency(&device_tree);
     initialize_log();
     initialize_trap_handler();
     log_sbi_metadata();

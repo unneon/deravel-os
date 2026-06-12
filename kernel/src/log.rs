@@ -1,9 +1,11 @@
-use crate::{TIMEBASE_FREQUENCY, sbi};
+use crate::device_tree::timebase_frequency;
+use crate::sbi;
 use alloc::boxed::Box;
 use log::{Level, LevelFilter, Metadata, Record};
 
 struct Logger {
     start_time: u64,
+    timebase_frequency: f64,
 }
 
 struct PrettyLogLevel(Level);
@@ -23,7 +25,7 @@ impl log::Log for Logger {
                 _ => "",
             };
             let time = (riscv::register::time::read64() - self.start_time) as f64
-                / unsafe { TIMEBASE_FREQUENCY };
+                / self.timebase_frequency;
             let level = PrettyLogLevel(record.level());
             let message = record.args();
             if record.module_path().is_some() {
@@ -78,6 +80,7 @@ impl core::fmt::Display for PrettyModulePath<'_> {
 pub fn initialize_log() {
     let logger = Logger {
         start_time: riscv::register::time::read64(),
+        timebase_frequency: timebase_frequency(),
     };
     log::set_logger(Box::leak(Box::new(logger))).unwrap();
     log::set_max_level(LevelFilter::Debug);

@@ -1,13 +1,14 @@
 use crate::allocators::TrivialAllocator;
 use crate::arch::{RiscvRegisters, switch_to_userspace_full};
 use crate::capability::CAPABILITY_PAGES;
+use crate::device_tree::timebase_frequency;
 use crate::elf::load_elf;
 use crate::hart::HartContext;
 use crate::heap::log_heap_statistics;
 use crate::page::{PageFlags, PageTable, map_pages};
+use crate::sbi;
 use crate::sbi::{ResetReason, ResetType};
 use crate::sync::Mutex;
-use crate::{TIMEBASE_FREQUENCY, sbi};
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
@@ -78,7 +79,7 @@ impl<T: ProcessTag> ProcessReservation<T> {
             self.elf,
             ProcessInputs {
                 id: self.id,
-                riscv_timebase_frequency: unsafe { TIMEBASE_FREQUENCY },
+                riscv_timebase_frequency: timebase_frequency(),
                 args,
             },
         )
