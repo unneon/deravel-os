@@ -89,7 +89,7 @@ fn generate_handler_impl(interface: &Interface, structs: &[Struct], out: &mut St
         writeln!(out, ") = serde_json::from_slice(_args).unwrap();").unwrap();
         write!(
             out,
-            "                let result = self.{method_name}(_sender, "
+            "                let _result = self.{method_name}(_sender, "
         )
         .unwrap();
         for (arg_name, arg_type) in &method.args {
@@ -97,7 +97,9 @@ fn generate_handler_impl(interface: &Interface, structs: &[Struct], out: &mut St
             write!(out, "{borrow}{arg_name},").unwrap();
         }
         writeln!(out, ");").unwrap();
-        writeln!(out, "                serde_json::to_vec(&result).unwrap()").unwrap();
+        if method.return_type != Some("never") {
+            writeln!(out, "                serde_json::to_vec(&_result).unwrap()").unwrap();
+        }
         writeln!(out, "            }}").unwrap();
     }
     writeln!(out, "            _ => unreachable!(),").unwrap();

@@ -1,3 +1,4 @@
+#![allow(clippy::diverging_sub_expression)]
 #![allow(clippy::let_unit_value)]
 #![allow(clippy::match_single_binding)]
 

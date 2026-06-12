@@ -89,6 +89,7 @@ pub fn rust_normal_ret_type(type_: &str, structs: &[Struct<'_>]) -> Cow<'static,
         "u64" => "u64".into(),
         "text" => "String".into(),
         "bytes" => "Vec<u8>".into(),
+        "never" => "!".into(),
         _ if structs.iter().any(|struct_| struct_.name == type_) => camel_case(type_).into(),
         _ => format!("Capability<{}>", camel_case(type_)).into(),
     }
@@ -106,6 +107,7 @@ pub fn rust_grantable_ret_type(type_: &str, structs: &[Struct<'_>]) -> Cow<'stat
         "u64" => "u64".into(),
         "text" => "String".into(),
         "bytes" => "Vec<u8>".into(),
+        "never" => "!".into(),
         _ if structs.iter().any(|struct_| struct_.name == type_) => camel_case(type_).into(),
         _ => format!("Capability<{}>", camel_case(type_)).into(),
     }

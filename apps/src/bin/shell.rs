@@ -28,6 +28,8 @@ fn main(args: Args) {
         } else if let Some(domain) = cmdline.strip_prefix("dns ") {
             let ip = args.net.dns(domain);
             println!("{ip}");
+        } else if cmdline == "shutdown" {
+            args.shutdown.shutdown();
         } else if cmdline == "exit" {
             break;
         } else {

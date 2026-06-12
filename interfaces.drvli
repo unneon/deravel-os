@@ -8,7 +8,7 @@ app ipc_b(c ipc_c)
 app ipc_c
     func bar(fs filesystem)
 
-app shell(console console, fs filesystem, net network)
+app shell(console console, fs filesystem, net network, shutdown shutdown)
 
 app tar_fs(drive drive) implements filesystem
 
@@ -54,6 +54,9 @@ interface window
 
 interface network
     func dns(domain text) text
+
+interface shutdown
+    func shutdown() never
 
 syscall exit() never
 

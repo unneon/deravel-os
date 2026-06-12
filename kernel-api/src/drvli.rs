@@ -1,5 +1,6 @@
 #![allow(
     unused,
+    clippy::diverging_sub_expression,
     clippy::let_unit_value,
     clippy::match_single_binding,
     clippy::never_loop

@@ -1,6 +1,6 @@
 mod ffi;
 
-use crate::drvli::ConsoleServer;
+use crate::drvli::{ConsoleServer, ShutdownServer};
 #[cfg(doc)]
 use Error::*;
 use deravel_types::ProcessId;
@@ -11,6 +11,8 @@ pub macro console_writeln($($arg:tt)*) {
 }
 
 pub struct SbiConsole;
+
+pub struct SbiShutdown;
 
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -124,6 +126,12 @@ impl core::fmt::Write for SbiConsole {
             to_write = &to_write[written..];
         }
         Ok(())
+    }
+}
+
+impl ShutdownServer for SbiShutdown {
+    fn shutdown(&self, _: ProcessId) -> ! {
+        system_reset(ResetType::Shutdown, ResetReason::NoReason).unwrap()
     }
 }
 

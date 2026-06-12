@@ -48,7 +48,7 @@ use crate::plic::{initialize_plic, plic_claim, plic_complete};
 use crate::process::{
     PROCESS_COUNT, PROCESSES, ProcessState, reserve_process, schedule_and_switch_to_userspace,
 };
-use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
+use crate::sbi::{ResetReason, ResetType, SbiShutdown, log_sbi_metadata};
 use ::log::*;
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
@@ -102,6 +102,7 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
         console: terminal.export,
         fs: fs_tar.export,
         net: reserve_kernel_capability(virtio_net),
+        shutdown: reserve_kernel_capability(&SbiShutdown),
     });
     fs_tar.spawn(TarFsArgs {
         drive: reserve_kernel_capability(virtio_blk),
