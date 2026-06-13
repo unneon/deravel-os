@@ -36,6 +36,8 @@ interface display
     func height() u32
     func framebuffer() shared_memory
     func draw()
+    func set_cursor_image(image bytes)
+    func update_cursor(x u32, y u32)
 
 struct input_event
     type u16

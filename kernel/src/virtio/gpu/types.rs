@@ -1,9 +1,11 @@
-pub unsafe trait Response: Default {
+use core::fmt::Debug;
+
+pub unsafe trait Response: Debug + Default {
     const TYPE: CtrlType;
     fn hdr(&self) -> &CtrlHdr;
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 #[repr(C)]
 pub struct CtrlHdr {
     pub type_: u32,
@@ -62,7 +64,15 @@ pub enum CtrlType {
     RespErrInvalidParameter,
 }
 
-#[derive(Default)]
+#[repr(C)]
+pub struct CursorPos {
+    pub scanout_id: u32,
+    pub x: u32,
+    pub y: u32,
+    pub padding: u32,
+}
+
+#[derive(Debug, Default)]
 #[repr(C)]
 pub struct DisplayOne {
     pub r: Rect,
@@ -102,7 +112,7 @@ pub struct MemEntry {
     pub padding: u32,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 #[repr(C)]
 pub struct Rect {
     pub x: u32,
@@ -135,14 +145,14 @@ pub struct ResourceFlush {
     pub padding: u32,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 #[repr(C)]
 pub struct ResponseDisplayInfo {
     pub hdr: CtrlHdr,
     pub pmodes: [DisplayOne; MAX_SCANOUTS],
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 #[repr(C)]
 pub struct ResponseNodata {
     pub hdr: CtrlHdr,
@@ -164,6 +174,18 @@ pub struct TransferToHost2D {
     pub resource_id: u32,
     pub padding: u32,
 }
+
+#[repr(C)]
+pub struct UpdateCursor {
+    pub hdr: CtrlHdr,
+    pub pos: CursorPos,
+    pub resource_id: u32,
+    pub hot_x: u32,
+    pub hot_y: u32,
+    pub padding: u32,
+}
+
+pub const FLAG_FENCE: u32 = 1 << 0;
 
 pub const MAX_SCANOUTS: usize = 16;
 

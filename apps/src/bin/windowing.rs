@@ -6,7 +6,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 use deravel_kernel_api::input::{EV_KEY, EV_REL, EV_SYN, KEY_ESC, KEY_LEFTALT, REL_X, REL_Y};
 use deravel_kernel_api::*;
-use log::debug;
+use log::*;
 
 enum Shortcut {
     NotStarted,
@@ -133,17 +133,7 @@ impl Observer<InputEvent, MouseTag> for Server {
                     .min(self.display_height);
             }
         } else if event.type_ == EV_SYN {
-            for dy in 0..5 {
-                for dx in 0..5 {
-                    self.display_framebuffer
-                        .as_chunks_mut()
-                        .0
-                        .chunks_mut(self.display_width as usize)
-                        .nth(self.cursor_y as usize + dy)
-                        .unwrap()[self.cursor_x as usize + dx] = [0, 0, 255, 255];
-                }
-            }
-            self.display.draw();
+            self.display.update_cursor(self.cursor_x, self.cursor_y);
         }
     }
 }
@@ -151,9 +141,10 @@ impl Observer<InputEvent, MouseTag> for Server {
 fn main(args: Args) {
     let width = args.display.width();
     let height = args.display.height();
-    debug!("found a {width}x{height} display");
+    info!("found a {width}x{height} display");
     let framebuffer = unsafe { &mut *map_shared_memory(args.display.framebuffer()) };
     fill_screen(191, 215, 234, framebuffer, &args);
+    initialize_cursor(255, 255, 255, 16, args.display);
 
     let server = Server {
         display_width: width,
@@ -181,6 +172,16 @@ fn fill_screen(red: u8, green: u8, blue: u8, framebuffer: &mut [u8], args: &Args
         *bgra = [blue, green, red, 255];
     }
     args.display.draw();
+}
+
+fn initialize_cursor(red: u8, green: u8, blue: u8, size: usize, display: Capability<Display>) {
+    let mut image = [0; 4 * 64 * 64];
+    for y in 0..size.min(63) {
+        for x in 0..size.min(63) {
+            image.as_chunks_mut().0.chunks_mut(64).nth(y).unwrap()[x] = [red, green, blue, 255];
+        }
+    }
+    display.set_cursor_image(&image);
 }
 
 app! { main Windowing }
