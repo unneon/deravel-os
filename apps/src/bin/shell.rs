@@ -17,7 +17,7 @@ fn main(args: Args) {
             println!("Hello world from shell!");
         } else if let Some(file_name) = cmdline.strip_prefix("read ") {
             let file = args.fs.read(file_name);
-            println!("{}", str::from_utf8(&file).unwrap());
+            print!("{}", str::from_utf8(&file).unwrap());
         } else if let Some(file_name) = cmdline.strip_prefix("write ") {
             let mut file_buf = [0; 512];
             let Some(file) = getmultiline(&mut file_buf) else {
@@ -58,23 +58,23 @@ fn getline(buf: &mut [u8]) -> Option<&str> {
 fn getmultiline(buf: &mut [u8]) -> Option<&str> {
     let mut i = 0;
     let mut line_empty = true;
-    loop {
+    while i < buf.len() {
         let ch = getchar();
         putchar(ch);
         if ch == b'\r' {
+            buf[i] = b'\n';
             if line_empty {
-                break Some(core::str::from_utf8(&buf[..i]).unwrap());
+                return Some(core::str::from_utf8(&buf[..i]).unwrap());
             }
             print!("\n");
             line_empty = true;
-        } else if i == buf.len() {
-            return None;
         } else {
             buf[i] = ch;
             line_empty = false;
         }
         i += 1;
     }
+    None
 }
 
 app! { main Shell }
