@@ -57,6 +57,9 @@ pub fn rust_arg_type(type_: &str, structs: &[Struct]) -> Cow<'static, str> {
         "u64" => "u64".into(),
         "text" => "&str".into(),
         "bytes" => "&[u8]".into(),
+        _ if let Some(inner) = type_.strip_prefix("process_spawner ") => {
+            format!("Capability<{}Spawner>", camel_case(inner)).into()
+        }
         _ if structs.iter().any(|struct_| struct_.name == type_) => camel_case(type_).into(),
         _ => format!("Capability<{}>", camel_case(type_)).into(),
     }
@@ -72,6 +75,9 @@ pub fn rust_member_type(type_: &str, structs: &[Struct]) -> Cow<'static, str> {
         "u16" => "u16".into(),
         "u32" => "u32".into(),
         "u64" => "u64".into(),
+        _ if let Some(inner) = type_.strip_prefix("process_spawner ") => {
+            format!("Capability<{}Spawner>", camel_case(inner)).into()
+        }
         _ if structs.iter().any(|struct_| struct_.name == type_) => camel_case(type_).into(),
         _ => format!("Capability<{}>", camel_case(type_)).into(),
     }

@@ -1,5 +1,5 @@
 use deravel_codegen::{
-    InterfaceDetails, camel_case, parse_drvli, rust_escape_name, rust_member_type,
+    Interface, InterfaceDetails, camel_case, parse_drvli, rust_escape_name, rust_member_type,
 };
 use std::fmt::Write;
 
@@ -39,10 +39,11 @@ fn main() {
         writeln!(&mut output, "}}").unwrap();
         if let InterfaceDetails::App { args, implements } = &interface.details {
             writeln!(&mut output, "#[repr(C)]").unwrap();
+            writeln!(&mut output, "#[derive(Debug, Deserialize)]").unwrap();
             writeln!(&mut output, "pub struct {name_camel}Args {{").unwrap();
             for (arg_name, arg_type) in args {
-                let arg_type = camel_case(arg_type);
-                writeln!(&mut output, "    pub {arg_name}: Capability<{arg_type}>,").unwrap();
+                let arg_type = rust_member_type(arg_type, &drvli.structs);
+                writeln!(&mut output, "    pub {arg_name}: {arg_type},").unwrap();
             }
             writeln!(&mut output, "}}").unwrap();
             writeln!(&mut output, "impl ProcessArgs for {name_camel}Args {{").unwrap();
@@ -64,12 +65,14 @@ fn main() {
             } else {
                 writeln!(&mut output, "    type Export = {name_camel};").unwrap();
             }
+            writeln!(&mut output, "    type Spawner = {name_camel}Spawner;").unwrap();
             writeln!(
                 &mut output,
                 "    const NAME: &'static str = \"{name_snake}\";"
             )
             .unwrap();
             writeln!(&mut output, "}}").unwrap();
+            generate_spawner(interface, &mut output);
         }
     }
     std::fs::write(
@@ -78,4 +81,9 @@ fn main() {
     )
     .unwrap();
     println!("cargo::rerun-if-changed=../interfaces.drvli");
+}
+
+fn generate_spawner(interface: &Interface, out: &mut String) {
+    let camel_name = camel_case(interface.name);
+    writeln!(out, "pub struct {camel_name}Spawner;").unwrap();
 }

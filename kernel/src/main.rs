@@ -27,6 +27,7 @@ mod page;
 mod pci;
 mod plic;
 mod process;
+mod process_spawner;
 mod sbi;
 mod shared_memory;
 mod sync;
@@ -48,6 +49,7 @@ use crate::plic::{initialize_plic, plic_claim, plic_complete};
 use crate::process::{
     PROCESS_COUNT, PROCESSES, ProcessState, reserve_process, schedule_and_switch_to_userspace,
 };
+use crate::process_spawner::ProcessSpawnerService;
 use crate::sbi::{ResetReason, ResetType, SbiShutdown, log_sbi_metadata};
 use ::log::*;
 use alloc::borrow::ToOwned;
@@ -83,8 +85,6 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     // let ipc_b = reserve_process::<IpcB>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-b"));
     // let ipc_c = reserve_process::<IpcC>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-c"));
     // let hello = reserve_process::<Hello>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_hello"));
-    let shell = reserve_process::<Shell>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_shell"));
-    let terminal = reserve_process::<Terminal>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_terminal"));
     let windowing = reserve_process::<Windowing>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_windowing"));
 
     // ipc_a.spawn(IpcAArgs {
@@ -96,22 +96,22 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     // hello.spawn(HelloArgs {
     //     console: reserve_kernel_capability(&SbiConsole),
     // });
-    shell.spawn(ShellArgs {
-        console: terminal.export,
-        fs: fs_tar.export,
-        net: reserve_kernel_capability(virtio_net),
-        shutdown: reserve_kernel_capability(&SbiShutdown),
-    });
-    fs_tar.spawn(TarFsArgs {
-        drive: reserve_kernel_capability(virtio_blk),
-    });
-    terminal.spawn(TerminalArgs {
-        windowing: windowing.export,
-    });
     windowing.spawn(WindowingArgs {
         display: reserve_kernel_capability(virtio_gpu),
         keyboard: reserve_kernel_capability(virtio_keyboard),
         mouse: reserve_kernel_capability(virtio_mouse),
+        fs: fs_tar.export,
+        net: reserve_kernel_capability(virtio_net),
+        shutdown: reserve_kernel_capability(&SbiShutdown),
+        terminal: reserve_kernel_capability(Box::leak(Box::new(
+            ProcessSpawnerService::<Terminal>::new(elf!("CARGO_BIN_FILE_DERAVEL_APPS_terminal")),
+        ))),
+        shell: reserve_kernel_capability(Box::leak(Box::new(ProcessSpawnerService::<Shell>::new(
+            elf!("CARGO_BIN_FILE_DERAVEL_APPS_shell"),
+        )))),
+    });
+    fs_tar.spawn(TarFsArgs {
+        drive: reserve_kernel_capability(virtio_blk),
     });
 
     // TODO: initialize_hart_stack should take a callback and pass this with the correct lifetime.
@@ -244,10 +244,11 @@ impl SyscallHandler for () {
                     schedule_and_switch_to_userspace(hart);
                 }
                 Actor::Kernel => {
+                    drop(current_proc);
                     let handler = capability::get_handler(original.local_index());
                     let result = handler.call_method(method, args_buffer, hart.current_pid());
                     result_buffer[..result.len()].copy_from_slice(&result);
-                    current_proc.state = ProcessState::Runnable;
+                    hart.current_process().state = ProcessState::Runnable;
                     result.len()
                 }
             }
@@ -335,7 +336,12 @@ impl SyscallHandler for () {
             4 => Level::Trace,
             _ => panic!("invalid log level {level}"),
         };
-        log_userspace(level, hart.current_process().name.unwrap(), &text);
+        log_userspace(
+            level,
+            hart.current_process().name.unwrap(),
+            hart.current_pid(),
+            &text,
+        );
     }
 
     fn ipc_map_ring_buffer(

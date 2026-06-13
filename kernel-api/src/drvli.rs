@@ -1,10 +1,9 @@
-#![allow(
-    unused,
-    clippy::diverging_sub_expression,
-    clippy::let_unit_value,
-    clippy::match_single_binding,
-    clippy::never_loop
-)]
+#![allow(unused)]
+#![allow(clippy::diverging_sub_expression)]
+#![allow(clippy::let_unit_value)]
+#![allow(clippy::match_single_binding)]
+#![allow(clippy::never_loop)]
+#![allow(clippy::too_many_arguments)]
 
 use crate::syscall::*;
 use crate::{Ctx, Handler, RingBuffer};

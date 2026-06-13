@@ -4,7 +4,9 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
-use deravel_kernel_api::input::{EV_KEY, EV_REL, EV_SYN, KEY_ESC, KEY_LEFTALT, REL_X, REL_Y};
+use deravel_kernel_api::input::{
+    BTN_LEFT, EV_KEY, EV_REL, EV_SYN, KEY_ESC, KEY_LEFTALT, KEY_T, REL_X, REL_Y,
+};
 use deravel_kernel_api::*;
 use log::*;
 
@@ -22,7 +24,12 @@ struct Server {
     active_window: Option<usize>,
     cursor_x: u32,
     cursor_y: u32,
+    fs: Capability<Filesystem>,
+    net: Capability<Network>,
+    shutdown: Capability<Shutdown>,
     global_shortcut: Shortcut,
+    shell_spawner: Capability<ShellSpawner>,
+    terminal_spawner: Capability<TerminalSpawner>,
 }
 
 struct WindowData {
@@ -49,8 +56,8 @@ impl WindowingServer for Server {
         let memory = allocate_shared_memory(width as usize * height as usize * 4);
         let framebuffer = unsafe { &mut *map_shared_memory(memory) };
         self.windows.push(WindowData {
-            x: 0,
-            y: 0,
+            x: self.cursor_x - width / 2,
+            y: self.cursor_y - height / 2,
             width,
             height,
             framebuffer,
@@ -99,11 +106,23 @@ impl WindowServer<usize> for Server {
 }
 
 impl Observer<InputEvent, KeyboardTag> for Server {
-    fn observe(&mut self, event: InputEvent, _: KeyboardTag) {
+    fn observe(&mut self, mut ctx: OCtx<Self>, event: InputEvent, _: KeyboardTag) {
         if event.type_ == EV_KEY {
             match (&mut self.global_shortcut, event.code, event.value) {
                 (Shortcut::NotStarted, KEY_LEFTALT, 1) => self.global_shortcut = Shortcut::Alt,
                 (Shortcut::Alt, KEY_ESC, 1) => exit(),
+                (Shortcut::Alt, KEY_T, 1) => {
+                    let term = self
+                        .terminal_spawner
+                        .spawn(ctx.grant_capability_to_kernel(()));
+                    let term = forward_capability_by_pid(term, Actor::Kernel);
+                    let fs = forward_capability_by_pid(self.fs, Actor::Kernel);
+                    let net = forward_capability_by_pid(self.net, Actor::Kernel);
+                    let shutdown = forward_capability_by_pid(self.shutdown, Actor::Kernel);
+                    self.shell_spawner.spawn(term, fs, net, shutdown);
+                    self.active_window = None;
+                    self.global_shortcut = Shortcut::NotStarted;
+                }
                 (Shortcut::Alt, KEY_LEFTALT, 0) => self.global_shortcut = Shortcut::NotStarted,
                 (Shortcut::Alt, _, 1) => self.global_shortcut = Shortcut::NotStarted,
                 _ => {}
@@ -118,8 +137,20 @@ impl Observer<InputEvent, KeyboardTag> for Server {
 }
 
 impl Observer<InputEvent, MouseTag> for Server {
-    fn observe(&mut self, event: InputEvent, _: MouseTag) {
-        if event.type_ == EV_REL {
+    fn observe(&mut self, _: OCtx<Self>, event: InputEvent, _: MouseTag) {
+        if event.type_ == EV_KEY {
+            if event.code == BTN_LEFT && event.value == 1 {
+                for (window_index, window) in self.windows.iter().enumerate() {
+                    if self.cursor_x >= window.x
+                        && self.cursor_x < window.x + window.width
+                        && self.cursor_y >= window.y
+                        && self.cursor_y < window.y + window.height
+                    {
+                        self.active_window = Some(window_index);
+                    }
+                }
+            }
+        } else if event.type_ == EV_REL {
             let delta = event.value as i32;
             if event.code == REL_X {
                 self.cursor_x = self
@@ -155,7 +186,12 @@ fn main(args: Args) {
         active_window: None,
         cursor_x: width / 2,
         cursor_y: height / 2,
+        fs: args.fs,
+        net: args.net,
+        shutdown: args.shutdown,
         global_shortcut: Shortcut::NotStarted,
+        shell_spawner: args.shell,
+        terminal_spawner: args.terminal,
     };
 
     let mut dispatch = Dispatch::new(server);

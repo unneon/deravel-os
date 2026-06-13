@@ -17,7 +17,7 @@ use core::alloc::{GlobalAlloc, Layout};
 use core::fmt::Write;
 use core::marker::PhantomData;
 use core::sync::atomic::{AtomicUsize, Ordering};
-use log::{Level, LevelFilter, Metadata, Record, error};
+use log::*;
 
 #[macro_export]
 macro_rules! app {
@@ -118,6 +118,10 @@ pub fn allocate_shared_memory(size: usize) -> Capability<SharedMemory> {
     unsafe { syscall2::allocate_shared_memory(size) }
 }
 
+pub fn current_pid() -> ProcessId {
+    unsafe { (INPUTS_ADDRESS as *const ProcessInputs<Hello>).read().id }
+}
+
 pub fn exit() -> ! {
     unsafe { syscall2::exit() }
 }
@@ -170,10 +174,6 @@ fn stdio() -> Capability<Console> {
     let stdio = STDIO.load(Ordering::SeqCst) as *mut CapabilityCertificate;
     assert!(!stdio.is_null(), "standard input/output not set");
     Capability(RawCapability::from_pointer(stdio), PhantomData)
-}
-
-fn current_pid() -> ProcessId {
-    unsafe { (INPUTS_ADDRESS as *const ProcessInputs<Hello>).read().id }
 }
 
 fn initialize_log() {

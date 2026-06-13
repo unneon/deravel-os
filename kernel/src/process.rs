@@ -74,6 +74,30 @@ impl Process {
 
 impl<T: ProcessTag> ProcessReservation<T> {
     pub fn spawn(self, args: T::Args) {
+        args.for_all(|cap: RawCapability| {
+            CAPABILITY_PAGES[match cap.certifier() {
+                Actor::Userspace(pid) => pid.as_usize(),
+                Actor::Kernel => PROCESS_COUNT,
+            }]
+            .0[cap.local_index()]
+            .store(
+                CapabilityCertificateValue::granted(ProcessId::new(self.id.as_usize())),
+                Ordering::Relaxed,
+            )
+        });
+
+        create_process::<T>(
+            T::NAME,
+            self.elf,
+            ProcessInputs {
+                id: self.id,
+                riscv_timebase_frequency: timebase_frequency(),
+                args,
+            },
+        )
+    }
+
+    pub fn spawn_with_ready_caps(self, args: T::Args) {
         create_process::<T>(
             T::NAME,
             self.elf,
@@ -99,18 +123,6 @@ pub fn reserve_process<T: ProcessTag>(elf: &'static [u8]) -> ProcessReservation<
 
 pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: ProcessInputs<T>) {
     let pid = inputs.id.as_usize();
-
-    inputs.args.for_all(|cap: RawCapability| {
-        CAPABILITY_PAGES[match cap.certifier() {
-            Actor::Userspace(pid) => pid.as_usize(),
-            Actor::Kernel => PROCESS_COUNT,
-        }]
-        .0[cap.local_index()]
-        .store(
-            CapabilityCertificateValue::granted(ProcessId::new(pid)),
-            Ordering::Relaxed,
-        )
-    });
 
     let mut page_table = Box::new(PageTable::new());
     map_kernel_memory(&mut page_table);

@@ -6,7 +6,7 @@ include!(concat!(env!("OUT_DIR"), "/font.rs"));
 
 use deravel_kernel_api::input::*;
 use deravel_kernel_api::*;
-use log::warn;
+use log::*;
 
 struct Renderer<'a> {
     cursor_x: i32,

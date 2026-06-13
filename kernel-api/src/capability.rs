@@ -9,7 +9,7 @@ use deravel_types::{
     CapabilityCertificateValue, Interface, ProcessId, RawCapability, RingBuffer,
     get_capability_certificate_page,
 };
-use log::trace;
+use log::*;
 
 pub trait Handler<T, O: Copy> {
     fn call_method(
@@ -23,7 +23,7 @@ pub trait Handler<T, O: Copy> {
 }
 
 pub trait Observer<T, O: Copy> {
-    fn observe(&mut self, value: T, object: O);
+    fn observe(&mut self, ctx: OCtx<Self>, value: T, object: O);
 }
 
 pub trait RawHandler<S: ?Sized> {
@@ -37,11 +37,15 @@ pub trait RawHandler<S: ?Sized> {
 }
 
 pub trait RawObserver<S: ?Sized> {
-    fn observe(&mut self, server: &mut S);
+    fn observe(&mut self, server: &mut S) -> Vec<HandlerEntry<S>>;
 }
 
 pub struct Ctx<'a, S: ?Sized> {
     sender: ProcessId,
+    new_handlers: &'a mut Vec<HandlerEntry<S>>,
+}
+
+pub struct OCtx<'a, S: ?Sized> {
     new_handlers: &'a mut Vec<HandlerEntry<S>>,
 }
 
@@ -79,10 +83,15 @@ impl<S: ?Sized + Handler<T, O>, T, O: Copy> RawHandler<S> for TypedHandler<T, O>
 }
 
 impl<S: ?Sized + Observer<T, O>, T: Copy, O: Copy> RawObserver<S> for TypedObserver<T, O> {
-    fn observe(&mut self, server: &mut S) {
+    fn observe(&mut self, server: &mut S) -> Vec<HandlerEntry<S>> {
+        let mut new_handlers = Vec::new();
         while let Some(value) = self.1.poll() {
-            server.observe(value, self.0);
+            let iteration_ctx = OCtx {
+                new_handlers: &mut new_handlers,
+            };
+            server.observe(iteration_ctx, value, self.0);
         }
+        new_handlers
     }
 }
 
@@ -115,6 +124,32 @@ impl<S: ?Sized> Ctx<'_, S> {
 
     pub fn forward_capability<T: Interface>(&mut self, cap: Capability<T>) -> Capability<T> {
         forward_capability_by_pid(cap, self.sender)
+    }
+}
+
+impl<S: ?Sized> OCtx<'_, S> {
+    pub fn grant_capability_to_kernel<T: Interface + 'static, O: Copy + 'static>(
+        &mut self,
+        object: O,
+    ) -> Capability<T>
+    where
+        S: Handler<T, O>,
+    {
+        let certificate = allocate_certificate();
+        certificate.store(
+            CapabilityCertificateValue::granted(Actor::Kernel),
+            Ordering::Relaxed,
+        );
+        let cap = Capability(RawCapability::from_pointer(certificate), PhantomData);
+        let t_name = T::NAME;
+        trace!("self-granted {cap:?} {t_name}");
+
+        self.new_handlers.push(HandlerEntry {
+            local_index: cap.local_index(),
+            handler: Box::new(TypedHandler(object, PhantomData)),
+        });
+
+        cap
     }
 }
 
@@ -159,10 +194,13 @@ impl<S> Dispatch<S> {
         args: &[u8],
         sender: ProcessId,
     ) -> Vec<u8> {
-        let (result, new_handlers) = self.handlers[cap.local_index()]
-            .as_mut()
-            .unwrap()
-            .call_method(&mut self.server, method, args, sender);
+        let Some(handler) = self.handlers[cap.local_index()].as_mut() else {
+            panic!(
+                "dispatch on unhandled {cap:?}, method {method} {} from {sender:?}",
+                str::from_utf8(args).unwrap()
+            )
+        };
+        let (result, new_handlers) = handler.call_method(&mut self.server, method, args, sender);
         self.handlers
             .resize_with(CAPABILITIES_ALLOCATED.load(Ordering::Relaxed), || None);
         for new_handler in new_handlers {
@@ -172,8 +210,15 @@ impl<S> Dispatch<S> {
     }
 
     pub fn run_observables(&mut self) {
+        let mut new_handlers = Vec::new();
         for observable in &mut self.observers {
-            observable.observe(&mut self.server);
+            let iteration_new_handlers = observable.observe(&mut self.server);
+            new_handlers.extend(iteration_new_handlers);
+        }
+        self.handlers
+            .resize_with(CAPABILITIES_ALLOCATED.load(Ordering::Relaxed), || None);
+        for new_handler in new_handlers {
+            self.handlers[new_handler.local_index] = Some(new_handler.handler);
         }
     }
 }
@@ -196,11 +241,12 @@ pub fn forward_capability_by_cap<T: Interface, U: Interface>(
 
 pub fn forward_capability_by_pid<T: Interface>(
     cap: Capability<T>,
-    forwardee: ProcessId,
+    forwardee: impl Into<Actor>,
 ) -> Capability<T> {
+    let forwardee = forwardee.into();
     let certificate = allocate_certificate();
     certificate.store(
-        CapabilityCertificateValue::forwarded(forwardee.into(), cap.0),
+        CapabilityCertificateValue::forwarded(forwardee, cap.0),
         Ordering::Relaxed,
     );
     let forwarded = Capability(RawCapability::from_pointer(certificate), PhantomData);

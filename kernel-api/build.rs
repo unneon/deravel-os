@@ -1,7 +1,8 @@
 use deravel_codegen::{
-    Drvli, Interface, camel_case, parse_drvli, rust_arg_type, rust_borrow_or_copy,
-    rust_escape_name, rust_grantable_ret_type, rust_normal_ret_type, rust_stream_type,
-    rust_syscall_arg_type, rust_syscall_ret_type, split_syscall_arg, split_syscall_ret,
+    Drvli, Interface, InterfaceDetails, camel_case, parse_drvli, rust_arg_type,
+    rust_borrow_or_copy, rust_escape_name, rust_grantable_ret_type, rust_normal_ret_type,
+    rust_stream_type, rust_syscall_arg_type, rust_syscall_ret_type, split_syscall_arg,
+    split_syscall_ret,
 };
 use std::fmt::Write;
 
@@ -16,6 +17,10 @@ fn main() {
         generate_client_impl(interface, &drvli, &mut out);
         generate_server_trait(interface, &drvli, &mut out);
         generate_server_handler_impl(interface, &drvli, &mut out);
+        if let InterfaceDetails::App { .. } = interface.details {
+            generate_spawner_trait(interface, &drvli, &mut out);
+            generate_spawner_impl(interface, &drvli, &mut out);
+        }
     }
     generate_syscalls(&drvli, &mut out);
     let out_path = format!("{}/drvli.rs", std::env::var("OUT_DIR").unwrap());
@@ -306,5 +311,66 @@ fn generate_syscalls(drvli: &Drvli, out: &mut String) {
         writeln!(out, "        }}").unwrap();
         writeln!(out, "    }}").unwrap();
     }
+    writeln!(out, "}}").unwrap();
+}
+
+fn generate_spawner_impl(interface: &Interface, drvli: &Drvli, out: &mut String) {
+    let name_camel = camel_case(interface.name);
+    writeln!(
+        out,
+        "impl {name_camel}SpawnerClient for Capability<{name_camel}Spawner> {{"
+    )
+    .unwrap();
+    let InterfaceDetails::App { args, implements } = &interface.details else {
+        unreachable!()
+    };
+    write!(out, "    fn spawn(self").unwrap();
+    for (arg_name, arg_type) in args {
+        let arg_type = rust_arg_type(arg_type, &drvli.structs);
+        write!(out, ", {arg_name}: {arg_type}").unwrap();
+    }
+    write!(out, ")").unwrap();
+    if let Some(implements) = implements {
+        let implements = camel_case(implements);
+        write!(out, " -> Capability<{implements}>").unwrap();
+    } else {
+        write!(out, " -> Capability<{name_camel}>").unwrap();
+    }
+    writeln!(out, " {{").unwrap();
+    writeln!(out, "        let data = serde_json::to_vec(&(").unwrap();
+    for (arg_name, _) in args {
+        writeln!(out, "            {arg_name},",).unwrap();
+    }
+    writeln!(out, "        )).unwrap();").unwrap();
+    writeln!(out, "        let mut buf = [0u8; 4096];").unwrap();
+    writeln!( out, "        let result_len = unsafe {{ syscall2::ipc_call(self.0, 0, data.as_ptr(), data.len(), buf.as_mut_ptr(), buf.len()) }};").unwrap();
+    writeln!(
+        out,
+        "        serde_json::from_slice(&buf[..result_len]).unwrap()"
+    )
+    .unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out, "}}").unwrap();
+}
+
+fn generate_spawner_trait(interface: &Interface, drvli: &Drvli, out: &mut String) {
+    let InterfaceDetails::App { args, implements } = &interface.details else {
+        unreachable!()
+    };
+    let name_camel = camel_case(interface.name);
+    writeln!(out, "pub trait {name_camel}SpawnerClient {{").unwrap();
+    write!(out, "    fn spawn(self").unwrap();
+    for (arg_name, arg_type) in args {
+        let arg_type = rust_arg_type(arg_type, &drvli.structs);
+        write!(out, ", {arg_name}: {arg_type}").unwrap();
+    }
+    write!(out, ")").unwrap();
+    if let Some(implements) = implements {
+        let implements = camel_case(implements);
+        write!(out, " -> Capability<{implements}>").unwrap();
+    } else {
+        write!(out, " -> Capability<{name_camel}>").unwrap();
+    }
+    writeln!(out, ";").unwrap();
     writeln!(out, "}}").unwrap();
 }
