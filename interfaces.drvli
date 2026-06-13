@@ -1,13 +1,3 @@
-app hello(console console)
-
-app ipc_a(fs filesystem, b ipc_b)
-
-app ipc_b(c ipc_c)
-    func foo(fs filesystem)
-
-app ipc_c
-    func bar(fs filesystem)
-
 app shell(console console, fs filesystem, net network, shutdown shutdown)
 
 app tar_fs(drive drive) implements filesystem

@@ -23,9 +23,14 @@ pub struct ProcessId(usize);
 
 #[repr(C)]
 pub struct ProcessInputs<T: ProcessTag> {
+    pub common: CommonProcessInputs,
+    pub args: T::Args,
+}
+
+#[repr(C)]
+pub struct CommonProcessInputs {
     pub id: ProcessId,
     pub riscv_timebase_frequency: f64,
-    pub args: T::Args,
 }
 
 pub struct SharedMemory;

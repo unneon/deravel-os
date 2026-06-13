@@ -119,7 +119,7 @@ pub fn allocate_shared_memory(size: usize) -> Capability<SharedMemory> {
 }
 
 pub fn current_pid() -> ProcessId {
-    unsafe { (INPUTS_ADDRESS as *const ProcessInputs<Hello>).read().id }
+    unsafe { (INPUTS_ADDRESS as *const CommonProcessInputs).read().id }
 }
 
 pub fn exit() -> ! {
@@ -160,7 +160,7 @@ pub fn set_stdio(cap: Capability<Console>) {
 pub fn system_time() -> f64 {
     riscv::register::time::read() as f64
         / unsafe {
-            (INPUTS_ADDRESS as *const ProcessInputs<Hello>)
+            (INPUTS_ADDRESS as *const CommonProcessInputs)
                 .read()
                 .riscv_timebase_frequency
         }

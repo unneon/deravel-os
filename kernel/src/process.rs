@@ -90,8 +90,10 @@ impl<T: ProcessTag> ProcessReservation<T> {
             T::NAME,
             self.elf,
             ProcessInputs {
-                id: self.id,
-                riscv_timebase_frequency: timebase_frequency(),
+                common: CommonProcessInputs {
+                    id: self.id,
+                    riscv_timebase_frequency: timebase_frequency(),
+                },
                 args,
             },
         )
@@ -102,8 +104,10 @@ impl<T: ProcessTag> ProcessReservation<T> {
             T::NAME,
             self.elf,
             ProcessInputs {
-                id: self.id,
-                riscv_timebase_frequency: timebase_frequency(),
+                common: CommonProcessInputs {
+                    id: self.id,
+                    riscv_timebase_frequency: timebase_frequency(),
+                },
                 args,
             },
         )
@@ -122,7 +126,7 @@ pub fn reserve_process<T: ProcessTag>(elf: &'static [u8]) -> ProcessReservation<
 }
 
 pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: ProcessInputs<T>) {
-    let pid = inputs.id.as_usize();
+    let pid = inputs.common.id.as_usize();
 
     let mut page_table = Box::new(PageTable::new());
     map_kernel_memory(&mut page_table);

@@ -81,21 +81,8 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     enable_interrupts();
 
     let fs_tar = reserve_process::<TarFs>(elf!("CARGO_BIN_FILE_DERAVEL_FILESYSTEM_TAR"));
-    // let ipc_a = reserve_process::<IpcA>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-a"));
-    // let ipc_b = reserve_process::<IpcB>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-b"));
-    // let ipc_c = reserve_process::<IpcC>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_ipc-c"));
-    // let hello = reserve_process::<Hello>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_hello"));
     let windowing = reserve_process::<Windowing>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_windowing"));
 
-    // ipc_a.spawn(IpcAArgs {
-    //     fs: fs_tar.export,
-    //     b: ipc_b.export,
-    // });
-    // ipc_b.spawn(IpcBArgs { c: ipc_c.export });
-    // ipc_c.spawn(IpcCArgs {});
-    // hello.spawn(HelloArgs {
-    //     console: reserve_kernel_capability(&SbiConsole),
-    // });
     windowing.spawn(WindowingArgs {
         display: reserve_kernel_capability(virtio_gpu),
         keyboard: reserve_kernel_capability(virtio_keyboard),
