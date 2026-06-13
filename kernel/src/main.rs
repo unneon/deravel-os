@@ -116,7 +116,7 @@ fn clear_bss() {
 }
 
 fn initialize_hart_stack() {
-    let stack = Box::leak(Box::new(HartStack::new()));
+    let stack = Box::leak(HartStack::new());
     unsafe { riscv::register::sscratch::write(stack.as_raw_ctx() as usize) }
 }
 

@@ -1,6 +1,7 @@
 use crate::STACK_SIZE;
 use crate::process::{PROCESSES, Process};
 use crate::sync::MutexGuard;
+use alloc::boxed::Box;
 use deravel_types::ProcessId;
 
 #[repr(align(16))]
@@ -33,11 +34,8 @@ impl HartContext {
 }
 
 impl HartStack {
-    pub fn new() -> HartStack {
-        HartStack {
-            data: [0; _],
-            ctx: HartContext { current_pid: None },
-        }
+    pub fn new() -> Box<HartStack> {
+        unsafe { Box::new_zeroed().assume_init() }
     }
 
     pub fn as_raw_ctx(&mut self) -> *mut HartContext {
