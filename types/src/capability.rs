@@ -8,6 +8,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 #[serde(transparent)]
 pub struct Capability<T>(pub RawCapability, pub PhantomData<T>);
 
+#[derive(Default)]
 pub struct CapabilityCertificate(AtomicU64);
 
 #[derive(Clone, Copy)]
@@ -66,10 +67,10 @@ impl RawCapability {
 
     pub fn certifier(self) -> Actor {
         let page_index = (self.as_usize() - CAPABILITIES_START) / PAGE_SIZE;
-        if page_index < MAX_PROCESSES {
-            Actor::Userspace(ProcessId::new(page_index as u16))
-        } else {
+        if page_index == 0 {
             Actor::Kernel
+        } else {
+            Actor::Userspace(ProcessId::new(page_index as u16))
         }
     }
 
@@ -83,6 +84,10 @@ impl RawCapability {
 }
 
 impl CapabilityCertificate {
+    pub const fn new() -> CapabilityCertificate {
+        CapabilityCertificate(AtomicU64::new(0))
+    }
+
     pub fn load(&self, ordering: Ordering) -> CapabilityCertificateValue {
         unsafe { core::mem::transmute::<u64, CapabilityCertificateValue>(self.0.load(ordering)) }
     }
@@ -107,7 +112,7 @@ impl CapabilityCertificateValue {
         CapabilityCertificateValue {
             grantee: match grantee.into() {
                 Actor::Userspace(pid) => pid.as_u16() as u32,
-                Actor::Kernel => MAX_PROCESSES as u32,
+                Actor::Kernel => 0,
             },
             payload: 0,
         }
@@ -117,17 +122,17 @@ impl CapabilityCertificateValue {
         CapabilityCertificateValue {
             grantee: match forwardee {
                 Actor::Userspace(pid) => pid.as_u16() as u32,
-                Actor::Kernel => MAX_PROCESSES as u32,
+                Actor::Kernel => 0,
             },
             payload: capability.as_usize() as u32,
         }
     }
 
     pub fn unpack(self) -> CapabilityCertificateUnpacked {
-        let grantee_or_forwardee = if (self.grantee as usize) < MAX_PROCESSES {
-            Actor::Userspace(ProcessId::new(self.grantee as u16))
-        } else {
+        let grantee_or_forwardee = if self.grantee == 0 {
             Actor::Kernel
+        } else {
+            Actor::Userspace(ProcessId::new(self.grantee as u16))
         };
         if self.payload == 0 {
             CapabilityCertificateUnpacked::Granted {
@@ -213,7 +218,7 @@ pub fn get_capability_certificate_page(
 ) -> &'static [CapabilityCertificate; CAPABILITIES_PER_PAGE] {
     let offset = match actor {
         Actor::Userspace(pid) => pid.as_u16() as usize,
-        Actor::Kernel => MAX_PROCESSES,
+        Actor::Kernel => 0,
     };
     &get_capability_certificate_pages()[offset]
 }

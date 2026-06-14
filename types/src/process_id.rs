@@ -8,10 +8,7 @@ pub struct ProcessId(NonZeroU16);
 impl ProcessId {
     #[track_caller]
     pub fn new(id: u16) -> ProcessId {
-        assert!(
-            (id as usize) < MAX_PROCESSES,
-            "process id exceeds MAX_PROCESSES"
-        );
+        assert!((id as usize) <= MAX_PROCESSES, "process id too large");
         ProcessId(NonZeroU16::new(id).expect("process id must be non-zero"))
     }
 

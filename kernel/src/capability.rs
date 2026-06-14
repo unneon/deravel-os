@@ -5,8 +5,8 @@ use alloc::vec::Vec;
 use core::marker::PhantomData;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use deravel_types::{
-    Actor, Capability, CapabilityCertificateValue, CapabilityPage, PAGE_SIZE, ProcessId,
-    RawCapability, UntypedRingBuffer,
+    Actor, Capability, CapabilityCertificate, CapabilityCertificateValue, CapabilityPage,
+    PAGE_SIZE, ProcessId, RawCapability, UntypedRingBuffer,
 };
 
 pub trait Handler<T> {
@@ -27,7 +27,8 @@ pub trait RawHandler {
 
 struct TypedHandler<T, H: 'static>(&'static H, PhantomData<T>);
 
-static CAPABILITY_PAGES: [CapabilityPage; PROCESS_COUNT + 1] = unsafe { core::mem::zeroed() };
+static CAPABILITY_PAGES: [CapabilityPage; PROCESS_COUNT + 1] =
+    [const { CapabilityPage([const { CapabilityCertificate::new() }; _]) }; _];
 
 static ALLOCATED_COUNT: AtomicUsize = AtomicUsize::new(0);
 
@@ -54,7 +55,7 @@ pub fn grant_kernel_capability<T: 'static + Sync>(
 ) -> Capability<T> {
     let cap = reserve_kernel_capability(handler);
     // TODO: Race condition, PID 0 can use the capability.
-    CAPABILITY_PAGES[PROCESS_COUNT].0[cap.local_index()].store(
+    kernel_capability_page().0[cap.local_index()].store(
         CapabilityCertificateValue::granted(grantee),
         Ordering::Relaxed,
     );
@@ -78,7 +79,7 @@ pub fn capability_page(pid: ProcessId) -> &'static CapabilityPage {
 }
 
 pub fn kernel_capability_page() -> &'static CapabilityPage {
-    &CAPABILITY_PAGES[PROCESS_COUNT]
+    &CAPABILITY_PAGES[0]
 }
 
 pub fn capability_pages_physical_address() -> usize {
