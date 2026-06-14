@@ -54,18 +54,18 @@ syscall exit() never
 
 syscall ipc_call(cap capability, method usize, args const_array u8, result array u8) usize
 
+syscall ipc_receive(args array u8) capability, usize, usize, pid
+
 syscall ipc_reply(result const_array u8)
 
-syscall allocate_pages(count usize) ptr u8
+syscall ipc_stream(cap capability, stream_ usize) ptr, usize
 
-syscall map_shared_memory(cap shared_memory) ptr u8, usize
+syscall alloc(size usize) ptr u8
 
-syscall log(message const_array u8, level u64)
+syscall alloc_shared(size usize) ptr u8, shared_memory
 
-syscall ipc_map_ring_buffer(cap capability, stream_ usize) ptr, usize
+syscall map_shared(cap shared_memory) ptr u8, usize
 
 syscall yield()
 
-syscall ipc_receive_async(args array u8) capability, usize, usize, pid
-
-syscall allocate_shared_memory(size usize) shared_memory
+syscall log(message const_array u8, level u64)

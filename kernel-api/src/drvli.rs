@@ -5,7 +5,7 @@
 #![allow(clippy::never_loop)]
 #![allow(clippy::too_many_arguments)]
 
-use crate::syscall::*;
+use crate::abi::*;
 use crate::{Ctx, Handler, RingBuffer};
 use alloc::string::String;
 use alloc::vec::Vec;

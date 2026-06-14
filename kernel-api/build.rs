@@ -54,7 +54,7 @@ fn generate_client_impl(interface: &Interface, drvli: &Drvli, out: &mut String) 
         }
         writeln!(out, "        )).unwrap();").unwrap();
         writeln!(out, "        let mut buf = [0u8; 4096];").unwrap();
-        writeln!( out, "        let result_len = unsafe {{ syscall2::ipc_call(self.0, {method_id}, data.as_ptr(), data.len(), buf.as_mut_ptr(), buf.len()) }};").unwrap();
+        writeln!( out, "        let result_len = unsafe {{ syscall::ipc_call(self.0, {method_id}, data.as_ptr(), data.len(), buf.as_mut_ptr(), buf.len()) }};").unwrap();
         writeln!(
             out,
             "        serde_json::from_slice(&buf[..result_len]).unwrap()"
@@ -72,7 +72,7 @@ fn generate_client_impl(interface: &Interface, drvli: &Drvli, out: &mut String) 
         .unwrap();
         writeln!(
              out,
-            "        let (ring_buffer, byte_count) = unsafe {{ syscall2::ipc_map_ring_buffer(self.0, {stream_id}) }};"
+            "        let (ring_buffer, byte_count) = unsafe {{ syscall::ipc_stream(self.0, {stream_id}) }};"
         )
             .unwrap();
         writeln!(
@@ -214,9 +214,9 @@ fn generate_server_handler_impl(interface: &Interface, drvli: &Drvli, out: &mut 
 }
 
 fn generate_syscalls(drvli: &Drvli, out: &mut String) {
-    writeln!(out, "pub mod syscall2 {{").unwrap();
+    writeln!(out, "pub mod syscall {{").unwrap();
     writeln!(out, "    #![allow(clippy::missing_safety_doc)]").unwrap();
-    writeln!(out, "    use crate::syscall::{{from_reg, to_reg}};").unwrap();
+    writeln!(out, "    use crate::abi::{{from_reg, to_reg}};").unwrap();
     writeln!(out, "    use deravel_types::*;").unwrap();
     for (syscall_number, syscall) in drvli.syscalls.iter().enumerate() {
         let syscall_name = rust_escape_name(syscall.name);
@@ -343,7 +343,7 @@ fn generate_spawner_impl(interface: &Interface, drvli: &Drvli, out: &mut String)
     }
     writeln!(out, "        )).unwrap();").unwrap();
     writeln!(out, "        let mut buf = [0u8; 4096];").unwrap();
-    writeln!( out, "        let result_len = unsafe {{ syscall2::ipc_call(self.0, 0, data.as_ptr(), data.len(), buf.as_mut_ptr(), buf.len()) }};").unwrap();
+    writeln!( out, "        let result_len = unsafe {{ syscall::ipc_call(self.0, 0, data.as_ptr(), data.len(), buf.as_mut_ptr(), buf.len()) }};").unwrap();
     writeln!(
         out,
         "        serde_json::from_slice(&buf[..result_len]).unwrap()"

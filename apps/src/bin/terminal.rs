@@ -142,7 +142,7 @@ impl ConsoleServer for Renderer<'_> {
 
 fn main(args: Args) {
     let window = args.windowing.create_window();
-    let framebuffer = unsafe { &mut *map_shared_memory(window.framebuffer()) };
+    let framebuffer = unsafe { &mut *map_shared(window.framebuffer()) };
     let mut renderer = Renderer {
         cursor_x: FONT.leftpad as i32,
         cursor_y: 0,

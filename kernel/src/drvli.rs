@@ -8,7 +8,7 @@ use crate::hart::HartContext;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::marker::PhantomData;
-use deravel_types::syscall::to_reg;
+use deravel_types::abi::to_reg;
 use deravel_types::*;
 
 include!(concat!(env!("OUT_DIR"), "/drvli.rs"));

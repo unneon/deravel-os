@@ -73,8 +73,7 @@ impl Write for Stdio {
 unsafe impl GlobalAlloc for PageAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         assert!(layout.align() <= PAGE_SIZE);
-        let page_count = layout.size().div_ceil(PAGE_SIZE);
-        unsafe { syscall2::allocate_pages(page_count) }
+        unsafe { syscall::alloc(layout.size()) }
     }
 
     unsafe fn dealloc(&self, _: *mut u8, _: Layout) {}
@@ -95,7 +94,7 @@ impl log::Log for KernelLogger {
             Level::Debug => 3,
             Level::Trace => 4,
         };
-        unsafe { syscall2::log(text.as_ptr(), text.len(), level) }
+        unsafe { syscall::log(text.as_ptr(), text.len(), level) }
     }
 
     fn flush(&self) {}
@@ -114,8 +113,9 @@ unsafe extern "C" fn __deravel_entry() -> ! {
     )
 }
 
-pub fn allocate_shared_memory(size: usize) -> Capability<SharedMemory> {
-    unsafe { syscall2::allocate_shared_memory(size) }
+pub fn allocate_shared_memory(size: usize) -> (*mut [u8], Capability<SharedMemory>) {
+    let (ptr, cap) = unsafe { syscall::alloc_shared(size) };
+    (core::ptr::slice_from_raw_parts_mut(ptr, size), cap)
 }
 
 pub fn current_pid() -> ProcessId {
@@ -123,7 +123,7 @@ pub fn current_pid() -> ProcessId {
 }
 
 pub fn exit() -> ! {
-    unsafe { syscall2::exit() }
+    unsafe { syscall::exit() }
 }
 
 pub fn getchar() -> u8 {
@@ -134,18 +134,18 @@ pub fn ipc_serve<S>(dispatch: &mut Dispatch<S>) {
     loop {
         let mut buf = [0u8; 4096];
         let (cap, method, args_len, sender) =
-            unsafe { syscall2::ipc_receive_async(buf.as_mut_ptr(), buf.len()) };
+            unsafe { syscall::ipc_receive(buf.as_mut_ptr(), buf.len()) };
         if cap.as_usize() == 0 {
             break;
         }
         let result = dispatch.dispatch(cap, method, &buf[..args_len], sender);
-        unsafe { syscall2::ipc_reply(result.as_ptr(), result.len()) }
+        unsafe { syscall::ipc_reply(result.as_ptr(), result.len()) }
     }
     dispatch.run_observables();
 }
 
-pub fn map_shared_memory(cap: Capability<SharedMemory>) -> *mut [u8] {
-    let (pointer, size) = unsafe { syscall2::map_shared_memory(cap) };
+pub fn map_shared(cap: Capability<SharedMemory>) -> *mut [u8] {
+    let (pointer, size) = unsafe { syscall::map_shared(cap) };
     core::ptr::from_raw_parts_mut(pointer, size)
 }
 
@@ -167,7 +167,7 @@ pub fn system_time() -> f64 {
 }
 
 pub fn yield_() {
-    unsafe { syscall2::yield_() }
+    unsafe { syscall::yield_() }
 }
 
 fn stdio() -> Capability<Console> {

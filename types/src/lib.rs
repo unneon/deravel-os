@@ -5,12 +5,12 @@
 #![no_std]
 extern crate alloc;
 
+pub mod abi;
 mod align;
 mod capability;
 mod drvli;
 pub mod input;
 mod ring_buffer;
-pub mod syscall;
 
 pub use align::{CACHE_LINE_SIZE, CacheLineAligned};
 pub use capability::*;

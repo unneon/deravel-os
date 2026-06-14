@@ -33,7 +33,7 @@ pub struct Process {
     pub state: ProcessState,
     pub registers: Option<RiscvRegisters>,
     pub pc: usize,
-    pub page_table: *const PageTable,
+    pub page_table: *mut PageTable,
     pub virtual_memory: TrivialAllocator,
     pub messages: Option<Box<VecDeque<(RawCapability, usize, Vec<u8>, ProcessId)>>>,
     #[allow(clippy::box_collection)]

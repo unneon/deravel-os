@@ -242,6 +242,30 @@ impl SyscallHandler for () {
         }
     }
 
+    fn ipc_receive(
+        _: usize,
+        _: &mut RiscvRegisters,
+        hart: &mut HartContext,
+        args_buffer: &mut [u8],
+    ) -> (RawCapability, usize, usize, ProcessId) {
+        let mut current_proc = hart.current_process();
+        assert!(current_proc.currently_serving.is_none());
+        if let Some((cap, method, args, sender)) =
+            current_proc.messages.as_mut().and_then(|q| q.pop_front())
+        {
+            args_buffer[..args.len()].copy_from_slice(&args);
+            current_proc.currently_serving = Some(sender);
+            (cap, method, args.len(), sender)
+        } else {
+            (
+                RawCapability::from_pointer(core::ptr::null()),
+                0,
+                0,
+                ProcessId::new(0),
+            )
+        }
+    }
+
     fn ipc_reply(_: usize, _: &mut RiscvRegisters, hart: &mut HartContext, result: &mut [u8]) {
         let caller = hart.current_process().currently_serving.take().unwrap();
         let mut caller = PROCESSES[caller.as_usize()].lock();
@@ -254,84 +278,7 @@ impl SyscallHandler for () {
         }
     }
 
-    fn allocate_pages(
-        _: usize,
-        _: &mut RiscvRegisters,
-        hart: &mut HartContext,
-        page_count: usize,
-    ) -> *mut u8 {
-        let mut current_proc = hart.current_process();
-        let pages = vec![[0; PAGE_SIZE]; page_count];
-        let page_table = unsafe { &mut *(current_proc.page_table as *mut PageTable) };
-        let virtual_addr = current_proc
-            .virtual_memory
-            .allocate(page_count * PAGE_SIZE, PAGE_SIZE);
-        map_pages(
-            page_table,
-            virtual_addr,
-            pages.as_ptr() as usize,
-            PageFlags::readwrite().user(),
-            page_count,
-        );
-        virtual_addr as *mut u8
-    }
-
-    fn map_shared_memory(
-        _: usize,
-        _: &mut RiscvRegisters,
-        hart: &mut HartContext,
-        farthest_cap: Capability<SharedMemory>,
-    ) -> (*mut u8, usize) {
-        let current_pid = hart.current_pid().as_usize();
-        let mut current_proc = hart.current_process();
-        let original = validate_untrusted_capability(farthest_cap.0, current_pid);
-        assert_eq!(
-            original.certifier(),
-            Actor::Kernel,
-            "shared memory capabilities can only be created by the kernel"
-        );
-        let handler = capability::get_handler(original.local_index());
-        let (physical_address, length) = handler.shared_memory();
-        assert!(length.is_multiple_of(PAGE_SIZE));
-
-        let virtual_addr = current_proc.virtual_memory.allocate(length, PAGE_SIZE);
-        let page_table = unsafe { &mut *(current_proc.page_table as *mut PageTable) };
-        map_pages(
-            page_table,
-            virtual_addr,
-            physical_address,
-            PageFlags::readwrite().user(),
-            length / PAGE_SIZE,
-        );
-
-        (virtual_addr as *mut u8, length)
-    }
-
-    fn log(
-        _: usize,
-        _: &mut RiscvRegisters,
-        hart: &mut HartContext,
-        message: &mut [u8],
-        level: u64,
-    ) {
-        let text = str::from_utf8(message).unwrap().to_owned();
-        let level = match level {
-            0 => Level::Error,
-            1 => Level::Warn,
-            2 => Level::Info,
-            3 => Level::Debug,
-            4 => Level::Trace,
-            _ => panic!("invalid log level {level}"),
-        };
-        log_userspace(
-            level,
-            hart.current_process().name.unwrap(),
-            hart.current_pid(),
-            &text,
-        );
-    }
-
-    fn ipc_map_ring_buffer(
+    fn ipc_stream(
         user_pc: usize,
         registers: &mut RiscvRegisters,
         hart: &mut HartContext,
@@ -354,9 +301,8 @@ impl SyscallHandler for () {
                     assert!(length >= 2 * CACHE_LINE_SIZE + declared_size);
 
                     let virtual_addr = current_proc.virtual_memory.allocate(length, PAGE_SIZE);
-                    let page_table = unsafe { &mut *(current_proc.page_table as *mut PageTable) };
                     map_pages(
-                        page_table,
+                        unsafe { &mut *current_proc.page_table },
                         virtual_addr,
                         physical_address,
                         PageFlags::readwrite().user(),
@@ -387,12 +333,11 @@ impl SyscallHandler for () {
                 let ring_buffer = handler.map_stream(stream);
                 let ring_buffer_size = size_of_val(ring_buffer);
 
-                let page_table = unsafe { &mut *(current_proc.page_table as *mut PageTable) };
                 let virtual_addr = current_proc
                     .virtual_memory
                     .allocate(ring_buffer_size, PAGE_SIZE);
                 map_pages(
-                    page_table,
+                    unsafe { &mut *current_proc.page_table },
                     virtual_addr,
                     ring_buffer as *const _ as *const u8 as usize,
                     PageFlags::readwrite().user(),
@@ -401,6 +346,78 @@ impl SyscallHandler for () {
                 (virtual_addr as *mut (), ring_buffer.0.data.0.len())
             }
         }
+    }
+
+    fn alloc(_: usize, _: &mut RiscvRegisters, hart: &mut HartContext, size: usize) -> *mut u8 {
+        let size = size.next_multiple_of(PAGE_SIZE);
+        let memory = Vec::leak(vec![0u8; size]);
+        let mut proc = hart.current_process();
+        let virtual_addr = proc.virtual_memory.allocate(size, PAGE_SIZE);
+        map_pages(
+            unsafe { &mut *proc.page_table },
+            virtual_addr,
+            memory.as_ptr() as usize,
+            PageFlags::readwrite().user(),
+            size / PAGE_SIZE,
+        );
+        virtual_addr as *mut u8
+    }
+
+    fn alloc_shared(
+        _: usize,
+        _: &mut RiscvRegisters,
+        hart: &mut HartContext,
+        size: usize,
+    ) -> (*mut u8, Capability<SharedMemory>) {
+        let size = size.next_multiple_of(PAGE_SIZE);
+        let memory = Vec::leak(vec![0u8; size]);
+        let mut proc = hart.current_process();
+        let virtual_addr = proc.virtual_memory.allocate(size, PAGE_SIZE);
+        map_pages(
+            unsafe { &mut *proc.page_table },
+            virtual_addr,
+            memory.as_ptr() as usize,
+            PageFlags::readwrite().user(),
+            size / PAGE_SIZE,
+        );
+        let cap = grant_kernel_capability(
+            hart.current_pid(),
+            Box::leak(Box::new(shared_memory::SharedMemory {
+                physical_address: memory.as_ptr() as usize,
+                size,
+            })),
+        );
+        (virtual_addr as *mut u8, cap)
+    }
+
+    fn map_shared(
+        _: usize,
+        _: &mut RiscvRegisters,
+        hart: &mut HartContext,
+        farthest_cap: Capability<SharedMemory>,
+    ) -> (*mut u8, usize) {
+        let current_pid = hart.current_pid().as_usize();
+        let mut current_proc = hart.current_process();
+        let original = validate_untrusted_capability(farthest_cap.0, current_pid);
+        assert_eq!(
+            original.certifier(),
+            Actor::Kernel,
+            "shared memory capabilities can only be created by the kernel"
+        );
+        let handler = capability::get_handler(original.local_index());
+        let (physical_address, length) = handler.shared_memory();
+        assert!(length.is_multiple_of(PAGE_SIZE));
+
+        let virtual_addr = current_proc.virtual_memory.allocate(length, PAGE_SIZE);
+        map_pages(
+            unsafe { &mut *current_proc.page_table },
+            virtual_addr,
+            physical_address,
+            PageFlags::readwrite().user(),
+            length / PAGE_SIZE,
+        );
+
+        (virtual_addr as *mut u8, length)
     }
 
     fn yield_(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut HartContext) {
@@ -412,44 +429,28 @@ impl SyscallHandler for () {
         schedule_and_switch_to_userspace(hart);
     }
 
-    fn ipc_receive_async(
+    fn log(
         _: usize,
         _: &mut RiscvRegisters,
         hart: &mut HartContext,
-        args_buffer: &mut [u8],
-    ) -> (RawCapability, usize, usize, ProcessId) {
-        let mut current_proc = hart.current_process();
-        assert!(current_proc.currently_serving.is_none());
-        if let Some((cap, method, args, sender)) =
-            current_proc.messages.as_mut().and_then(|q| q.pop_front())
-        {
-            args_buffer[..args.len()].copy_from_slice(&args);
-            current_proc.currently_serving = Some(sender);
-            (cap, method, args.len(), sender)
-        } else {
-            (
-                RawCapability::from_pointer(core::ptr::null()),
-                0,
-                0,
-                ProcessId::new(0),
-            )
-        }
-    }
-
-    fn allocate_shared_memory(
-        _: usize,
-        _: &mut RiscvRegisters,
-        hart: &mut HartContext,
-        size: usize,
-    ) -> Capability<SharedMemory> {
-        let size = size.next_multiple_of(PAGE_SIZE);
-        let memory = vec![0u8; size];
-        let memory = Vec::leak(memory);
-        let memory = shared_memory::SharedMemory {
-            physical_address: memory.as_ptr() as usize,
-            size,
+        message: &mut [u8],
+        level: u64,
+    ) {
+        let text = str::from_utf8(message).unwrap().to_owned();
+        let level = match level {
+            0 => Level::Error,
+            1 => Level::Warn,
+            2 => Level::Info,
+            3 => Level::Debug,
+            4 => Level::Trace,
+            _ => panic!("invalid log level {level}"),
         };
-        grant_kernel_capability(hart.current_pid(), Box::leak(Box::new(memory)))
+        log_userspace(
+            level,
+            hart.current_process().name.unwrap(),
+            hart.current_pid(),
+            &text,
+        );
     }
 }
 

@@ -53,8 +53,8 @@ impl WindowingServer for Server {
         let window_id = self.windows.len();
         let width = 400;
         let height = 300;
-        let memory = allocate_shared_memory(width as usize * height as usize * 4);
-        let framebuffer = unsafe { &mut *map_shared_memory(memory) };
+        let (framebuffer, memory) = allocate_shared_memory(width as usize * height as usize * 4);
+        let framebuffer = unsafe { &mut *framebuffer };
         self.windows.push(WindowData {
             x: self.cursor_x - width / 2,
             y: self.cursor_y - height / 2,
@@ -97,8 +97,7 @@ impl WindowServer<usize> for Server {
     }
 
     fn events(&mut self, window_id: usize) -> (Capability<SharedMemory>, usize) {
-        let cap = allocate_shared_memory(PAGE_SIZE);
-        let memory = map_shared_memory(cap);
+        let (memory, cap) = allocate_shared_memory(PAGE_SIZE);
         let ring = unsafe { RingBuffer::new_in_single_page(memory) };
         self.windows[window_id].event_ring = Some(ring);
         (cap, ring.untype().0.data.0.len())
@@ -173,7 +172,7 @@ fn main(args: Args) {
     let width = args.display.width();
     let height = args.display.height();
     info!("found a {width}x{height} display");
-    let framebuffer = unsafe { &mut *map_shared_memory(args.display.framebuffer()) };
+    let framebuffer = unsafe { &mut *map_shared(args.display.framebuffer()) };
     fill_screen(191, 215, 234, framebuffer, &args);
     initialize_cursor(255, 255, 255, 16, args.display);
 
