@@ -28,10 +28,11 @@ static PLIC: AtomicPtr<Plic> = AtomicPtr::null();
 
 pub fn initialize_plic(device_tree: &Fdt) {
     let plic = find_plic(device_tree).unwrap();
-    for e in 1..MAX_SOURCES {
+    let supported_external = supported_external_interrupts(device_tree).unwrap();
+    for e in 1..=supported_external.min(MAX_SOURCES - 1) {
         plic.priority().index(e).write(1);
     }
-    for i in 0..5 {
+    for i in 0..supported_external.div_ceil(32) {
         plic.enable().index(1).index(i).write(!0);
     }
     plic.contexts().index(1).priority_threshold().write(0);
@@ -59,4 +60,11 @@ fn get_plic() -> Volatile<Plic> {
     let address = PLIC.load(Ordering::Relaxed);
     assert!(!address.is_null());
     unsafe { Volatile::new(address) }
+}
+
+fn supported_external_interrupts(device_tree: &Fdt) -> Option<usize> {
+    device_tree
+        .find_node("/soc/plic")?
+        .property("riscv,ndev")?
+        .as_usize()
 }
