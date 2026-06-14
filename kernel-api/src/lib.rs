@@ -1,16 +1,18 @@
 #![feature(decl_macro)]
-// #![feature(never_type)]
 #![feature(ptr_metadata)]
+#![feature(slice_ptr_get)]
 #![no_std]
 
 extern crate alloc;
 
 mod capability;
 pub mod drvli;
+mod framebuffer;
 
 pub use capability::*;
 pub use deravel_types::*;
 pub use drvli::*;
+pub use framebuffer::Framebuffer;
 
 use alloc::string::String;
 use core::alloc::{GlobalAlloc, Layout};
@@ -113,7 +115,7 @@ unsafe extern "C" fn __deravel_entry() -> ! {
     )
 }
 
-pub fn allocate_shared_memory(size: usize) -> (*mut [u8], Capability<SharedMemory>) {
+pub fn alloc_shared(size: usize) -> (*mut [u8], Capability<SharedMemory>) {
     let (ptr, cap) = unsafe { syscall::alloc_shared(size) };
     (core::ptr::slice_from_raw_parts_mut(ptr, size), cap)
 }

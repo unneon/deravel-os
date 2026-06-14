@@ -55,6 +55,7 @@ pub fn rust_arg_type(type_: &str, structs: &[Struct]) -> Cow<'static, str> {
         "u16" => "u16".into(),
         "u32" => "u32".into(),
         "u64" => "u64".into(),
+        "usize" => "usize".into(),
         "text" => "&str".into(),
         "bytes" => "&[u8]".into(),
         _ if let Some(inner) = type_.strip_prefix("process_spawner ") => {
@@ -75,6 +76,7 @@ pub fn rust_member_type(type_: &str, structs: &[Struct]) -> Cow<'static, str> {
         "u16" => "u16".into(),
         "u32" => "u32".into(),
         "u64" => "u64".into(),
+        "usize" => "usize".into(),
         _ if let Some(inner) = type_.strip_prefix("process_spawner ") => {
             format!("Capability<{}Spawner>", camel_case(inner)).into()
         }
@@ -93,6 +95,7 @@ pub fn rust_normal_ret_type(type_: &str, structs: &[Struct<'_>]) -> Cow<'static,
         "u16" => "u16".into(),
         "u32" => "u32".into(),
         "u64" => "u64".into(),
+        "usize" => "usize".into(),
         "text" => "String".into(),
         "bytes" => "Vec<u8>".into(),
         "never" => "!".into(),
@@ -111,6 +114,7 @@ pub fn rust_grantable_ret_type(type_: &str, structs: &[Struct<'_>]) -> Cow<'stat
         "u16" => "u16".into(),
         "u32" => "u32".into(),
         "u64" => "u64".into(),
+        "usize" => "usize".into(),
         "text" => "String".into(),
         "bytes" => "Vec<u8>".into(),
         "never" => "!".into(),
@@ -200,6 +204,7 @@ pub fn is_capability(type_: &str, structs: &[Struct<'_>]) -> bool {
         "u16" => false,
         "u32" => false,
         "u64" => false,
+        "usize" => false,
         "text" => false,
         "bytes" => false,
         _ if structs.iter().any(|struct_| struct_.name == type_) => false,
@@ -217,6 +222,7 @@ pub fn rust_stream_type(type_: &str, structs: &[Struct]) -> Cow<'static, str> {
         "u16" => "u16".into(),
         "u32" => "u32".into(),
         "u64" => "u64".into(),
+        "usize" => "usize".into(),
         "text" => unimplemented!(),
         "bytes" => unimplemented!(),
         _ if structs.iter().any(|struct_| struct_.name == type_) => camel_case(type_).into(),

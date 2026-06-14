@@ -38,8 +38,8 @@ interface input_device
     stream events input_event
 
 interface window
-    func width() u32
-    func height() u32
+    func width() usize
+    func height() usize
     func framebuffer() shared_memory
     func draw()
     stream events input_event

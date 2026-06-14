@@ -8,17 +8,17 @@ use deravel_kernel_api::input::*;
 use deravel_kernel_api::*;
 use log::*;
 
-struct Renderer<'a> {
+struct Renderer {
     cursor_x: i32,
     cursor_y: i32,
     window_width: i32,
     window_height: i32,
-    framebuffer: &'a mut [u8],
+    framebuffer: Framebuffer,
     window: Capability<Window>,
     events: &'static RingBuffer<InputEvent>,
 }
 
-impl Renderer<'_> {
+impl Renderer {
     fn render_char(&mut self, c: u8) {
         if c == b' ' {
             self.cursor_x += FONT.width as i32;
@@ -40,13 +40,10 @@ impl Renderer<'_> {
                         && fb_y >= 0
                         && fb_y < self.window_height
                     {
-                        let [b, g, r, _] = &mut self.framebuffer.as_chunks_mut().0
-                            [fb_y as usize * self.window_width as usize + fb_x as usize];
                         let color =
                             glyph.bitmap[bitmap_y as usize * glyph.width + bitmap_x as usize];
-                        *b = 0;
-                        *g = color;
-                        *r = 0;
+                        self.framebuffer
+                            .set_pixel(fb_x as usize, fb_y as usize, 0, color, 0, 255);
                     }
                 }
             }
@@ -66,22 +63,18 @@ impl Renderer<'_> {
     }
 
     fn scroll_up(&mut self) {
-        let row_size = 4 * self.window_width as usize;
-        let scroll_start = FONT.height * row_size;
-        let clear_start = self.framebuffer.len() - scroll_start;
-        self.framebuffer.copy_within(scroll_start.., 0);
-        self.framebuffer[clear_start..]
-            .as_chunks_mut()
-            .0
-            .fill([0, 0, 0, 255]);
+        let empty_start = self.window_height as usize - FONT.height;
+        self.framebuffer.shift_rows(FONT.height, 0, empty_start);
+        self.framebuffer
+            .fill_rows(empty_start, self.window_height as usize, 0, 0, 0, 255);
     }
 
     fn clear_screen(&mut self) {
-        self.framebuffer.as_chunks_mut().0.fill([0, 0, 0, 255]);
+        self.framebuffer.fill(0, 0, 0, 255);
     }
 }
 
-impl ConsoleServer for Renderer<'_> {
+impl ConsoleServer for Renderer {
     fn getchar(&mut self, _: &mut Ctx<Self>, _: ()) -> u8 {
         loop {
             let Some(event) = self.events.poll() else {
@@ -142,12 +135,14 @@ impl ConsoleServer for Renderer<'_> {
 
 fn main(args: Args) {
     let window = args.windowing.create_window();
-    let framebuffer = unsafe { &mut *map_shared(window.framebuffer()) };
+    let width = window.width();
+    let height = window.height();
+    let framebuffer = Framebuffer::map(width, height, window.framebuffer());
     let mut renderer = Renderer {
         cursor_x: FONT.leftpad as i32,
         cursor_y: 0,
-        window_width: window.width() as i32,
-        window_height: window.height() as i32,
+        window_width: width as i32,
+        window_height: height as i32,
         framebuffer,
         window,
         events: window.events(),

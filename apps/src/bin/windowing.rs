@@ -17,13 +17,13 @@ enum Shortcut {
 
 struct Server {
     display: Capability<Display>,
-    display_width: u32,
-    display_height: u32,
-    display_framebuffer: &'static mut [u8],
+    display_width: usize,
+    display_height: usize,
+    display_framebuffer: Framebuffer,
     windows: Vec<WindowData>,
     active_window: Option<usize>,
-    cursor_x: u32,
-    cursor_y: u32,
+    cursor_x: usize,
+    cursor_y: usize,
     fs: Capability<Filesystem>,
     net: Capability<Network>,
     shutdown: Capability<Shutdown>,
@@ -33,11 +33,11 @@ struct Server {
 }
 
 struct WindowData {
-    x: u32,
-    y: u32,
-    width: u32,
-    height: u32,
-    framebuffer: &'static mut [u8],
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+    framebuffer: Framebuffer,
     memory: Capability<SharedMemory>,
     event_ring: Option<&'static RingBuffer<InputEvent>>,
 }
@@ -53,8 +53,7 @@ impl WindowingServer for Server {
         let window_id = self.windows.len();
         let width = 400;
         let height = 300;
-        let (framebuffer, memory) = allocate_shared_memory(width as usize * height as usize * 4);
-        let framebuffer = unsafe { &mut *framebuffer };
+        let (framebuffer, memory) = Framebuffer::alloc(width, height);
         self.windows.push(WindowData {
             x: self.cursor_x - width / 2,
             y: self.cursor_y - height / 2,
@@ -70,11 +69,11 @@ impl WindowingServer for Server {
 }
 
 impl WindowServer<usize> for Server {
-    fn width(&mut self, _: &mut Ctx<Self>, window_id: usize) -> u32 {
+    fn width(&mut self, _: &mut Ctx<Self>, window_id: usize) -> usize {
         self.windows[window_id].width
     }
 
-    fn height(&mut self, _: &mut Ctx<Self>, window_id: usize) -> u32 {
+    fn height(&mut self, _: &mut Ctx<Self>, window_id: usize) -> usize {
         self.windows[window_id].height
     }
 
@@ -84,20 +83,16 @@ impl WindowServer<usize> for Server {
 
     fn draw(&mut self, _: &mut Ctx<Self>, window_id: usize) {
         let window = &mut self.windows[window_id];
-        for window_y in 0..window.height as usize {
-            let display_y = window.y as usize + window_y;
-            let display_offset =
-                4 * display_y * self.display_width as usize + 4 * window.x as usize;
-            let window_offset = 4 * window_y * window.width as usize;
-            let size = 4 * window.width as usize;
-            self.display_framebuffer[display_offset..][..size]
-                .copy_from_slice(&window.framebuffer[window_offset..][..size]);
+        for window_y in 0..window.height {
+            let display_y = window.y + window_y;
+            self.display_framebuffer.row(display_y)[window.x..][..window.width]
+                .copy_from_slice(window.framebuffer.row(window_y))
         }
         self.display.draw();
     }
 
     fn events(&mut self, window_id: usize) -> (Capability<SharedMemory>, usize) {
-        let (memory, cap) = allocate_shared_memory(PAGE_SIZE);
+        let (memory, cap) = alloc_shared(PAGE_SIZE);
         let ring = unsafe { RingBuffer::new_in_single_page(memory) };
         self.windows[window_id].event_ring = Some(ring);
         (cap, ring.untype().0.data.0.len())
@@ -150,7 +145,7 @@ impl Observer<InputEvent, MouseTag> for Server {
                 }
             }
         } else if event.type_ == EV_REL {
-            let delta = event.value as i32;
+            let delta = event.value as i32 as isize;
             if event.code == REL_X {
                 self.cursor_x = self
                     .cursor_x
@@ -163,17 +158,21 @@ impl Observer<InputEvent, MouseTag> for Server {
                     .min(self.display_height);
             }
         } else if event.type_ == EV_SYN {
-            self.display.update_cursor(self.cursor_x, self.cursor_y);
+            self.display
+                .update_cursor(self.cursor_x as u32, self.cursor_y as u32);
         }
     }
 }
 
 fn main(args: Args) {
-    let width = args.display.width();
-    let height = args.display.height();
+    let width = args.display.width() as usize;
+    let height = args.display.height() as usize;
     info!("found a {width}x{height} display");
-    let framebuffer = unsafe { &mut *map_shared(args.display.framebuffer()) };
-    fill_screen(191, 215, 234, framebuffer, &args);
+
+    let mut framebuffer = Framebuffer::map(width, height, args.display.framebuffer());
+    framebuffer.fill(191, 215, 234, 255);
+    args.display.draw();
+
     initialize_cursor(255, 255, 255, 16, args.display);
 
     let server = Server {
@@ -200,13 +199,6 @@ fn main(args: Args) {
         ipc_serve(&mut dispatch);
         yield_();
     }
-}
-
-fn fill_screen(red: u8, green: u8, blue: u8, framebuffer: &mut [u8], args: &Args) {
-    for bgra in framebuffer.as_chunks_mut().0 {
-        *bgra = [blue, green, red, 255];
-    }
-    args.display.draw();
 }
 
 fn initialize_cursor(red: u8, green: u8, blue: u8, size: usize, display: Capability<Display>) {

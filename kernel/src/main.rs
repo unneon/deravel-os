@@ -349,16 +349,16 @@ impl SyscallHandler for () {
     }
 
     fn alloc(_: usize, _: &mut RiscvRegisters, hart: &mut HartContext, size: usize) -> *mut u8 {
-        let size = size.next_multiple_of(PAGE_SIZE);
-        let memory = Vec::leak(vec![0u8; size]);
+        let padded_size = size.next_multiple_of(PAGE_SIZE);
+        let memory = Vec::leak(vec![0u8; padded_size]);
         let mut proc = hart.current_process();
-        let virtual_addr = proc.virtual_memory.allocate(size, PAGE_SIZE);
+        let virtual_addr = proc.virtual_memory.allocate(padded_size, PAGE_SIZE);
         map_pages(
             unsafe { &mut *proc.page_table },
             virtual_addr,
             memory.as_ptr() as usize,
             PageFlags::readwrite().user(),
-            size / PAGE_SIZE,
+            padded_size / PAGE_SIZE,
         );
         virtual_addr as *mut u8
     }
@@ -369,16 +369,16 @@ impl SyscallHandler for () {
         hart: &mut HartContext,
         size: usize,
     ) -> (*mut u8, Capability<SharedMemory>) {
-        let size = size.next_multiple_of(PAGE_SIZE);
-        let memory = Vec::leak(vec![0u8; size]);
+        let padded_size = size.next_multiple_of(PAGE_SIZE);
+        let memory = Vec::leak(vec![0u8; padded_size]);
         let mut proc = hart.current_process();
-        let virtual_addr = proc.virtual_memory.allocate(size, PAGE_SIZE);
+        let virtual_addr = proc.virtual_memory.allocate(padded_size, PAGE_SIZE);
         map_pages(
             unsafe { &mut *proc.page_table },
             virtual_addr,
             memory.as_ptr() as usize,
             PageFlags::readwrite().user(),
-            size / PAGE_SIZE,
+            padded_size / PAGE_SIZE,
         );
         let cap = grant_kernel_capability(
             hart.current_pid(),
@@ -406,15 +406,17 @@ impl SyscallHandler for () {
         );
         let handler = capability::get_handler(original.local_index());
         let (physical_address, length) = handler.shared_memory();
-        assert!(length.is_multiple_of(PAGE_SIZE));
+        let padded_length = length.next_multiple_of(PAGE_SIZE);
 
-        let virtual_addr = current_proc.virtual_memory.allocate(length, PAGE_SIZE);
+        let virtual_addr = current_proc
+            .virtual_memory
+            .allocate(padded_length, PAGE_SIZE);
         map_pages(
             unsafe { &mut *current_proc.page_table },
             virtual_addr,
             physical_address,
             PageFlags::readwrite().user(),
-            length / PAGE_SIZE,
+            padded_length / PAGE_SIZE,
         );
 
         (virtual_addr as *mut u8, length)
