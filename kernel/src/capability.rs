@@ -27,7 +27,7 @@ pub trait RawHandler {
 
 struct TypedHandler<T, H: 'static>(&'static H, PhantomData<T>);
 
-pub static CAPABILITY_PAGES: [CapabilityPage; PROCESS_COUNT + 1] = unsafe { core::mem::zeroed() };
+static CAPABILITY_PAGES: [CapabilityPage; PROCESS_COUNT + 1] = unsafe { core::mem::zeroed() };
 
 static ALLOCATED_COUNT: AtomicUsize = AtomicUsize::new(0);
 
@@ -71,4 +71,16 @@ pub fn reserve_kernel_capability<T: 'static + Sync>(
 
 pub fn get_handler(local_index: usize) -> &'static dyn RawHandler {
     HANDLERS[local_index].lock().unwrap()
+}
+
+pub fn capability_page(pid: ProcessId) -> &'static CapabilityPage {
+    &CAPABILITY_PAGES[pid.as_u16() as usize]
+}
+
+pub fn kernel_capability_page() -> &'static CapabilityPage {
+    &CAPABILITY_PAGES[PROCESS_COUNT]
+}
+
+pub fn capability_pages_physical_address() -> usize {
+    &CAPABILITY_PAGES as *const _ as usize
 }

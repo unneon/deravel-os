@@ -137,9 +137,9 @@ pub fn ipc_serve<S>(dispatch: &mut Dispatch<S>) {
         let mut buf = [0u8; 4096];
         let (cap, method, args_len, sender) =
             unsafe { syscall::ipc_receive(buf.as_mut_ptr(), buf.len()) };
-        if cap.as_usize() == 0 {
+        let Some(sender) = sender else {
             break;
-        }
+        };
         let result = dispatch.dispatch(cap, method, &buf[..args_len], sender);
         unsafe { syscall::ipc_reply(result.as_ptr(), result.len()) }
     }

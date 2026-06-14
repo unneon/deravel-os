@@ -36,7 +36,9 @@ mod util;
 mod virtio;
 
 use crate::arch::{RiscvRegisters, initialize_trap_handler, switch_to_userspace_registers_only};
-use crate::capability::{CAPABILITY_PAGES, grant_kernel_capability, reserve_kernel_capability};
+use crate::capability::{
+    capability_page, grant_kernel_capability, kernel_capability_page, reserve_kernel_capability,
+};
 use crate::device_tree::initialize_timebase_frequency;
 use crate::drvli::{SyscallHandler, dispatch_syscall};
 use crate::elf::elf;
@@ -47,7 +49,7 @@ use crate::page::{PageFlags, PageTable, map_pages};
 use crate::pci::initialize_all_pci;
 use crate::plic::{initialize_plic, plic_claim, plic_complete};
 use crate::process::{
-    PROCESS_COUNT, PROCESSES, ProcessState, reserve_process, schedule_and_switch_to_userspace,
+    ProcessState, get_process, reserve_process, schedule_and_switch_to_userspace,
 };
 use crate::process_spawner::ProcessSpawnerService;
 use crate::sbi::{ResetReason, ResetType, SbiShutdown, log_sbi_metadata};
@@ -161,16 +163,19 @@ fn handle_trap(registers: &mut RiscvRegisters, hart: &mut HartContext) -> ! {
     }
 }
 
-fn validate_untrusted_capability(farthest_cap: RawCapability, current_pid: usize) -> RawCapability {
-    trace!("validating capability {farthest_cap:?} presented by {current_pid}");
+fn validate_untrusted_capability(
+    farthest_cap: RawCapability,
+    current_pid: ProcessId,
+) -> RawCapability {
+    trace!("validating capability {farthest_cap:?} presented by {current_pid:?}");
     let mut capability = farthest_cap;
-    let mut sender = Actor::Userspace(ProcessId::new(current_pid));
+    let mut sender = Actor::Userspace(current_pid);
     loop {
         let certifier = capability.certifier();
-        let certificate = &CAPABILITY_PAGES[match certifier {
-            Actor::Userspace(pid) => pid.as_usize(),
-            Actor::Kernel => PROCESS_COUNT,
-        }]
+        let certificate = &match certifier {
+            Actor::Userspace(pid) => capability_page(pid),
+            Actor::Kernel => kernel_capability_page(),
+        }
         .0[capability.local_index()];
         match certificate.load(Ordering::Relaxed).unpack() {
             CapabilityCertificateUnpacked::Granted { grantee } => {
@@ -214,11 +219,10 @@ impl SyscallHandler for () {
             current_proc.registers = Some(registers.clone());
             current_proc.pc = user_pc;
 
-            let original =
-                validate_untrusted_capability(farthest_cap, hart.current_pid().as_usize());
+            let original = validate_untrusted_capability(farthest_cap, hart.current_pid());
             match original.certifier() {
                 Actor::Userspace(dest) => {
-                    let mut dest = PROCESSES[dest.as_usize()].lock();
+                    let mut dest = get_process(dest).lock();
                     dest.messages.get_or_insert_default().push_back((
                         original,
                         method,
@@ -247,7 +251,7 @@ impl SyscallHandler for () {
         _: &mut RiscvRegisters,
         hart: &mut HartContext,
         args_buffer: &mut [u8],
-    ) -> (RawCapability, usize, usize, ProcessId) {
+    ) -> (RawCapability, usize, usize, Option<ProcessId>) {
         let mut current_proc = hart.current_process();
         assert!(current_proc.currently_serving.is_none());
         if let Some((cap, method, args, sender)) =
@@ -255,20 +259,15 @@ impl SyscallHandler for () {
         {
             args_buffer[..args.len()].copy_from_slice(&args);
             current_proc.currently_serving = Some(sender);
-            (cap, method, args.len(), sender)
+            (cap, method, args.len(), Some(sender))
         } else {
-            (
-                RawCapability::from_pointer(core::ptr::null()),
-                0,
-                0,
-                ProcessId::new(0),
-            )
+            (RawCapability::from_pointer(core::ptr::null()), 0, 0, None)
         }
     }
 
     fn ipc_reply(_: usize, _: &mut RiscvRegisters, hart: &mut HartContext, result: &mut [u8]) {
         let caller = hart.current_process().currently_serving.take().unwrap();
-        let mut caller = PROCESSES[caller.as_usize()].lock();
+        let mut caller = get_process(caller).lock();
         if caller.state == ProcessState::WaitingForReply {
             caller.reply = Some(Box::new(result.to_owned()));
         } else if caller.state == ProcessState::WaitingForStreamMap {
@@ -285,14 +284,13 @@ impl SyscallHandler for () {
         farthest_cap: RawCapability,
         stream: usize,
     ) -> (*mut (), usize) {
-        let current_pid = hart.current_pid().as_usize();
         let mut current_proc = hart.current_process();
-        let original = validate_untrusted_capability(farthest_cap, current_pid);
+        let original = validate_untrusted_capability(farthest_cap, hart.current_pid());
         match original.certifier() {
             Actor::Userspace(original_pid) => {
                 if current_proc.state == ProcessState::WaitingForStreamMap {
                     let (ring, declared_size) = current_proc.stream_map.take().unwrap();
-                    let ring = validate_untrusted_capability(ring, original_pid.as_usize());
+                    let ring = validate_untrusted_capability(ring, original_pid);
                     assert_eq!(ring.certifier(), Actor::Kernel);
 
                     let handler = capability::get_handler(ring.local_index());
@@ -315,12 +313,12 @@ impl SyscallHandler for () {
                     current_proc.state = ProcessState::WaitingForStreamMap;
                     current_proc.registers = Some(registers.clone());
                     current_proc.pc = user_pc;
-                    let mut dest = PROCESSES[original_pid.as_usize()].lock();
+                    let mut dest = get_process(original_pid).lock();
                     dest.messages.get_or_insert_default().push_back((
                         original,
                         1000 + stream,
                         Vec::new(),
-                        ProcessId::new(current_pid),
+                        hart.current_pid(),
                     ));
 
                     drop(current_proc);
@@ -396,9 +394,8 @@ impl SyscallHandler for () {
         hart: &mut HartContext,
         farthest_cap: Capability<SharedMemory>,
     ) -> (*mut u8, usize) {
-        let current_pid = hart.current_pid().as_usize();
         let mut current_proc = hart.current_process();
-        let original = validate_untrusted_capability(farthest_cap.0, current_pid);
+        let original = validate_untrusted_capability(farthest_cap.0, hart.current_pid());
         assert_eq!(
             original.certifier(),
             Actor::Kernel,

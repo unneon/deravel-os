@@ -50,17 +50,8 @@ pub const MAX_PROCESSES: usize = (CAPABILITIES_END - CAPABILITIES_START) / PAGE_
 impl RawCapability {
     pub fn new(certifier: impl Into<Actor>, local_index: usize) -> RawCapability {
         assert!(local_index < PAGE_SIZE / size_of::<CapabilityCertificate>());
-        let pointer = match certifier.into() {
-            Actor::Userspace(pid) => {
-                CAPABILITIES_START
-                    + pid.0 * PAGE_SIZE
-                    + local_index * size_of::<CapabilityCertificate>()
-            }
-            Actor::Kernel => {
-                CAPABILITIES_END - PAGE_SIZE + local_index * size_of::<CapabilityCertificate>()
-            }
-        };
-        RawCapability(pointer as *const _)
+        let pointer = &get_capability_certificate_page(certifier.into())[local_index];
+        RawCapability(pointer as *const CapabilityCertificate)
     }
 
     pub fn from_pointer(pointer: *const CapabilityCertificate) -> RawCapability {
@@ -71,7 +62,7 @@ impl RawCapability {
     pub fn certifier(self) -> Actor {
         let page_index = (self.0 as usize - CAPABILITIES_START) / PAGE_SIZE;
         if page_index < MAX_PROCESSES {
-            Actor::Userspace(ProcessId(page_index))
+            Actor::Userspace(ProcessId::new(page_index as u16))
         } else {
             Actor::Kernel
         }
@@ -110,7 +101,7 @@ impl CapabilityCertificateValue {
     pub fn granted(grantee: impl Into<Actor>) -> CapabilityCertificateValue {
         CapabilityCertificateValue {
             grantee: match grantee.into() {
-                Actor::Userspace(pid) => pid.0 as u32,
+                Actor::Userspace(pid) => pid.as_u16() as u32,
                 Actor::Kernel => MAX_PROCESSES as u32,
             },
             payload: 0,
@@ -120,7 +111,7 @@ impl CapabilityCertificateValue {
     pub fn forwarded(forwardee: Actor, capability: RawCapability) -> CapabilityCertificateValue {
         CapabilityCertificateValue {
             grantee: match forwardee {
-                Actor::Userspace(pid) => pid.0 as u32,
+                Actor::Userspace(pid) => pid.as_u16() as u32,
                 Actor::Kernel => MAX_PROCESSES as u32,
             },
             payload: capability.0 as u32,
@@ -129,7 +120,7 @@ impl CapabilityCertificateValue {
 
     pub fn unpack(self) -> CapabilityCertificateUnpacked {
         let grantee_or_forwardee = if (self.grantee as usize) < MAX_PROCESSES {
-            Actor::Userspace(ProcessId(self.grantee as usize))
+            Actor::Userspace(ProcessId::new(self.grantee as u16))
         } else {
             Actor::Kernel
         };
@@ -179,7 +170,7 @@ impl<T> core::ops::Deref for Capability<T> {
 impl core::fmt::Debug for Actor {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Actor::Userspace(pid) => write!(f, "{}", pid.as_usize()),
+            Actor::Userspace(pid) => write!(f, "{}", pid.as_u16()),
             Actor::Kernel => write!(f, "kernel"),
         }
     }
@@ -219,7 +210,7 @@ pub fn get_capability_certificate_page(
     actor: Actor,
 ) -> &'static [CapabilityCertificate; CAPABILITIES_PER_PAGE] {
     let offset = match actor {
-        Actor::Userspace(pid) => pid.0,
+        Actor::Userspace(pid) => pid.as_u16() as usize,
         Actor::Kernel => MAX_PROCESSES,
     };
     &get_capability_certificate_pages()[offset]

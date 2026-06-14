@@ -1,4 +1,4 @@
-use crate::capability::{CAPABILITY_PAGES, Handler};
+use crate::capability::{Handler, capability_page};
 use crate::process::reserve_process;
 use alloc::vec::Vec;
 use core::marker::PhantomData;
@@ -26,14 +26,14 @@ impl<T: ProcessTag> Handler<T::Spawner> for ProcessSpawnerService<T> {
     fn call_method(&self, _: usize, args: &[u8], sender: ProcessId) -> Vec<u8> {
         let reserve = reserve_process::<T>(self.elf);
         let export = reserve.export;
-        CAPABILITY_PAGES[reserve.id.as_usize()].0[0].store(
+        capability_page(reserve.id).0[0].store(
             CapabilityCertificateValue::granted(sender),
             Ordering::Relaxed,
         );
         let args: <T as ProcessTag>::Args = serde_json::from_slice(args).unwrap();
         args.for_all(|cap| {
             assert_eq!(cap.certifier(), Actor::from(sender));
-            let slot = &CAPABILITY_PAGES[sender.as_usize()].0[cap.local_index()];
+            let slot = &capability_page(sender).0[cap.local_index()];
             let preforward = slot.load(Ordering::Relaxed).unpack();
             match preforward {
                 CapabilityCertificateUnpacked::Granted {

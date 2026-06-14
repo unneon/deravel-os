@@ -54,7 +54,7 @@ syscall exit() never
 
 syscall ipc_call(cap capability, method usize, args const_array u8, result array u8) usize
 
-syscall ipc_receive(args array u8) capability, usize, usize, pid
+syscall ipc_receive(args array u8) capability, usize, usize, option pid
 
 syscall ipc_reply(result const_array u8)
 

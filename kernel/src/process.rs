@@ -1,6 +1,8 @@
 use crate::allocators::TrivialAllocator;
 use crate::arch::{RiscvRegisters, switch_to_userspace_full};
-use crate::capability::CAPABILITY_PAGES;
+use crate::capability::{
+    capability_page, capability_pages_physical_address, kernel_capability_page,
+};
 use crate::device_tree::timebase_frequency;
 use crate::elf::load_elf;
 use crate::hart::HartContext;
@@ -61,7 +63,7 @@ unsafe extern "C" {
     static readwrite_end: u8;
 }
 
-pub static PROCESSES: [Mutex<Process>; PROCESS_COUNT] = unsafe { core::mem::zeroed() };
+static PROCESSES: [Mutex<Process>; PROCESS_COUNT] = unsafe { core::mem::zeroed() };
 
 impl Process {
     pub fn satp(&self) -> Satp {
@@ -75,13 +77,13 @@ impl Process {
 impl<T: ProcessTag> ProcessReservation<T> {
     pub fn spawn(self, args: T::Args) {
         args.for_all(|cap: RawCapability| {
-            CAPABILITY_PAGES[match cap.certifier() {
-                Actor::Userspace(pid) => pid.as_usize(),
-                Actor::Kernel => PROCESS_COUNT,
-            }]
+            match cap.certifier() {
+                Actor::Userspace(pid) => capability_page(pid),
+                Actor::Kernel => kernel_capability_page(),
+            }
             .0[cap.local_index()]
             .store(
-                CapabilityCertificateValue::granted(ProcessId::new(self.id.as_usize())),
+                CapabilityCertificateValue::granted(self.id),
                 Ordering::Relaxed,
             )
         });
@@ -114,27 +116,30 @@ impl<T: ProcessTag> ProcessReservation<T> {
     }
 }
 
+pub fn get_process(pid: ProcessId) -> &'static Mutex<Process> {
+    &PROCESSES[pid.as_u16() as usize]
+}
+
 pub fn reserve_process<T: ProcessTag>(elf: &'static [u8]) -> ProcessReservation<T> {
     let pid = find_free_process_slot().expect("exhausted all process slots");
-    let mut proc = PROCESSES[pid].lock();
+    let mut proc = get_process(pid).lock();
     proc.state = ProcessState::Reserved;
     ProcessReservation {
-        id: ProcessId::new(pid),
+        id: pid,
         elf,
-        export: Capability(RawCapability::new(ProcessId::new(pid), 0), PhantomData),
+        export: Capability(RawCapability::new(pid, 0), PhantomData),
     }
 }
 
 pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: ProcessInputs<T>) {
-    let pid = inputs.common.id.as_usize();
-
+    let pid = inputs.common.id;
     let mut page_table = Box::new(PageTable::new());
     map_kernel_memory(&mut page_table);
     let entry_point = load_elf(elf, &mut page_table);
     map_capability_memory(&mut page_table, pid);
     map_inputs_memory(&mut page_table, inputs);
 
-    let mut proc = PROCESSES[pid].lock();
+    let mut proc = get_process(pid).lock();
     proc.name = Some(name);
     proc.state = ProcessState::Runnable;
     proc.registers = Some(RiscvRegisters::default());
@@ -176,15 +181,21 @@ fn map_kernel_memory_section(
     map_pages(page_table, start, start, flags, page_count);
 }
 
-fn map_capability_memory(pages: &mut PageTable, pid: usize) {
+fn map_capability_memory(pages: &mut PageTable, pid: ProcessId) {
     let pre_v = CAPABILITIES_START;
-    let pre_p = &raw const CAPABILITY_PAGES as usize;
-    let own_v = pre_v + pid * PAGE_SIZE;
-    let own_p = pre_p + pid * PAGE_SIZE;
+    let pre_p = capability_pages_physical_address();
+    let own_v = pre_v + pid.as_u16() as usize * PAGE_SIZE;
+    let own_p = pre_p + pid.as_u16() as usize * PAGE_SIZE;
     let suf_v = own_v + PAGE_SIZE;
     let suf_p = own_p + PAGE_SIZE;
-    let suf_l = PROCESS_COUNT - pid - 1;
-    map_pages(pages, pre_v, pre_p, PageFlags::readonly().user(), pid);
+    let suf_l = PROCESS_COUNT - pid.as_u16() as usize - 1;
+    map_pages(
+        pages,
+        pre_v,
+        pre_p,
+        PageFlags::readonly().user(),
+        pid.as_u16() as usize,
+    );
     map_pages(pages, own_v, own_p, PageFlags::readwrite().user(), 1);
     map_pages(pages, suf_v, suf_p, PageFlags::readonly().user(), suf_l);
 }
@@ -200,10 +211,10 @@ fn map_inputs_memory<T: ProcessTag>(pages: &mut PageTable, inputs: ProcessInputs
     );
 }
 
-fn find_free_process_slot() -> Option<usize> {
-    for (i, process) in PROCESSES.iter().enumerate() {
+fn find_free_process_slot() -> Option<ProcessId> {
+    for (i, process) in PROCESSES.iter().enumerate().skip(1) {
         if process.lock().state == ProcessState::Unused {
-            return Some(i);
+            return Some(ProcessId::new(i as u16));
         }
     }
     None
@@ -214,7 +225,7 @@ pub fn schedule_and_switch_to_userspace(hart: &mut HartContext) -> ! {
         log_heap_statistics();
         sbi::system_reset(ResetType::Shutdown, ResetReason::NoReason).unwrap()
     };
-    let next = PROCESSES[next_pid.as_usize()].lock();
+    let next = get_process(next_pid).lock();
     hart.set_current_pid(next_pid);
 
     switch_to_userspace_full(next);
@@ -222,13 +233,13 @@ pub fn schedule_and_switch_to_userspace(hart: &mut HartContext) -> ! {
 
 pub fn find_runnable_process(hart: &HartContext) -> Option<ProcessId> {
     let scan_start = match hart.try_current_pid() {
-        Some(current) => current.as_usize() + 1,
+        Some(current) => current.as_u16() + 1,
         None => 0,
     };
 
-    for scan_offset in 0..PROCESS_COUNT {
-        let scan_index = (scan_start + scan_offset) % PROCESS_COUNT;
-        let process = PROCESSES[scan_index].lock();
+    for scan_offset in 0..PROCESS_COUNT as u16 {
+        let scan_index = (scan_start + scan_offset) % PROCESS_COUNT as u16;
+        let process = PROCESSES[scan_index as usize].lock();
         if process.state == ProcessState::Runnable
             || (process.state == ProcessState::WaitingForMessage
                 && process.messages.as_ref().is_some_and(|q| !q.is_empty()))

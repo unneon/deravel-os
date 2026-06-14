@@ -1,5 +1,5 @@
 use crate::STACK_SIZE;
-use crate::process::{PROCESSES, Process};
+use crate::process::{Process, get_process};
 use crate::sync::MutexGuard;
 use alloc::boxed::Box;
 use deravel_types::ProcessId;
@@ -25,7 +25,7 @@ impl HartContext {
     }
 
     pub fn current_process(&self) -> MutexGuard<'_, Process> {
-        PROCESSES[self.current_pid().as_usize()].lock()
+        get_process(self.current_pid()).lock()
     }
 
     pub fn set_current_pid(&mut self, pid: ProcessId) {

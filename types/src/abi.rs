@@ -33,6 +33,8 @@ unsafe impl SyscallAbi for RawCapability {}
 
 unsafe impl SyscallAbi for ProcessId {}
 
+unsafe impl SyscallAbi for Option<ProcessId> {}
+
 pub unsafe fn from_reg<T: SyscallAbi>(register: usize) -> T {
     unsafe { Register { register }.rust }
 }
