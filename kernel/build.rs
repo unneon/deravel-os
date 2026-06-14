@@ -179,7 +179,7 @@ fn generate_syscall_dispatch(drvli: &Drvli, out: &mut String) {
                     "RawCapability::from_ptr(registers.a{used_arg_registers} as *mut CapabilityCertificate)"
                 ),
                 "shared_memory" => format!(
-                    "Capability(RawCapability::from_ptr(registers.a{used_arg_registers} as *mut CapabilityCertificate), PhantomData)"
+                    "unsafe {{ Capability::new(RawCapability::from_ptr(registers.a{used_arg_registers} as *mut CapabilityCertificate)) }}"
                 ),
                 "u64" => format!("registers.a{used_arg_registers} as u64"),
                 "usize" => format!("registers.a{used_arg_registers}"),

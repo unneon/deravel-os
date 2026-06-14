@@ -6,6 +6,7 @@
 extern crate alloc;
 
 pub mod abi;
+mod actor;
 mod align;
 mod capability;
 mod drvli;
@@ -13,6 +14,7 @@ pub mod input;
 mod process_id;
 mod ring_buffer;
 
+pub use actor::Actor;
 pub use align::{CACHE_LINE_SIZE, CacheLineAligned};
 pub use capability::*;
 pub use drvli::*;
@@ -34,6 +36,8 @@ pub struct CommonProcessInputs {
 pub struct SharedMemory;
 
 pub const INPUTS_ADDRESS: usize = 0x3000000;
+
+pub const MAX_PROCESSES: usize = 8;
 
 pub const PAGE_SIZE: usize = 4096;
 

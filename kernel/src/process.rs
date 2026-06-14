@@ -14,7 +14,6 @@ use crate::sync::Mutex;
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
-use core::marker::PhantomData;
 use core::sync::atomic::Ordering;
 use deravel_types::*;
 use riscv::register::satp::{Mode, Satp};
@@ -127,7 +126,7 @@ pub fn reserve_process<T: ProcessTag>(elf: &'static [u8]) -> ProcessReservation<
     ProcessReservation {
         id: pid,
         elf,
-        export: Capability(RawCapability::new(pid, 0), PhantomData),
+        export: unsafe { Capability::new(RawCapability::new(pid, 0)) },
     }
 }
 

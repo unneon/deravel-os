@@ -110,7 +110,7 @@ impl<S: ?Sized> Ctx<'_, S> {
             CapabilityCertificateValue::granted(self.sender),
             Ordering::Relaxed,
         );
-        let cap = Capability(RawCapability::from_ref(certificate), PhantomData);
+        let cap = unsafe { Capability::new(RawCapability::from_ref(certificate)) };
         let t_name = T::NAME;
         trace!("granted {cap:?} {t_name} to {:?}", self.sender);
 
@@ -140,7 +140,7 @@ impl<S: ?Sized> OCtx<'_, S> {
             CapabilityCertificateValue::granted(Actor::Kernel),
             Ordering::Relaxed,
         );
-        let cap = Capability(RawCapability::from_ref(certificate), PhantomData);
+        let cap = unsafe { Capability::new(RawCapability::from_ref(certificate)) };
         let t_name = T::NAME;
         trace!("self-granted {cap:?} {t_name}");
 
@@ -229,10 +229,10 @@ pub fn forward_capability_by_cap<T: Interface, U: Interface>(
 ) -> Capability<T> {
     let certificate = allocate_certificate();
     certificate.store(
-        CapabilityCertificateValue::forwarded(forwardee.certifier(), cap.0),
+        CapabilityCertificateValue::forwarded(forwardee.certifier(), cap.as_raw()),
         Ordering::Relaxed,
     );
-    let forwarded = Capability(RawCapability::from_ref(certificate), PhantomData);
+    let forwarded = unsafe { Capability::new(RawCapability::from_ref(certificate)) };
     let t_name = T::NAME;
     let u_name = U::NAME;
     trace!("forwarded {cap:?} {t_name} as {forwarded:?} to {forwardee:?} {u_name}");
@@ -246,10 +246,10 @@ pub fn forward_capability_by_pid<T: Interface>(
     let forwardee = forwardee.into();
     let certificate = allocate_certificate();
     certificate.store(
-        CapabilityCertificateValue::forwarded(forwardee, cap.0),
+        CapabilityCertificateValue::forwarded(forwardee, cap.as_raw()),
         Ordering::Relaxed,
     );
-    let forwarded = Capability(RawCapability::from_ref(certificate), PhantomData);
+    let forwarded = unsafe { Capability::new(RawCapability::from_ref(certificate)) };
     let t_name = T::NAME;
     trace!("forwarded {cap:?} {t_name} as {forwarded:?} to {forwardee:?}");
     forwarded

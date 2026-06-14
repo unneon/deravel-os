@@ -395,7 +395,7 @@ impl SyscallHandler for () {
         farthest_cap: Capability<SharedMemory>,
     ) -> (*mut u8, usize) {
         let mut current_proc = hart.current_process();
-        let original = validate_untrusted_capability(farthest_cap.0, hart.current_pid());
+        let original = validate_untrusted_capability(farthest_cap.as_raw(), hart.current_pid());
         assert_eq!(
             original.certifier(),
             Actor::Kernel,

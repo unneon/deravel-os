@@ -54,7 +54,7 @@ fn generate_client_impl(interface: &Interface, drvli: &Drvli, out: &mut String) 
         }
         writeln!(out, "        )).unwrap();").unwrap();
         writeln!(out, "        let mut buf = [0u8; 4096];").unwrap();
-        writeln!( out, "        let result_len = unsafe {{ syscall::ipc_call(self.0, {method_id}, data.as_ptr(), data.len(), buf.as_mut_ptr(), buf.len()) }};").unwrap();
+        writeln!( out, "        let result_len = unsafe {{ syscall::ipc_call(self.as_raw(), {method_id}, data.as_ptr(), data.len(), buf.as_mut_ptr(), buf.len()) }};").unwrap();
         writeln!(
             out,
             "        serde_json::from_slice(&buf[..result_len]).unwrap()"
@@ -72,7 +72,7 @@ fn generate_client_impl(interface: &Interface, drvli: &Drvli, out: &mut String) 
         .unwrap();
         writeln!(
              out,
-            "        let (ring_buffer, byte_count) = unsafe {{ syscall::ipc_stream(self.0, {stream_id}) }};"
+            "        let (ring_buffer, byte_count) = unsafe {{ syscall::ipc_stream(self.as_raw(), {stream_id}) }};"
         )
             .unwrap();
         writeln!(
@@ -343,7 +343,7 @@ fn generate_spawner_impl(interface: &Interface, drvli: &Drvli, out: &mut String)
     }
     writeln!(out, "        )).unwrap();").unwrap();
     writeln!(out, "        let mut buf = [0u8; 4096];").unwrap();
-    writeln!( out, "        let result_len = unsafe {{ syscall::ipc_call(self.0, 0, data.as_ptr(), data.len(), buf.as_mut_ptr(), buf.len()) }};").unwrap();
+    writeln!( out, "        let result_len = unsafe {{ syscall::ipc_call(self.as_raw(), 0, data.as_ptr(), data.len(), buf.as_mut_ptr(), buf.len()) }};").unwrap();
     writeln!(
         out,
         "        serde_json::from_slice(&buf[..result_len]).unwrap()"

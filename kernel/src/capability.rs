@@ -5,9 +5,10 @@ use alloc::vec::Vec;
 use core::marker::PhantomData;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use deravel_types::{
-    Actor, Capability, CapabilityCertificate, CapabilityCertificateValue, CapabilityPage,
-    PAGE_SIZE, ProcessId, RawCapability, UntypedRingBuffer,
+    Actor, Capability, CapabilityCertificate, CapabilityCertificateValue, PAGE_SIZE, ProcessId,
+    UntypedRingBuffer,
 };
+use deravel_types::{CapabilityPage, RawCapability};
 
 pub trait Handler<T> {
     fn call_method(&self, method: usize, args: &[u8], sender: ProcessId) -> Vec<u8>;
@@ -67,7 +68,7 @@ pub fn reserve_kernel_capability<T: 'static + Sync>(
 ) -> Capability<T> {
     let local_index = ALLOCATED_COUNT.fetch_add(1, Ordering::Relaxed);
     *HANDLERS[local_index].lock() = Some(Box::leak(Box::new(TypedHandler(handler, PhantomData))));
-    Capability(RawCapability::new(Actor::Kernel, local_index), PhantomData)
+    unsafe { Capability::new(RawCapability::new(Actor::Kernel, local_index)) }
 }
 
 pub fn get_handler(local_index: usize) -> &'static dyn RawHandler {

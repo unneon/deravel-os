@@ -53,7 +53,7 @@ fn main() {
             )
             .unwrap();
             for (arg_name, _) in args {
-                writeln!(&mut output, "        _f(self.{arg_name}.0);").unwrap();
+                writeln!(&mut output, "        _f(self.{arg_name}.as_raw());").unwrap();
             }
             writeln!(&mut output, "    }}").unwrap();
             writeln!(&mut output, "}}").unwrap();

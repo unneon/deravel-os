@@ -17,7 +17,6 @@ pub use framebuffer::Framebuffer;
 use alloc::string::String;
 use core::alloc::{GlobalAlloc, Layout};
 use core::fmt::Write;
-use core::marker::PhantomData;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use log::*;
 
@@ -175,7 +174,7 @@ pub fn yield_() {
 fn stdio() -> Capability<Console> {
     let stdio = STDIO.load(Ordering::SeqCst) as *mut CapabilityCertificate;
     assert!(!stdio.is_null(), "standard input/output not set");
-    Capability(RawCapability::from_ptr(stdio), PhantomData)
+    unsafe { Capability::new(RawCapability::from_ptr(stdio)) }
 }
 
 fn initialize_log() {

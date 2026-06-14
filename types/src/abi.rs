@@ -1,4 +1,5 @@
-use crate::{Capability, ProcessId, RawCapability};
+use crate::capability::RawCapability;
+use crate::{Capability, ProcessId};
 
 pub unsafe trait SyscallAbi: Copy + Sized {
     unsafe fn from_ret(register: usize, _: usize, _: usize, _: usize) -> Self {
