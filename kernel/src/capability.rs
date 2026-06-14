@@ -4,11 +4,8 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 use core::sync::atomic::{AtomicUsize, Ordering};
-use deravel_types::{
-    Actor, Capability, CapabilityCertificate, CapabilityCertificateValue, PAGE_SIZE, ProcessId,
-    UntypedRingBuffer,
-};
-use deravel_types::{CapabilityPage, RawCapability};
+use deravel_types::*;
+use log::trace;
 
 pub trait Handler<T> {
     fn call_method(&self, method: usize, args: &[u8], sender: ProcessId) -> Vec<u8>;
@@ -85,4 +82,34 @@ pub fn kernel_capability_page() -> &'static CapabilityPage {
 
 pub fn capability_pages_physical_address() -> usize {
     &CAPABILITY_PAGES as *const _ as usize
+}
+
+pub fn validate_untrusted_capability(
+    farthest_cap: RawCapability,
+    current_pid: ProcessId,
+) -> RawCapability {
+    trace!("validating capability {farthest_cap:?} presented by {current_pid:?}");
+    let mut capability = farthest_cap;
+    let mut sender = Actor::Userspace(current_pid);
+    loop {
+        let certifier = capability.certifier();
+        let certificate = &match certifier {
+            Actor::Userspace(pid) => capability_page(pid),
+            Actor::Kernel => kernel_capability_page(),
+        }
+        .0[capability.local_index()];
+        match certificate.load(Ordering::Relaxed).unpack() {
+            CapabilityCertificateUnpacked::Granted { grantee } => {
+                trace!("... granted by {certifier:?} to {grantee:?}");
+                assert!(grantee == sender);
+                break capability;
+            }
+            CapabilityCertificateUnpacked::Forwarded { forwardee, inner } => {
+                trace!("... forwarded {inner:?} by {certifier:?} to {forwardee:?}");
+                assert!(forwardee == sender);
+                capability = inner;
+                sender = certifier;
+            }
+        }
+    }
 }

@@ -1,4 +1,3 @@
-use crate::STACK_SIZE;
 use crate::process::{Process, get_process};
 use crate::sync::MutexGuard;
 use alloc::boxed::Box;
@@ -14,6 +13,8 @@ pub struct HartStack {
     data: [u8; STACK_SIZE - size_of::<HartContext>().next_multiple_of(16)],
     ctx: HartContext,
 }
+
+const STACK_SIZE: usize = 128 * 4096;
 
 impl HartContext {
     pub fn try_current_pid(&self) -> Option<ProcessId> {

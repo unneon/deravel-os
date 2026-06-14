@@ -37,7 +37,7 @@ mod virtio;
 
 use crate::arch::{RiscvRegisters, initialize_trap_handler, switch_to_userspace_registers_only};
 use crate::capability::{
-    capability_page, grant_kernel_capability, kernel_capability_page, reserve_kernel_capability,
+    grant_kernel_capability, reserve_kernel_capability, validate_untrusted_capability,
 };
 use crate::device_tree::initialize_timebase_frequency;
 use crate::drvli::{SyscallHandler, dispatch_syscall};
@@ -59,14 +59,11 @@ use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::panic::PanicInfo;
-use core::sync::atomic::Ordering;
 use deravel_types::*;
 use fdt::Fdt;
 use riscv::interrupt::Trap;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
 use riscv::register::satp::Mode;
-
-const STACK_SIZE: usize = 128 * 4096;
 
 fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     clear_bss();
@@ -160,36 +157,6 @@ fn handle_trap(registers: &mut RiscvRegisters, hart: &mut HartContext) -> ! {
         switch_to_userspace_registers_only(registers)
     } else {
         panic!("unexpected trap scause={scause:?} stval={stval:#x} user_pc={user_pc:#x}");
-    }
-}
-
-fn validate_untrusted_capability(
-    farthest_cap: RawCapability,
-    current_pid: ProcessId,
-) -> RawCapability {
-    trace!("validating capability {farthest_cap:?} presented by {current_pid:?}");
-    let mut capability = farthest_cap;
-    let mut sender = Actor::Userspace(current_pid);
-    loop {
-        let certifier = capability.certifier();
-        let certificate = &match certifier {
-            Actor::Userspace(pid) => capability_page(pid),
-            Actor::Kernel => kernel_capability_page(),
-        }
-        .0[capability.local_index()];
-        match certificate.load(Ordering::Relaxed).unpack() {
-            CapabilityCertificateUnpacked::Granted { grantee } => {
-                trace!("... granted by {certifier:?} to {grantee:?}");
-                assert!(grantee == sender);
-                break capability;
-            }
-            CapabilityCertificateUnpacked::Forwarded { forwardee, inner } => {
-                trace!("... forwarded {inner:?} by {certifier:?} to {forwardee:?}");
-                assert!(forwardee == sender);
-                capability = inner;
-                sender = certifier;
-            }
-        }
     }
 }
 
