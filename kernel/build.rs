@@ -176,10 +176,10 @@ fn generate_syscall_dispatch(drvli: &Drvli, out: &mut String) {
         for (arg_name, arg_type) in &syscall.args {
             let value = match *arg_type {
                 "capability" => format!(
-                    "RawCapability::from_pointer(registers.a{used_arg_registers} as *mut CapabilityCertificate)"
+                    "RawCapability::from_ptr(registers.a{used_arg_registers} as *mut CapabilityCertificate)"
                 ),
                 "shared_memory" => format!(
-                    "Capability(RawCapability::from_pointer(registers.a{used_arg_registers} as *mut CapabilityCertificate), PhantomData)"
+                    "Capability(RawCapability::from_ptr(registers.a{used_arg_registers} as *mut CapabilityCertificate), PhantomData)"
                 ),
                 "u64" => format!("registers.a{used_arg_registers} as u64"),
                 "usize" => format!("registers.a{used_arg_registers}"),

@@ -38,7 +38,7 @@ pub enum Actor {
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
-pub struct RawCapability(*const CapabilityCertificate);
+pub struct RawCapability(&'static CapabilityCertificate);
 
 pub const CAPABILITIES_PER_PAGE: usize = PAGE_SIZE / size_of::<CapabilityCertificate>();
 
@@ -50,17 +50,22 @@ pub const MAX_PROCESSES: usize = (CAPABILITIES_END - CAPABILITIES_START) / PAGE_
 impl RawCapability {
     pub fn new(certifier: impl Into<Actor>, local_index: usize) -> RawCapability {
         assert!(local_index < PAGE_SIZE / size_of::<CapabilityCertificate>());
-        let pointer = &get_capability_certificate_page(certifier.into())[local_index];
-        RawCapability(pointer as *const CapabilityCertificate)
+        RawCapability(&get_capability_certificate_page(certifier.into())[local_index])
     }
 
-    pub fn from_pointer(pointer: *const CapabilityCertificate) -> RawCapability {
-        // assert!(is_capability_pointer_valid(pointer));
+    pub fn from_ref(pointer: &'static CapabilityCertificate) -> RawCapability {
+        assert!(is_capability_pointer_valid(pointer));
         RawCapability(pointer)
     }
 
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    pub fn from_ptr(pointer: *const CapabilityCertificate) -> RawCapability {
+        assert!(is_capability_pointer_valid(pointer));
+        RawCapability(unsafe { &*pointer })
+    }
+
     pub fn certifier(self) -> Actor {
-        let page_index = (self.0 as usize - CAPABILITIES_START) / PAGE_SIZE;
+        let page_index = (self.as_usize() - CAPABILITIES_START) / PAGE_SIZE;
         if page_index < MAX_PROCESSES {
             Actor::Userspace(ProcessId::new(page_index as u16))
         } else {
@@ -69,11 +74,11 @@ impl RawCapability {
     }
 
     pub fn local_index(self) -> usize {
-        (self.0 as usize % PAGE_SIZE) / 8
+        (self.as_usize() % PAGE_SIZE) / 8
     }
 
     pub fn as_usize(self) -> usize {
-        self.0 as _
+        self.0 as *const CapabilityCertificate as usize
     }
 }
 
@@ -114,7 +119,7 @@ impl CapabilityCertificateValue {
                 Actor::Userspace(pid) => pid.as_u16() as u32,
                 Actor::Kernel => MAX_PROCESSES as u32,
             },
-            payload: capability.0 as u32,
+            payload: capability.as_usize() as u32,
         }
     }
 
@@ -129,11 +134,9 @@ impl CapabilityCertificateValue {
                 grantee: grantee_or_forwardee,
             }
         } else {
-            let inner = self.payload as *const CapabilityCertificate;
-            assert!(is_capability_pointer_valid(inner));
             CapabilityCertificateUnpacked::Forwarded {
                 forwardee: grantee_or_forwardee,
-                inner: RawCapability(inner),
+                inner: RawCapability::from_ptr(self.payload as *const CapabilityCertificate),
             }
         }
     }
@@ -184,21 +187,20 @@ impl<T> core::fmt::Debug for Capability<T> {
 
 impl core::fmt::Debug for RawCapability {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{:#x}", self.0 as usize)
+        write!(f, "{:#x}", self.as_usize())
     }
 }
 
 impl<'de> Deserialize<'de> for RawCapability {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let cap = usize::deserialize(deserializer)? as *const CapabilityCertificate;
-        assert!(is_capability_pointer_valid(cap));
-        Ok(RawCapability(cap))
+        Ok(RawCapability::from_ptr(cap))
     }
 }
 
 impl Serialize for RawCapability {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        (self.0 as usize).serialize(serializer)
+        self.as_usize().serialize(serializer)
     }
 }
 

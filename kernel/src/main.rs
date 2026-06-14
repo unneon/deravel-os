@@ -251,7 +251,7 @@ impl SyscallHandler for () {
         _: &mut RiscvRegisters,
         hart: &mut HartContext,
         args_buffer: &mut [u8],
-    ) -> (RawCapability, usize, usize, Option<ProcessId>) {
+    ) -> (Option<RawCapability>, usize, usize, Option<ProcessId>) {
         let mut current_proc = hart.current_process();
         assert!(current_proc.currently_serving.is_none());
         if let Some((cap, method, args, sender)) =
@@ -259,9 +259,9 @@ impl SyscallHandler for () {
         {
             args_buffer[..args.len()].copy_from_slice(&args);
             current_proc.currently_serving = Some(sender);
-            (cap, method, args.len(), Some(sender))
+            (Some(cap), method, args.len(), Some(sender))
         } else {
-            (RawCapability::from_pointer(core::ptr::null()), 0, 0, None)
+            (None, 0, 0, None)
         }
     }
 

@@ -31,6 +31,8 @@ unsafe impl<T> SyscallAbi for Capability<T> {}
 
 unsafe impl SyscallAbi for RawCapability {}
 
+unsafe impl SyscallAbi for Option<RawCapability> {}
+
 unsafe impl SyscallAbi for ProcessId {}
 
 unsafe impl SyscallAbi for Option<ProcessId> {}

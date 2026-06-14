@@ -137,7 +137,7 @@ pub fn ipc_serve<S>(dispatch: &mut Dispatch<S>) {
         let mut buf = [0u8; 4096];
         let (cap, method, args_len, sender) =
             unsafe { syscall::ipc_receive(buf.as_mut_ptr(), buf.len()) };
-        let Some(sender) = sender else {
+        let (Some(cap), Some(sender)) = (cap, sender) else {
             break;
         };
         let result = dispatch.dispatch(cap, method, &buf[..args_len], sender);
@@ -175,7 +175,7 @@ pub fn yield_() {
 fn stdio() -> Capability<Console> {
     let stdio = STDIO.load(Ordering::SeqCst) as *mut CapabilityCertificate;
     assert!(!stdio.is_null(), "standard input/output not set");
-    Capability(RawCapability::from_pointer(stdio), PhantomData)
+    Capability(RawCapability::from_ptr(stdio), PhantomData)
 }
 
 fn initialize_log() {

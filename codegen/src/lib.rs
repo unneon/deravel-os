@@ -130,6 +130,7 @@ pub fn rust_syscall_arg_type(type_: &str, structs: &[Struct<'_>]) -> Cow<'static
         "i32" => "i32".into(),
         "i64" => "i64".into(),
         "capability" => "RawCapability".into(),
+        "option capability" => "Option<RawCapability>".into(),
         "u8" => "u8".into(),
         "u16" => "u16".into(),
         "u32" => "u32".into(),
@@ -151,6 +152,7 @@ pub fn rust_syscall_kernel_arg_type(type_: &str, structs: &[Struct<'_>]) -> Cow<
         "i32" => "i32".into(),
         "i64" => "i64".into(),
         "capability" => "RawCapability".into(),
+        "option capability" => "Option<RawCapability>".into(),
         "u8" => "u8".into(),
         "u16" => "u16".into(),
         "u32" => "u32".into(),
@@ -180,7 +182,7 @@ pub fn rust_syscall_ret_type(type_: &str, structs: &[Struct<'_>]) -> Cow<'static
         "ptr u8, shared_memory" => "(*mut u8, Capability<SharedMemory>)".into(),
         "ptr, u64" => "(*mut (), u64)".into(),
         "capability" => "RawCapability".into(),
-        "capability, u64, u64, option pid" => "(RawCapability, u64, u64, Option<ProcessId>)".into(),
+        "option capability" => "Option<RawCapability>".into(),
         "u8" => "u8".into(),
         "u16" => "u16".into(),
         "u32" => "u32".into(),
@@ -374,8 +376,8 @@ pub fn split_syscall_ret(type_: &str) -> impl Iterator<Item = &str> {
         "ptr u8, usize" => Box::new(["ptr u8", "usize"].into_iter()),
         "ptr u8, shared_memory" => Box::new(["ptr u8", "shared_memory"].into_iter()),
         "ptr, usize" => Box::new(["ptr", "usize"].into_iter()),
-        "capability, usize, usize, option pid" => {
-            Box::new(["capability", "usize", "usize", "option pid"].into_iter())
+        "option capability, usize, usize, option pid" => {
+            Box::new(["option capability", "usize", "usize", "option pid"].into_iter())
         }
         _ => Box::new(once(type_)),
     }

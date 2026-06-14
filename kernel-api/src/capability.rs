@@ -110,7 +110,7 @@ impl<S: ?Sized> Ctx<'_, S> {
             CapabilityCertificateValue::granted(self.sender),
             Ordering::Relaxed,
         );
-        let cap = Capability(RawCapability::from_pointer(certificate), PhantomData);
+        let cap = Capability(RawCapability::from_ref(certificate), PhantomData);
         let t_name = T::NAME;
         trace!("granted {cap:?} {t_name} to {:?}", self.sender);
 
@@ -140,7 +140,7 @@ impl<S: ?Sized> OCtx<'_, S> {
             CapabilityCertificateValue::granted(Actor::Kernel),
             Ordering::Relaxed,
         );
-        let cap = Capability(RawCapability::from_pointer(certificate), PhantomData);
+        let cap = Capability(RawCapability::from_ref(certificate), PhantomData);
         let t_name = T::NAME;
         trace!("self-granted {cap:?} {t_name}");
 
@@ -232,7 +232,7 @@ pub fn forward_capability_by_cap<T: Interface, U: Interface>(
         CapabilityCertificateValue::forwarded(forwardee.certifier(), cap.0),
         Ordering::Relaxed,
     );
-    let forwarded = Capability(RawCapability::from_pointer(certificate), PhantomData);
+    let forwarded = Capability(RawCapability::from_ref(certificate), PhantomData);
     let t_name = T::NAME;
     let u_name = U::NAME;
     trace!("forwarded {cap:?} {t_name} as {forwarded:?} to {forwardee:?} {u_name}");
@@ -249,7 +249,7 @@ pub fn forward_capability_by_pid<T: Interface>(
         CapabilityCertificateValue::forwarded(forwardee, cap.0),
         Ordering::Relaxed,
     );
-    let forwarded = Capability(RawCapability::from_pointer(certificate), PhantomData);
+    let forwarded = Capability(RawCapability::from_ref(certificate), PhantomData);
     let t_name = T::NAME;
     trace!("forwarded {cap:?} {t_name} as {forwarded:?} to {forwardee:?}");
     forwarded
