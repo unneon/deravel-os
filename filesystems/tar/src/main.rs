@@ -93,7 +93,7 @@ impl FilesystemServer<usize> for Server {
         let path = concat_path(&self.caps[cap], path_suffix);
         let new_cap = self.caps.len();
         self.caps.push(path.into_owned());
-        ctx.grant_capability(new_cap)
+        ctx.grant_to_sender(new_cap)
     }
 }
 
@@ -105,10 +105,7 @@ fn main(args: Args) {
         caps: vec![String::new()],
     };
     let mut dispatch = Dispatch::new_object(server, 0);
-    loop {
-        ipc_serve(&mut dispatch);
-        yield_();
-    }
+    dispatch.run();
 }
 
 fn concat_path<'a>(prefix: &'a str, suffix: &'a str) -> Cow<'a, str> {

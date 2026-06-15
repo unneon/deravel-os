@@ -64,7 +64,7 @@ impl WindowingServer for Server {
             event_ring: None,
         });
         self.active_window = Some(window_id);
-        ctx.grant_capability(window_id)
+        ctx.grant_to_sender(window_id)
     }
 }
 
@@ -78,7 +78,7 @@ impl WindowServer<usize> for Server {
     }
 
     fn framebuffer(&mut self, ctx: &mut Ctx<Self>, window_id: usize) -> Capability<SharedMemory> {
-        ctx.forward_capability(self.windows[window_id].memory)
+        ctx.forward_to_sender(self.windows[window_id].memory)
     }
 
     fn draw(&mut self, _: &mut Ctx<Self>, window_id: usize) {
@@ -106,13 +106,11 @@ impl Observer<InputEvent, KeyboardTag> for Server {
                 (Shortcut::NotStarted, KEY_LEFTALT, 1) => self.global_shortcut = Shortcut::Alt,
                 (Shortcut::Alt, KEY_ESC, 1) => exit(),
                 (Shortcut::Alt, KEY_T, 1) => {
-                    let term = self
-                        .terminal_spawner
-                        .spawn(ctx.grant_capability_to_kernel(()));
-                    let term = forward_capability_by_pid(term, Actor::Kernel);
-                    let fs = forward_capability_by_pid(self.fs, Actor::Kernel);
-                    let net = forward_capability_by_pid(self.net, Actor::Kernel);
-                    let shutdown = forward_capability_by_pid(self.shutdown, Actor::Kernel);
+                    let term = self.terminal_spawner.spawn(ctx.grant_to_kernel(()));
+                    let term = forward(term, Actor::Kernel);
+                    let fs = forward(self.fs, Actor::Kernel);
+                    let net = forward(self.net, Actor::Kernel);
+                    let shutdown = forward(self.shutdown, Actor::Kernel);
                     self.shell_spawner.spawn(term, fs, net, shutdown);
                     self.active_window = None;
                     self.global_shortcut = Shortcut::NotStarted;
@@ -195,10 +193,7 @@ fn main(args: Args) {
     let mut dispatch = Dispatch::new(server);
     dispatch.observe(KeyboardTag, args.keyboard.events());
     dispatch.observe(MouseTag, args.mouse.events());
-    loop {
-        ipc_serve(&mut dispatch);
-        yield_();
-    }
+    dispatch.run();
 }
 
 fn initialize_cursor(red: u8, green: u8, blue: u8, size: usize, display: Capability<Display>) {

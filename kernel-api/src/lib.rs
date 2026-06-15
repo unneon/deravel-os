@@ -6,11 +6,13 @@
 extern crate alloc;
 
 mod capability;
+mod dispatch;
 pub mod drvli;
 mod framebuffer;
 
 pub use capability::*;
 pub use deravel_types::*;
+pub use dispatch::*;
 pub use drvli::*;
 pub use framebuffer::Framebuffer;
 
@@ -129,20 +131,6 @@ pub fn exit() -> ! {
 
 pub fn getchar() -> u8 {
     stdio().getchar()
-}
-
-pub fn ipc_serve<S>(dispatch: &mut Dispatch<S>) {
-    loop {
-        let mut buf = [0u8; 4096];
-        let (cap, method, args_len, sender) =
-            unsafe { syscall::ipc_receive(buf.as_mut_ptr(), buf.len()) };
-        let (Some(cap), Some(sender)) = (cap, sender) else {
-            break;
-        };
-        let result = dispatch.dispatch(cap, method, &buf[..args_len], sender);
-        unsafe { syscall::ipc_reply(result.as_ptr(), result.len()) }
-    }
-    dispatch.run_observables();
 }
 
 pub fn map_shared(cap: Capability<SharedMemory>) -> *mut [u8] {

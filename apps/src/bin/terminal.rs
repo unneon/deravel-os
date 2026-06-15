@@ -150,11 +150,7 @@ fn main(args: Args) {
 
     renderer.clear_screen();
 
-    let mut dispatch = Dispatch::new(renderer);
-    loop {
-        ipc_serve(&mut dispatch);
-        yield_();
-    }
+    Dispatch::new(renderer).run();
 }
 
 app! { main Terminal }
