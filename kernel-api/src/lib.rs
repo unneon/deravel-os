@@ -1,3 +1,4 @@
+#![allow(clippy::too_many_arguments)]
 #![feature(decl_macro)]
 #![feature(ptr_metadata)]
 #![feature(slice_ptr_get)]

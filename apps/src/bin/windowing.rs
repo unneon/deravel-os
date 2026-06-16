@@ -5,11 +5,12 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 use deravel_kernel_api::input::{
-    BTN_LEFT, EV_KEY, EV_REL, EV_SYN, KEY_ESC, KEY_LEFTALT, KEY_T, REL_X, REL_Y,
+    BTN_LEFT, EV_KEY, EV_REL, EV_SYN, KEY_ESC, KEY_LEFTALT, KEY_Q, KEY_T, REL_X, REL_Y,
 };
 use deravel_kernel_api::*;
 use log::*;
 
+#[derive(Clone, Copy)]
 enum Shortcut {
     NotStarted,
     Alt,
@@ -37,9 +38,16 @@ struct WindowData {
     y: usize,
     width: usize,
     height: usize,
+    status: WindowStatus,
     framebuffer: Framebuffer,
     memory: Capability<SharedMemory>,
     event_ring: Option<&'static RingBuffer<InputEvent>>,
+}
+
+#[derive(Eq, PartialEq)]
+enum WindowStatus {
+    Open,
+    Closed,
 }
 
 #[derive(Clone, Copy)]
@@ -59,6 +67,7 @@ impl WindowingServer for Server {
             y: self.cursor_y - height / 2,
             width,
             height,
+            status: WindowStatus::Open,
             framebuffer,
             memory,
             event_ring: None,
@@ -102,7 +111,7 @@ impl WindowServer<usize> for Server {
 impl Observer<InputEvent, KeyboardTag> for Server {
     fn observe(&mut self, mut ctx: OCtx<Self>, event: InputEvent, _: KeyboardTag) {
         if event.type_ == EV_KEY {
-            match (&mut self.global_shortcut, event.code, event.value) {
+            match (self.global_shortcut, event.code, event.value) {
                 (Shortcut::NotStarted, KEY_LEFTALT, 1) => self.global_shortcut = Shortcut::Alt,
                 (Shortcut::Alt, KEY_ESC, 1) => exit(),
                 (Shortcut::Alt, KEY_T, 1) => {
@@ -114,6 +123,23 @@ impl Observer<InputEvent, KeyboardTag> for Server {
                     self.shell_spawner.spawn(term, fs, net, shutdown);
                     self.active_window = None;
                     self.global_shortcut = Shortcut::NotStarted;
+                }
+                (Shortcut::Alt, KEY_Q, 1) => {
+                    if let Some(window_id) = self.active_window.take() {
+                        let window = &mut self.windows[window_id];
+                        window.status = WindowStatus::Closed;
+                        self.display_framebuffer.fill_rect(
+                            window.x,
+                            window.y,
+                            window.x + window.width,
+                            window.y + window.height,
+                            191,
+                            215,
+                            234,
+                            255,
+                        );
+                        self.display.draw();
+                    }
                 }
                 (Shortcut::Alt, KEY_LEFTALT, 0) => self.global_shortcut = Shortcut::NotStarted,
                 (Shortcut::Alt, _, 1) => self.global_shortcut = Shortcut::NotStarted,
@@ -137,6 +163,7 @@ impl Observer<InputEvent, MouseTag> for Server {
                         && self.cursor_x < window.x + window.width
                         && self.cursor_y >= window.y
                         && self.cursor_y < window.y + window.height
+                        && window.status == WindowStatus::Open
                     {
                         self.active_window = Some(window_index);
                     }

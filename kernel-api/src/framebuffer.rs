@@ -30,6 +30,22 @@ impl Framebuffer {
         self.ptr.fill(bgra(r, g, b, a));
     }
 
+    pub fn fill_rect(
+        &mut self,
+        x_start: usize,
+        y_start: usize,
+        x_end: usize,
+        y_end: usize,
+        r: u8,
+        g: u8,
+        b: u8,
+        a: u8,
+    ) {
+        for row in self.rect(x_start, y_start, x_end, y_end) {
+            row.fill(bgra(r, g, b, a));
+        }
+    }
+
     pub fn fill_rows(&mut self, y_start: usize, y_end: usize, r: u8, g: u8, b: u8, a: u8) {
         self.rows(y_start, y_end).fill(bgra(r, g, b, a))
     }
@@ -39,6 +55,19 @@ impl Framebuffer {
             y_from * self.width..(y_from + count) * self.width,
             y_to * self.width,
         )
+    }
+
+    pub fn rect(
+        &mut self,
+        x_start: usize,
+        y_start: usize,
+        x_end: usize,
+        y_end: usize,
+    ) -> impl Iterator<Item = &mut [u32]> {
+        let width = self.width;
+        self.rows(y_start, y_end)
+            .chunks_mut(width)
+            .map(move |row| &mut row[x_start..x_end])
     }
 
     pub fn rows(&mut self, y_start: usize, y_end: usize) -> &mut [u32] {
