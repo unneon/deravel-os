@@ -1,7 +1,8 @@
 ENTRY(boot)
 
 SECTIONS {
-    . = 0x80200000;
+    . = 0x80050000;
+    kernel_start = .;
 
     .text :{
         text_start = .;
@@ -41,4 +42,5 @@ SECTIONS {
     heap_end = .;
 
     readwrite_end = .;
+    kernel_end = .;
 }

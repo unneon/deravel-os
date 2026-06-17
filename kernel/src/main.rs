@@ -43,6 +43,7 @@ use crate::device_tree::initialize_timebase_frequency;
 use crate::drvli::{SyscallHandler, dispatch_syscall};
 use crate::elf::elf;
 use crate::hart::{HartContext, HartStack};
+use crate::heap::initialize_heap;
 use crate::interrupt::INTERRUPTS;
 use crate::log::{initialize_log, log_userspace};
 use crate::page::{PageFlags, PageTable, map_pages};
@@ -73,6 +74,7 @@ fn main(_hart_id: u64, device_tree: *const u8) -> ! {
     initialize_log();
     initialize_trap_handler();
     log_sbi_metadata();
+    initialize_heap(&device_tree);
     let (virtio_blk, virtio_net, virtio_gpu, virtio_keyboard, virtio_mouse) =
         initialize_all_pci(&device_tree);
     initialize_plic(&device_tree);
