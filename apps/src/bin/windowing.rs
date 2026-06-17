@@ -113,7 +113,7 @@ impl Observer<InputEvent, KeyboardTag> for Server {
         if event.type_ == EV_KEY {
             match (self.global_shortcut, event.code, event.value) {
                 (Shortcut::NotStarted, KEY_LEFTALT, 1) => self.global_shortcut = Shortcut::Alt,
-                (Shortcut::Alt, KEY_ESC, 1) => exit(),
+                (Shortcut::Alt, KEY_ESC, 1) => self.shutdown.shutdown(),
                 (Shortcut::Alt, KEY_T, 1) => {
                     let term = self.terminal_spawner.spawn(ctx.grant_to_kernel(()));
                     let term = forward(term, Actor::Kernel);
