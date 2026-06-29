@@ -48,20 +48,19 @@ pub fn load_elf(elf_bytes: &[u8], page_table: &mut PageTable<2>) -> usize {
         let flags = paging_flags(&segment);
 
         if flags.is_writable() {
-            let page_count = (segment.p_memsz as usize).div_ceil(PAGE_SIZE);
-            let pages = vec![0u8; PAGE_SIZE * page_count];
+            let size = (segment.p_memsz as usize).next_multiple_of(PAGE_SIZE);
+            let pages = vec![0u8; size];
 
             map_pages(
                 page_table,
                 segment.p_vaddr as usize,
                 pages.as_ptr() as usize,
                 flags,
-                page_count,
+                size,
             );
 
             let flat_pointer = Vec::leak(pages).as_mut_ptr();
-            let flat_memory =
-                unsafe { core::slice::from_raw_parts_mut(flat_pointer, PAGE_SIZE * page_count) };
+            let flat_memory = unsafe { core::slice::from_raw_parts_mut(flat_pointer, size) };
             flat_memory[..segment.p_filesz as usize].copy_from_slice(data);
             flat_memory[segment.p_memsz as usize..].fill(0);
         } else {
@@ -73,7 +72,7 @@ pub fn load_elf(elf_bytes: &[u8], page_table: &mut PageTable<2>) -> usize {
                 segment.p_vaddr as usize,
                 data.as_ptr() as usize,
                 flags,
-                data.len().div_ceil(PAGE_SIZE),
+                data.len().next_multiple_of(PAGE_SIZE),
             );
         }
     }

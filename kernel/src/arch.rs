@@ -1,3 +1,4 @@
+use crate::page::satp;
 use crate::process::Process;
 use crate::sync::MutexGuard;
 use crate::{handle_trap, main};
@@ -64,7 +65,7 @@ pub fn initialize_trap_handler() {
 
 pub fn switch_to_userspace_full(mut next: MutexGuard<Process>) -> ! {
     riscv::asm::sfence_vma_all();
-    unsafe { riscv::register::satp::write(next.satp()) };
+    unsafe { riscv::register::satp::write(satp(next.page_table)) };
     riscv::asm::sfence_vma_all();
     unsafe { riscv::register::sepc::write(next.pc) };
     let mut status = riscv::register::sstatus::read();

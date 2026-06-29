@@ -5,7 +5,6 @@ use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::alloc::Layout;
-use riscv::register::satp::Mode;
 
 pub const QUEUE_SIZE: usize = 16;
 
@@ -135,10 +134,7 @@ impl<const INDEX: u16> Queue<INDEX> {
     }
 
     pub fn notify(&mut self) {
-        let old_satp = riscv::register::satp::read();
-        unsafe { riscv::register::satp::set(Mode::Bare, 0, 0) }
         self.notify.write(INDEX);
-        unsafe { riscv::register::satp::write(old_satp) }
     }
 
     fn size(&self) -> usize {

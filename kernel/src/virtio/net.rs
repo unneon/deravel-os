@@ -8,7 +8,6 @@ use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use deravel_types::ProcessId;
-use riscv::register::satp::Satp;
 use smoltcp::iface::{Interface, SocketSet, SocketStorage};
 use smoltcp::phy::{DeviceCapabilities, Medium};
 use smoltcp::socket::dns;
@@ -100,8 +99,6 @@ impl VirtioNet {
 
 impl NetworkServer for VirtioNet {
     fn dns(&self, _: ProcessId, domain: &str) -> String {
-        let satp = riscv::register::satp::read();
-        unsafe { riscv::register::satp::write(Satp::from_bits(0)) }
         let mut state = self.state.lock();
         let mut iface = Interface::new(
             smoltcp::iface::Config::new(HardwareAddress::Ethernet(self.device.mac().read())),
@@ -136,9 +133,7 @@ impl NetworkServer for VirtioNet {
                 .get_query_result(query)
             {
                 Ok(addrs) => {
-                    let address = addrs[0].to_string();
-                    unsafe { riscv::register::satp::write(satp) }
-                    break address;
+                    break addrs[0].to_string();
                 }
                 Err(GetQueryResultError::Pending) => {}
                 Err(e) => {

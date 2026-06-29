@@ -3,6 +3,7 @@ pub mod config;
 
 use crate::allocators::TrivialAllocator;
 use crate::interrupt::register_interrupt;
+use crate::page::physical_to_identity_mapped;
 use crate::pci::config::{Config, GeneralDeviceConfig};
 use crate::sync::Mutex;
 use crate::uart::{Uart16550, Uart16550Mmio};
@@ -14,7 +15,7 @@ use crate::virtio::input::VirtioInput;
 use crate::virtio::net::VirtioNet;
 use fdt::Fdt;
 use fdt::node::FdtNode;
-use log::warn;
+use log::*;
 
 #[derive(Default)]
 pub struct AllocatedRange {
@@ -51,7 +52,7 @@ pub fn initialize_all_pci(
     let mut mem32 = TrivialAllocator::new(pci_ranges.mem32.length);
     let mut mem64 = TrivialAllocator::new(pci_ranges.mem64.length);
     let region = pci.reg().unwrap().next().unwrap();
-    let configs = region.starting_address as *mut Config;
+    let configs = physical_to_identity_mapped(region.starting_address as *mut Config);
     let configs = configs..configs.wrapping_byte_add(region.size.unwrap());
     let configs = unsafe { core::slice::from_mut_ptr_range(configs) };
     let mut virtio_blk_slot = None;
@@ -68,7 +69,11 @@ pub fn initialize_all_pci(
             let config = config.as_general_device().unwrap();
             let bars = allocate_all_bars(config, &pci_ranges, &mut io, &mut mem32, &mut mem64);
             config.command.write_bitor(0b111);
-            let bar = unsafe { Volatile::new(bars[0].soc_offset as *mut Uart16550Mmio) };
+            let bar = unsafe {
+                Volatile::new(physical_to_identity_mapped(
+                    bars[0].soc_offset as *mut Uart16550Mmio,
+                ))
+            };
             let mut uart = Uart16550::new(bar);
             uart.demo();
         } else if config.vendor_id == 0x1AF4 && config.device_id == 0x1041 {

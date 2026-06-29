@@ -1,3 +1,4 @@
+use crate::page::physical_to_identity_mapped;
 use crate::pci::AllocatedRange;
 use crate::pci::capability::{PciCapability, VendorPciCapability};
 use crate::pci::config::GeneralDeviceConfig;
@@ -75,7 +76,7 @@ const VIRTIO_PCI_CAP_DEVICE_CFG: u8 = 4;
 impl NotifySlot {
     unsafe fn select(&self, common: Volatile<VirtioCommonConfig>) -> Volatile<u16> {
         let offset = common.queue_notify_off().read() as usize * self.off_multiplier as usize;
-        unsafe { Volatile::new(self.base.byte_add(offset)) }
+        unsafe { Volatile::new(physical_to_identity_mapped(self.base.byte_add(offset))) }
     }
 }
 
@@ -130,7 +131,8 @@ fn extract_capabilities<T>(
             let address = bars[cap.bar as usize].soc_offset + cap.offset as usize;
             if cap.cfg_type == VIRTIO_PCI_CAP_COMMON_CFG {
                 assert!(common.is_none());
-                common = Some(unsafe { Volatile::new(address as *mut VirtioCommonConfig) });
+                let address = physical_to_identity_mapped(address as *mut VirtioCommonConfig);
+                common = Some(unsafe { Volatile::new(address) });
             } else if cap.cfg_type == VIRTIO_PCI_CAP_NOTIFY_CFG {
                 assert!(notify.is_none());
                 let cap = unsafe {
@@ -141,10 +143,12 @@ fn extract_capabilities<T>(
                     off_multiplier: cap.notify_off_multiplier,
                 });
             } else if cap.cfg_type == VIRTIO_PCI_CAP_ISR_CFG {
-                isr = Some(unsafe { Volatile::<_, Readonly>::new(address as *mut u8) });
+                let address = physical_to_identity_mapped(address as *mut u8);
+                isr = Some(unsafe { Volatile::<_, Readonly>::new(address) });
             } else if cap.cfg_type == VIRTIO_PCI_CAP_DEVICE_CFG {
                 assert!(device.is_none());
-                device = Some(unsafe { Volatile::new(address as *mut T) });
+                let address = physical_to_identity_mapped(address as *mut T);
+                device = Some(unsafe { Volatile::new(address) });
             }
         }
     }

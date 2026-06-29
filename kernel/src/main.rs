@@ -48,7 +48,9 @@ use crate::hart::{HartContext, HartStack};
 use crate::heap::initialize_heap;
 use crate::interrupt::INTERRUPTS;
 use crate::log::{initialize_log, log_userspace};
-use crate::page::{PageFlags, PageTable, map_pages};
+use crate::page::{
+    PageFlags, PageTable, initialize_memory_mapping, map_pages, physical_to_identity_mapped,
+};
 use crate::pci::initialize_all_pci;
 use crate::plic::{initialize_plic, plic_claim, plic_complete};
 use crate::process::{
@@ -66,16 +68,18 @@ use deravel_types::*;
 use fdt::Fdt;
 use riscv::interrupt::Trap;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
-use riscv::register::satp::Mode;
 
-fn main(_hart_id: u64, device_tree: *const u8) -> ! {
+fn main(_hart_id: u64, device_tree_ptr: *const u8) -> ! {
     clear_bss();
 
-    let device_tree = unsafe { Fdt::from_ptr(device_tree) }.unwrap();
+    let device_tree = unsafe { Fdt::from_ptr(device_tree_ptr) }.unwrap();
     initialize_timebase_frequency(&device_tree);
     initialize_log();
     initialize_trap_handler();
+    initialize_memory_mapping();
     log_sbi_metadata();
+    let device_tree =
+        unsafe { Fdt::from_ptr(physical_to_identity_mapped(device_tree_ptr as *mut u8)) }.unwrap();
     initialize_heap(&device_tree);
     let (virtio_blk, virtio_net, virtio_gpu, virtio_keyboard, virtio_mouse) =
         initialize_all_pci(&device_tree);
@@ -145,8 +149,6 @@ fn handle_trap(registers: &mut RiscvRegisters, hart: &mut HartContext) -> ! {
         sbi::set_timer(u64::MAX);
         switch_to_userspace_registers_only(registers)
     } else if scause == Trap::Interrupt(Interrupt::SupervisorExternal) {
-        let satp = riscv::register::satp::read();
-        unsafe { riscv::register::satp::set(Mode::Bare, 0, 0) }
         let irq = plic_claim();
         for ie in &INTERRUPTS {
             let ie = ie.lock();
@@ -157,7 +159,6 @@ fn handle_trap(registers: &mut RiscvRegisters, hart: &mut HartContext) -> ! {
             }
         }
         plic_complete(irq);
-        unsafe { riscv::register::satp::write(satp) }
         switch_to_userspace_registers_only(registers)
     } else {
         panic!("unexpected trap scause={scause:?} stval={stval:#x} user_pc={user_pc:#x}");
@@ -275,7 +276,7 @@ impl SyscallHandler for () {
                         virtual_addr,
                         physical_address,
                         PageFlags::readwrite().user(),
-                        length / PAGE_SIZE,
+                        length,
                     );
 
                     current_proc.state = ProcessState::Runnable;
@@ -310,7 +311,7 @@ impl SyscallHandler for () {
                     virtual_addr,
                     ring_buffer as *const _ as *const u8 as usize,
                     PageFlags::readwrite().user(),
-                    1,
+                    PAGE_SIZE,
                 );
                 (virtual_addr as *mut (), ring_buffer.0.data.0.len())
             }
@@ -327,7 +328,7 @@ impl SyscallHandler for () {
             virtual_addr,
             memory.as_ptr() as usize,
             PageFlags::readwrite().user(),
-            padded_size / PAGE_SIZE,
+            padded_size,
         );
         virtual_addr as *mut u8
     }
@@ -347,7 +348,7 @@ impl SyscallHandler for () {
             virtual_addr,
             memory.as_ptr() as usize,
             PageFlags::readwrite().user(),
-            padded_size / PAGE_SIZE,
+            padded_size,
         );
         let cap = grant_kernel_capability(
             hart.current_pid(),
@@ -384,7 +385,7 @@ impl SyscallHandler for () {
             virtual_addr,
             physical_address,
             PageFlags::readwrite().user(),
-            padded_length / PAGE_SIZE,
+            padded_length,
         );
 
         (virtual_addr as *mut u8, length)

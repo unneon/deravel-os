@@ -7,7 +7,9 @@ use crate::device_tree::timebase_frequency;
 use crate::elf::load_elf;
 use crate::hart::HartContext;
 use crate::heap::log_heap_statistics;
-use crate::page::{PageFlags, PageTable, map_pages};
+use crate::page::{
+    PageFlags, PageTable, map_kernel_identity_mapping, map_kernel_memory, map_pages,
+};
 use crate::sbi;
 use crate::sbi::{ResetReason, ResetType};
 use crate::sync::Mutex;
@@ -16,7 +18,6 @@ use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 use core::sync::atomic::Ordering;
 use deravel_types::*;
-use riscv::register::satp::{Mode, Satp};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ProcessState {
@@ -53,25 +54,7 @@ pub struct ProcessReservation<T: ProcessTag> {
 
 pub const PROCESS_COUNT: usize = 8;
 
-unsafe extern "C" {
-    static text_start: u8;
-    static text_end: u8;
-    static rodata_start: u8;
-    static rodata_end: u8;
-    static readwrite_start: u8;
-    static readwrite_end: u8;
-}
-
 static PROCESSES: [Mutex<Process>; PROCESS_COUNT] = unsafe { core::mem::zeroed() };
-
-impl Process {
-    pub fn satp(&self) -> Satp {
-        let mut satp = Satp::from_bits(0);
-        satp.set_ppn(self.page_table as usize / PAGE_SIZE);
-        satp.set_mode(Mode::Sv39);
-        satp
-    }
-}
 
 impl<T: ProcessTag> ProcessReservation<T> {
     pub fn spawn(self, args: T::Args) {
@@ -133,6 +116,7 @@ pub fn reserve_process<T: ProcessTag>(elf: &'static [u8]) -> ProcessReservation<
 pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: ProcessInputs<T>) {
     let pid = inputs.common.id;
     let mut page_table = Box::new(PageTable::new());
+    map_kernel_identity_mapping(&mut page_table);
     map_kernel_memory(&mut page_table);
     let entry_point = load_elf(elf, &mut page_table);
     map_capability_memory(&mut page_table, pid);
@@ -145,39 +129,6 @@ pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: Pro
     proc.pc = entry_point;
     proc.page_table = Box::leak(page_table);
     proc.virtual_memory = TrivialAllocator::new_range(0x4000000, 0x5000000);
-}
-
-fn map_kernel_memory(page_table: &mut PageTable<2>) {
-    map_kernel_memory_section(
-        page_table,
-        &raw const text_start,
-        &raw const text_end,
-        PageFlags::executable(),
-    );
-    map_kernel_memory_section(
-        page_table,
-        &raw const rodata_start,
-        &raw const rodata_end,
-        PageFlags::readonly(),
-    );
-    map_kernel_memory_section(
-        page_table,
-        &raw const readwrite_start,
-        &raw const readwrite_end,
-        PageFlags::readwrite(),
-    )
-}
-
-fn map_kernel_memory_section(
-    page_table: &mut PageTable<2>,
-    start: *const u8,
-    end: *const u8,
-    flags: PageFlags,
-) {
-    let start = start as usize;
-    assert!(start.is_multiple_of(PAGE_SIZE));
-    let page_count = (end as usize - start).div_ceil(PAGE_SIZE);
-    map_pages(page_table, start, start, flags, page_count);
 }
 
 fn map_capability_memory(pages: &mut PageTable<2>, pid: ProcessId) {
@@ -193,10 +144,22 @@ fn map_capability_memory(pages: &mut PageTable<2>, pid: ProcessId) {
         pre_v,
         pre_p,
         PageFlags::readonly().user(),
-        pid.as_u16() as usize,
+        (pid.as_u16() as usize) * PAGE_SIZE,
     );
-    map_pages(pages, own_v, own_p, PageFlags::readwrite().user(), 1);
-    map_pages(pages, suf_v, suf_p, PageFlags::readonly().user(), suf_l);
+    map_pages(
+        pages,
+        own_v,
+        own_p,
+        PageFlags::readwrite().user(),
+        PAGE_SIZE,
+    );
+    map_pages(
+        pages,
+        suf_v,
+        suf_p,
+        PageFlags::readonly().user(),
+        suf_l * PAGE_SIZE,
+    );
 }
 
 fn map_inputs_memory<T: ProcessTag>(pages: &mut PageTable<2>, inputs: ProcessInputs<T>) {
@@ -206,7 +169,7 @@ fn map_inputs_memory<T: ProcessTag>(pages: &mut PageTable<2>, inputs: ProcessInp
         INPUTS_ADDRESS,
         page as *mut _ as usize,
         PageFlags::readonly().user(),
-        1,
+        PAGE_SIZE,
     );
 }
 
