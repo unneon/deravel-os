@@ -7,10 +7,12 @@ pub struct PageAligned<T>(pub T);
 #[derive(Clone)]
 pub struct PageFlags(usize);
 
-pub struct PageTable(pub [PageTableEntry; PAGE_SIZE / size_of::<PageTableEntry>()]);
+pub struct PageTable<const LEVEL: usize>(
+    pub [PageTableEntry<LEVEL>; PAGE_SIZE / size_of::<usize>()],
+);
 
 #[derive(Clone, Copy, Default)]
-pub struct PageTableEntry(pub usize);
+pub struct PageTableEntry<const LEVEL: usize>(pub usize);
 
 const PAGE_V: usize = 1 << 0;
 const PAGE_R: usize = 1 << 1;
@@ -40,15 +42,19 @@ impl PageFlags {
     }
 }
 
-impl PageTable {
-    pub const fn new() -> PageTable {
+impl<const LEVEL: usize> PageTable<LEVEL> {
+    pub const fn new() -> PageTable<LEVEL> {
         PageTable([PageTableEntry(0); _])
     }
 
-    unsafe fn get_or_create_indirect(&mut self, vpn_segment: usize) -> &'static mut PageTable {
+    unsafe fn get_or_create_indirect(
+        &mut self,
+        vpn_segment: usize,
+    ) -> &'static mut PageTable<{ LEVEL - 1 }> {
         if !self.0[vpn_segment].is_valid() {
             let indirect = Box::leak(Box::new(PageTable::new()));
-            self.0[vpn_segment] = PageTableEntry::indirect(indirect as *mut PageTable);
+            self.0[vpn_segment] =
+                PageTableEntry::indirect(indirect as *mut PageTable<{ LEVEL - 1 }>);
             indirect
         } else {
             unsafe { &mut *self.0[vpn_segment].unwrap_indirect() }
@@ -56,12 +62,12 @@ impl PageTable {
     }
 }
 
-impl PageTableEntry {
-    fn indirect(table: *mut PageTable) -> PageTableEntry {
+impl<const LEVEL: usize> PageTableEntry<LEVEL> {
+    fn indirect(table: *mut PageTable<{ LEVEL - 1 }>) -> PageTableEntry<LEVEL> {
         PageTableEntry(((table as usize / PAGE_SIZE) << 10) | PAGE_V)
     }
 
-    fn leaf(physical_addr: usize, flags: PageFlags) -> PageTableEntry {
+    fn leaf(physical_addr: usize, flags: PageFlags) -> PageTableEntry<LEVEL> {
         PageTableEntry(((physical_addr / PAGE_SIZE) << 10) | PAGE_V | flags.0)
     }
 
@@ -69,19 +75,19 @@ impl PageTableEntry {
         self.0 & PAGE_V != 0
     }
 
-    fn unwrap_indirect(&mut self) -> *mut PageTable {
-        ((self.0 >> 10) * PAGE_SIZE) as *mut PageTable
+    fn unwrap_indirect(&mut self) -> *mut PageTable<{ LEVEL - 1 }> {
+        ((self.0 >> 10) * PAGE_SIZE) as *mut PageTable<{ LEVEL - 1 }>
     }
 }
 
-impl Default for PageTable {
-    fn default() -> PageTable {
-        PageTable([PageTableEntry::default(); PAGE_SIZE / size_of::<PageTableEntry>()])
+impl<const LEVEL: usize> Default for PageTable<LEVEL> {
+    fn default() -> PageTable<LEVEL> {
+        PageTable([PageTableEntry::default(); _])
     }
 }
 
 pub fn map_pages(
-    table2: &mut PageTable,
+    table2: &mut PageTable<2>,
     virtual_addr: usize,
     physical_addr: usize,
     flags: PageFlags,
@@ -98,7 +104,12 @@ pub fn map_pages(
     }
 }
 
-fn map_page(table2: &mut PageTable, virtual_addr: usize, physical_addr: usize, flags: PageFlags) {
+fn map_page(
+    table2: &mut PageTable<2>,
+    virtual_addr: usize,
+    physical_addr: usize,
+    flags: PageFlags,
+) {
     assert!(virtual_addr.is_multiple_of(PAGE_SIZE));
     assert!(physical_addr.is_multiple_of(PAGE_SIZE));
 

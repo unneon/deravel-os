@@ -34,7 +34,7 @@ pub struct Process {
     pub state: ProcessState,
     pub registers: Option<RiscvRegisters>,
     pub pc: usize,
-    pub page_table: *mut PageTable,
+    pub page_table: *mut PageTable<2>,
     pub virtual_memory: TrivialAllocator,
     pub messages: Option<Box<VecDeque<(RawCapability, usize, Vec<u8>, ProcessId)>>>,
     #[allow(clippy::box_collection)]
@@ -147,7 +147,7 @@ pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: Pro
     proc.virtual_memory = TrivialAllocator::new_range(0x4000000, 0x5000000);
 }
 
-fn map_kernel_memory(page_table: &mut PageTable) {
+fn map_kernel_memory(page_table: &mut PageTable<2>) {
     map_kernel_memory_section(
         page_table,
         &raw const text_start,
@@ -169,7 +169,7 @@ fn map_kernel_memory(page_table: &mut PageTable) {
 }
 
 fn map_kernel_memory_section(
-    page_table: &mut PageTable,
+    page_table: &mut PageTable<2>,
     start: *const u8,
     end: *const u8,
     flags: PageFlags,
@@ -180,7 +180,7 @@ fn map_kernel_memory_section(
     map_pages(page_table, start, start, flags, page_count);
 }
 
-fn map_capability_memory(pages: &mut PageTable, pid: ProcessId) {
+fn map_capability_memory(pages: &mut PageTable<2>, pid: ProcessId) {
     let pre_v = CAPABILITIES_START;
     let pre_p = capability_pages_physical_address();
     let own_v = pre_v + pid.as_u16() as usize * PAGE_SIZE;
@@ -199,7 +199,7 @@ fn map_capability_memory(pages: &mut PageTable, pid: ProcessId) {
     map_pages(pages, suf_v, suf_p, PageFlags::readonly().user(), suf_l);
 }
 
-fn map_inputs_memory<T: ProcessTag>(pages: &mut PageTable, inputs: ProcessInputs<T>) {
+fn map_inputs_memory<T: ProcessTag>(pages: &mut PageTable<2>, inputs: ProcessInputs<T>) {
     let page = Box::leak(Box::new(inputs));
     map_pages(
         pages,
