@@ -18,7 +18,7 @@ pub macro elf($env:literal) {{
 }}
 
 const USER_START: usize = 0x1000000;
-const USER_END: usize = 0x1800000;
+const USER_END: usize = 0x2000000;
 
 pub fn load_elf(elf_bytes: &[u8], page_table: &mut PageTable) -> usize {
     let elf = ElfBytes::<LittleEndian>::minimal_parse(elf_bytes).unwrap();

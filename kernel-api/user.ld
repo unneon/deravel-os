@@ -22,5 +22,7 @@ SECTIONS {
         . = ALIGN(16);
         . += 64 * 1024;
         __deravel_stack_top = .;
+
+        ASSERT(. <= 0x2000000, "user application too large");
     }
 }
