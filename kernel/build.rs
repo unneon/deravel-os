@@ -1,9 +1,9 @@
 extern crate core;
 
+use deravel_codegen::RustTypeCtx::*;
+use deravel_codegen::parse::parse_drvli;
 use deravel_codegen::{
-    Drvli, Interface, Struct, camel_case, parse_drvli, rust_arg_type, rust_borrow_or_copy,
-    rust_escape_name, rust_member_type, rust_normal_ret_type, rust_syscall_kernel_arg_type,
-    rust_syscall_ret_type, split_syscall_arg, split_syscall_ret,
+    Drvli, Interface, Type, camel_case, rust_escape_name, split_syscall_arg, split_syscall_ret,
 };
 use std::fmt::Write;
 
@@ -14,8 +14,8 @@ fn main() {
     let drvli = parse_drvli(&drvli_text);
     let mut output = String::new();
     for interface in &drvli.interfaces {
-        generate_server_trait(interface, &drvli.structs, &mut output);
-        generate_handler_impl(interface, &drvli.structs, &mut output);
+        generate_server_trait(interface, &mut output);
+        generate_handler_impl(interface, &mut output);
     }
     generate_syscall_trait(&drvli, &mut output);
     generate_syscall_dispatch(&drvli, &mut output);
@@ -29,7 +29,7 @@ fn main() {
     println!("cargo::rustc-link-arg=-Tkernel/kernel.ld");
 }
 
-fn generate_server_trait(interface: &Interface, structs: &[Struct], out: &mut String) {
+fn generate_server_trait(interface: &Interface, out: &mut String) {
     let name_snake = &interface.name;
     let name_camel = camel_case(name_snake);
     writeln!(out, "#[allow(dead_code)]").unwrap();
@@ -38,19 +38,19 @@ fn generate_server_trait(interface: &Interface, structs: &[Struct], out: &mut St
         let method_name = &method.name;
         write!(out, "    fn {method_name}(&self, sender: ProcessId").unwrap();
         for (arg_name, arg_type) in &method.args {
-            let arg_type = rust_arg_type(arg_type, structs);
+            let arg_type = arg_type.rust(Arg);
             write!(out, ", {arg_name}: {arg_type}").unwrap();
         }
         write!(out, ")").unwrap();
         if let Some(return_type) = &method.return_type {
-            let return_type = rust_normal_ret_type(return_type, structs);
+            let return_type = return_type.rust(NormalRet);
             write!(out, " -> {return_type}").unwrap();
         }
         writeln!(out, ";").unwrap();
     }
     for stream in &interface.streams {
         let stream_name = &stream.name;
-        let type_ = rust_member_type(stream.type_, structs);
+        let type_ = stream.type_.rust(Member);
         writeln!(
             out,
             "    fn {stream_name}(&self) -> &'static RingBuffer<{type_}>;"
@@ -60,7 +60,7 @@ fn generate_server_trait(interface: &Interface, structs: &[Struct], out: &mut St
     writeln!(out, "}}").unwrap();
 }
 
-fn generate_handler_impl(interface: &Interface, structs: &[Struct], out: &mut String) {
+fn generate_handler_impl(interface: &Interface, out: &mut String) {
     let name_snake = &interface.name;
     let name_camel = camel_case(name_snake);
     writeln!(
@@ -83,7 +83,7 @@ fn generate_handler_impl(interface: &Interface, structs: &[Struct], out: &mut St
         }
         write!(out, "): (").unwrap();
         for (_, arg_type) in &method.args {
-            let arg_type = rust_normal_ret_type(arg_type, structs);
+            let arg_type = arg_type.rust(NormalRet);
             write!(out, "{arg_type},").unwrap();
         }
         writeln!(out, ") = serde_json::from_slice(_args).unwrap();").unwrap();
@@ -93,11 +93,11 @@ fn generate_handler_impl(interface: &Interface, structs: &[Struct], out: &mut St
         )
         .unwrap();
         for (arg_name, arg_type) in &method.args {
-            let borrow = rust_borrow_or_copy(arg_type);
+            let borrow = arg_type.rust_borrow_or_copy();
             write!(out, "{borrow}{arg_name},").unwrap();
         }
         writeln!(out, ");").unwrap();
-        if method.return_type != Some("never") {
+        if method.return_type != Some(Type::Never) {
             writeln!(out, "                serde_json::to_vec(&_result).unwrap()").unwrap();
         }
         writeln!(out, "            }}").unwrap();
@@ -134,24 +134,24 @@ fn generate_syscall_trait(drvli: &Drvli, out: &mut String) {
         let syscall_name = rust_escape_name(syscall.name);
         write!(out, "    fn {syscall_name}(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut HartContext").unwrap();
         for (arg_name, arg_type) in &syscall.args {
-            let arg_type = rust_syscall_kernel_arg_type(arg_type, &drvli.structs);
+            let arg_type = arg_type.rust(SyscallKernelArg);
             write!(out, ", {arg_name}: {arg_type}").unwrap();
         }
         write!(out, ")").unwrap();
-        if let Some(return_type) = syscall.return_type {
+        if let Some(return_type) = &syscall.return_type {
             if syscall
                 .return_type
-                .into_iter()
+                .iter()
                 .flat_map(split_syscall_ret)
                 .count()
                 == 1
             {
-                let return_type = rust_syscall_ret_type(return_type, &drvli.structs);
+                let return_type = return_type.rust(SyscallRet);
                 write!(out, " -> {return_type}").unwrap();
             } else {
                 write!(out, " -> (").unwrap();
                 for ret_type in split_syscall_ret(return_type) {
-                    let ret_type = rust_syscall_ret_type(ret_type, &drvli.structs);
+                    let ret_type = ret_type.rust(SyscallRet);
                     write!(out, "{ret_type}, ").unwrap();
                 }
                 writeln!(out, "            )").unwrap();
@@ -174,16 +174,16 @@ fn generate_syscall_dispatch(drvli: &Drvli, out: &mut String) {
             "            let _result = <() as SyscallHandler>::{syscall_name}(user_pc, registers, hart").unwrap();
         let mut used_arg_registers = 0;
         for (arg_name, arg_type) in &syscall.args {
-            let value = match *arg_type {
-                "capability" => format!(
+            let value = match arg_type {
+                Type::UntypedCapability => format!(
                     "RawCapability::from_ptr(registers.a{used_arg_registers} as *mut CapabilityCertificate)"
                 ),
-                "shared_memory" => format!(
+                Type::SharedMemory => format!(
                     "unsafe {{ Capability::new(RawCapability::from_ptr(registers.a{used_arg_registers} as *mut CapabilityCertificate)) }}"
                 ),
-                "u64" => format!("registers.a{used_arg_registers} as u64"),
-                "usize" => format!("registers.a{used_arg_registers}"),
-                "array u8" | "const_array u8" => {
+                Type::U64 => format!("registers.a{used_arg_registers} as u64"),
+                Type::Usize => format!("registers.a{used_arg_registers}"),
+                Type::Array(inner) | Type::ConstArray(inner) if **inner == Type::U8 => {
                     let ap = format!("registers.a{used_arg_registers}");
                     let as_ = format!("registers.a{}", used_arg_registers + 1);
                     format!("unsafe {{ core::slice::from_raw_parts_mut({ap} as *mut u8, {as_}) }}")
@@ -194,12 +194,12 @@ fn generate_syscall_dispatch(drvli: &Drvli, out: &mut String) {
             write!(out, ", {value}").unwrap();
         }
         writeln!(out, ");").unwrap();
-        if let Some(return_type) = syscall.return_type
-            && return_type != "never"
+        if let Some(return_type) = &syscall.return_type
+            && return_type != &Type::Never
         {
             if syscall
                 .return_type
-                .into_iter()
+                .iter()
                 .flat_map(split_syscall_ret)
                 .count()
                 == 1

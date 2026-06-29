@@ -1,6 +1,12 @@
+pub mod parse;
+
 use std::borrow::Cow;
-use std::iter::{Peekable, once};
-use std::str::Lines;
+use std::collections::HashSet;
+use std::iter::once;
+
+trait ContainsTypes<'a> {
+    fn fix_types(&mut self, interfaces: &HashSet<&'a str>, structs: &HashSet<&'a str>);
+}
 
 pub struct Drvli<'a> {
     pub interfaces: Vec<Interface<'a>>,
@@ -10,7 +16,7 @@ pub struct Drvli<'a> {
 
 pub struct Struct<'a> {
     pub name: &'a str,
-    pub members: Vec<(&'a str, &'a str)>,
+    pub members: Vec<(&'a str, Type<'a>)>,
 }
 
 pub struct Interface<'a> {
@@ -22,18 +28,18 @@ pub struct Interface<'a> {
 
 pub struct Method<'a> {
     pub name: &'a str,
-    pub args: Vec<(&'a str, &'a str)>,
-    pub return_type: Option<&'a str>,
+    pub args: Vec<(&'a str, Type<'a>)>,
+    pub return_type: Option<Type<'a>>,
 }
 
 pub struct Stream<'a> {
     pub name: &'a str,
-    pub type_: &'a str,
+    pub type_: Type<'a>,
 }
 
 pub enum InterfaceDetails<'a> {
     App {
-        args: Vec<(&'a str, &'a str)>,
+        args: Vec<(&'a str, Type<'a>)>,
         implements: Option<&'a str>,
     },
     Interface,
@@ -41,203 +47,194 @@ pub enum InterfaceDetails<'a> {
 
 pub struct Syscall<'a> {
     pub name: &'a str,
-    pub args: Vec<(&'a str, &'a str)>,
-    pub return_type: Option<&'a str>,
+    pub args: Vec<(&'a str, Type<'a>)>,
+    pub return_type: Option<Type<'a>>,
 }
 
-pub fn rust_arg_type(type_: &str, structs: &[Struct]) -> Cow<'static, str> {
-    match type_ {
-        "i8" => "i8".into(),
-        "i16" => "i16".into(),
-        "i32" => "i32".into(),
-        "i64" => "i64".into(),
-        "u8" => "u8".into(),
-        "u16" => "u16".into(),
-        "u32" => "u32".into(),
-        "u64" => "u64".into(),
-        "usize" => "usize".into(),
-        "text" => "&str".into(),
-        "bytes" => "&[u8]".into(),
-        _ if let Some(inner) = type_.strip_prefix("process_spawner ") => {
-            format!("Capability<{}Spawner>", camel_case(inner)).into()
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Type<'a> {
+    Array(Box<Type<'a>>),
+    Bytes,
+    ConstArray(Box<Type<'a>>),
+    ConstPtr(Box<Type<'a>>),
+    I8,
+    I16,
+    I32,
+    I64,
+    Isize,
+    Never,
+    Option(Box<Type<'a>>),
+    ProcessId,
+    ProcessSpawner(&'a str),
+    Ptr(Box<Type<'a>>),
+    SharedMemory,
+    Struct(&'a str),
+    Text,
+    Tuple(Vec<Type<'a>>),
+    TypedCapability(&'a str),
+    U8,
+    U16,
+    U32,
+    U64,
+    Unknown(&'a str),
+    UntypedCapability,
+    UntypedPointer,
+    Usize,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum RustTypeCtx {
+    Arg,
+    Member,
+    NormalRet,
+    GrantableRet,
+    SyscallArg,
+    SyscallKernelArg,
+    SyscallRet,
+    Stream,
+}
+
+impl Type<'_> {
+    pub fn rust(&self, ctx: RustTypeCtx) -> Cow<'static, str> {
+        use RustTypeCtx::*;
+        use Type::*;
+        match (self, ctx) {
+            (Array(inner) | ConstArray(inner), SyscallKernelArg) => {
+                format!("&mut [{}]", inner.rust(ctx)).into()
+            }
+            (Bytes, Arg) => "&[u8]".into(),
+            (Bytes, NormalRet | GrantableRet) => "Vec<u8>".into(),
+            (ConstPtr(inner), _) => format!("*const {}", inner.rust(ctx)).into(),
+            (I8, _) => "i8".into(),
+            (I16, _) => "i16".into(),
+            (I32, _) => "i32".into(),
+            (I64, _) => "i64".into(),
+            (Isize, _) => "isize".into(),
+            (Never, _) => "!".into(),
+            (Option(inner), _) => format!("Option<{}>", inner.rust(ctx)).into(),
+            (Ptr(inner), _) => format!("*mut {}", inner.rust(ctx)).into(),
+            (ProcessId, SyscallRet) => "ProcessId".into(),
+            (ProcessSpawner(name), _) => format!("Capability<{}Spawner>", camel_case(name)).into(),
+            (SharedMemory, _) => "Capability<SharedMemory>".into(),
+            (Struct(name), _) => camel_case(name).into(),
+            (TypedCapability(name), _) => format!("Capability<{}>", camel_case(name)).into(),
+            (Text, Arg) => "&str".into(),
+            (Text, NormalRet | GrantableRet) => "String".into(),
+            (U8, _) => "u8".into(),
+            (U16, _) => "u16".into(),
+            (U32, _) => "u32".into(),
+            (U64, _) => "u64".into(),
+            (UntypedCapability, _) => "RawCapability".into(),
+            (UntypedPointer, _) => "*mut ()".into(),
+            (Usize, _) => "usize".into(),
+            _ => unimplemented!("rust({self:?}, {ctx:?})"),
         }
-        _ if structs.iter().any(|struct_| struct_.name == type_) => camel_case(type_).into(),
-        _ => format!("Capability<{}>", camel_case(type_)).into(),
     }
-}
 
-pub fn rust_member_type(type_: &str, structs: &[Struct]) -> Cow<'static, str> {
-    match type_ {
-        "i8" => "i8".into(),
-        "i16" => "i16".into(),
-        "i32" => "i32".into(),
-        "i64" => "i64".into(),
-        "u8" => "u8".into(),
-        "u16" => "u16".into(),
-        "u32" => "u32".into(),
-        "u64" => "u64".into(),
-        "usize" => "usize".into(),
-        _ if let Some(inner) = type_.strip_prefix("process_spawner ") => {
-            format!("Capability<{}Spawner>", camel_case(inner)).into()
+    pub fn rust_borrow_or_copy(&self) -> &'static str {
+        match self {
+            Type::Text | Type::Bytes => "&",
+            _ => "",
         }
-        _ if structs.iter().any(|struct_| struct_.name == type_) => camel_case(type_).into(),
-        _ => format!("Capability<{}>", camel_case(type_)).into(),
     }
 }
 
-pub fn rust_normal_ret_type(type_: &str, structs: &[Struct<'_>]) -> Cow<'static, str> {
-    match type_ {
-        "i8" => "i8".into(),
-        "i16" => "i16".into(),
-        "i32" => "i32".into(),
-        "i64" => "i64".into(),
-        "u8" => "u8".into(),
-        "u16" => "u16".into(),
-        "u32" => "u32".into(),
-        "u64" => "u64".into(),
-        "usize" => "usize".into(),
-        "text" => "String".into(),
-        "bytes" => "Vec<u8>".into(),
-        "never" => "!".into(),
-        _ if structs.iter().any(|struct_| struct_.name == type_) => camel_case(type_).into(),
-        _ => format!("Capability<{}>", camel_case(type_)).into(),
+impl<'a> ContainsTypes<'a> for Drvli<'a> {
+    fn fix_types(&mut self, interfaces: &HashSet<&'a str>, structs: &HashSet<&'a str>) {
+        self.interfaces.fix_types(interfaces, structs);
+        self.structs.fix_types(interfaces, structs);
+        self.syscalls.fix_types(interfaces, structs);
     }
 }
 
-pub fn rust_grantable_ret_type(type_: &str, structs: &[Struct<'_>]) -> Cow<'static, str> {
-    match type_ {
-        "i8" => "i8".into(),
-        "i16" => "i16".into(),
-        "i32" => "i32".into(),
-        "i64" => "i64".into(),
-        "u8" => "u8".into(),
-        "u16" => "u16".into(),
-        "u32" => "u32".into(),
-        "u64" => "u64".into(),
-        "usize" => "usize".into(),
-        "text" => "String".into(),
-        "bytes" => "Vec<u8>".into(),
-        "never" => "!".into(),
-        _ if structs.iter().any(|struct_| struct_.name == type_) => camel_case(type_).into(),
-        _ => format!("Capability<{}>", camel_case(type_)).into(),
+impl<'a> ContainsTypes<'a> for Interface<'a> {
+    fn fix_types(&mut self, interfaces: &HashSet<&'a str>, structs: &HashSet<&'a str>) {
+        self.methods.fix_types(interfaces, structs);
+        self.streams.fix_types(interfaces, structs);
+        self.details.fix_types(interfaces, structs);
     }
 }
 
-pub fn rust_syscall_arg_type(type_: &str, structs: &[Struct<'_>]) -> Cow<'static, str> {
-    match type_ {
-        "i8" => "i8".into(),
-        "i16" => "i16".into(),
-        "i32" => "i32".into(),
-        "i64" => "i64".into(),
-        "capability" => "RawCapability".into(),
-        "option capability" => "Option<RawCapability>".into(),
-        "u8" => "u8".into(),
-        "u16" => "u16".into(),
-        "u32" => "u32".into(),
-        "u64" => "u64".into(),
-        "usize" => "usize".into(),
-        "const_ptr u8" => "*const u8".into(),
-        "ptr u8" => "*mut u8".into(),
-        // "text" => "String".into(),
-        // "bytes" => "Vec<u8>".into(),
-        _ if structs.iter().any(|struct_| struct_.name == type_) => camel_case(type_).into(),
-        _ => format!("Capability<{}>", camel_case(type_)).into(),
+impl<'a> ContainsTypes<'a> for Method<'a> {
+    fn fix_types(&mut self, interfaces: &HashSet<&'a str>, structs: &HashSet<&'a str>) {
+        for (_, type_) in &mut self.args {
+            type_.fix_types(interfaces, structs);
+        }
+        if let Some(type_) = &mut self.return_type {
+            type_.fix_types(interfaces, structs);
+        }
     }
 }
 
-pub fn rust_syscall_kernel_arg_type(type_: &str, structs: &[Struct<'_>]) -> Cow<'static, str> {
-    match type_ {
-        "i8" => "i8".into(),
-        "i16" => "i16".into(),
-        "i32" => "i32".into(),
-        "i64" => "i64".into(),
-        "capability" => "RawCapability".into(),
-        "option capability" => "Option<RawCapability>".into(),
-        "u8" => "u8".into(),
-        "u16" => "u16".into(),
-        "u32" => "u32".into(),
-        "u64" => "u64".into(),
-        "usize" => "usize".into(),
-        "const_array u8" => "&mut [u8]".into(),
-        "array u8" => "&mut [u8]".into(),
-        // "ptr u8" => "*mut u8".into(),
-        // "text" => "String".into(),
-        // "bytes" => "Vec<u8>".into(),
-        _ if structs.iter().any(|struct_| struct_.name == type_) => camel_case(type_).into(),
-        _ => format!("Capability<{}>", camel_case(type_)).into(),
+impl<'a> ContainsTypes<'a> for Stream<'a> {
+    fn fix_types(&mut self, interfaces: &HashSet<&'a str>, structs: &HashSet<&'a str>) {
+        self.type_.fix_types(interfaces, structs);
     }
 }
 
-pub fn rust_syscall_ret_type(type_: &str, structs: &[Struct<'_>]) -> Cow<'static, str> {
-    match type_ {
-        "i8" => "i8".into(),
-        "i16" => "i16".into(),
-        "i32" => "i32".into(),
-        "i64" => "i64".into(),
-        "never" => "!".into(),
-        "const_ptr u8" => "*const u8".into(),
-        "ptr" => "*mut ()".into(),
-        "ptr u8" => "*mut u8".into(),
-        "ptr u8, u64" => "(*mut u8, u64)".into(),
-        "ptr u8, shared_memory" => "(*mut u8, Capability<SharedMemory>)".into(),
-        "ptr, u64" => "(*mut (), u64)".into(),
-        "capability" => "RawCapability".into(),
-        "option capability" => "Option<RawCapability>".into(),
-        "u8" => "u8".into(),
-        "u16" => "u16".into(),
-        "u32" => "u32".into(),
-        "u64" => "u64".into(),
-        "usize" => "usize".into(),
-        "pid" => "ProcessId".into(),
-        "option pid" => "Option<ProcessId>".into(),
-        // "text" => "String".into(),
-        // "bytes" => "Vec<u8>".into(),
-        _ if structs.iter().any(|struct_| struct_.name == type_) => camel_case(type_).into(),
-        _ => format!("Capability<{}>", camel_case(type_)).into(),
+impl<'a> ContainsTypes<'a> for InterfaceDetails<'a> {
+    fn fix_types(&mut self, interfaces: &HashSet<&'a str>, structs: &HashSet<&'a str>) {
+        match self {
+            InterfaceDetails::App { args, .. } => {
+                for (_, type_) in args {
+                    type_.fix_types(interfaces, structs);
+                }
+            }
+            InterfaceDetails::Interface => {}
+        }
     }
 }
 
-pub fn is_capability(type_: &str, structs: &[Struct<'_>]) -> bool {
-    match type_ {
-        "i8" => false,
-        "i16" => false,
-        "i32" => false,
-        "i64" => false,
-        "u8" => false,
-        "u16" => false,
-        "u32" => false,
-        "u64" => false,
-        "usize" => false,
-        "text" => false,
-        "bytes" => false,
-        _ if structs.iter().any(|struct_| struct_.name == type_) => false,
-        _ => true,
+impl<'a> ContainsTypes<'a> for Struct<'a> {
+    fn fix_types(&mut self, interfaces: &HashSet<&'a str>, structs: &HashSet<&'a str>) {
+        for (_, type_) in &mut self.members {
+            type_.fix_types(interfaces, structs);
+        }
     }
 }
 
-pub fn rust_stream_type(type_: &str, structs: &[Struct]) -> Cow<'static, str> {
-    match type_ {
-        "i8" => "i8".into(),
-        "i16" => "i16".into(),
-        "i32" => "i32".into(),
-        "i64" => "i64".into(),
-        "u8" => "u8".into(),
-        "u16" => "u16".into(),
-        "u32" => "u32".into(),
-        "u64" => "u64".into(),
-        "usize" => "usize".into(),
-        "text" => unimplemented!(),
-        "bytes" => unimplemented!(),
-        _ if structs.iter().any(|struct_| struct_.name == type_) => camel_case(type_).into(),
-        _ => format!("Capability<{}>", camel_case(type_)).into(),
+impl<'a> ContainsTypes<'a> for Syscall<'a> {
+    fn fix_types(&mut self, interfaces: &HashSet<&'a str>, structs: &HashSet<&'a str>) {
+        for (_, type_) in &mut self.args {
+            type_.fix_types(interfaces, structs);
+        }
+        if let Some(type_) = &mut self.return_type {
+            type_.fix_types(interfaces, structs);
+        }
     }
 }
 
-pub fn rust_borrow_or_copy(type_: &str) -> &'static str {
-    match type_ {
-        "text" => "&",
-        "bytes" => "&",
-        _ => "",
+impl<'a> ContainsTypes<'a> for Type<'a> {
+    fn fix_types(&mut self, interfaces: &HashSet<&'a str>, structs: &HashSet<&'a str>) {
+        use Type::*;
+        match self {
+            Bytes | I8 | I16 | I32 | I64 | Isize | Never | ProcessId | ProcessSpawner(_)
+            | SharedMemory | Struct(_) | Text | TypedCapability(_) | U8 | U16 | U32 | U64
+            | UntypedCapability | UntypedPointer | Usize => {}
+            Array(t) | ConstArray(t) | ConstPtr(t) | Option(t) | Ptr(t) => {
+                t.fix_types(interfaces, structs)
+            }
+            Tuple(ts) => {
+                ts.fix_types(interfaces, structs);
+            }
+            Unknown(name) => {
+                if structs.contains(name) {
+                    *self = Struct(name);
+                } else if interfaces.contains(name) {
+                    *self = TypedCapability(name);
+                } else {
+                    panic!("unknown type {name:?}");
+                }
+            }
+        }
+    }
+}
+
+impl<'a, T: ContainsTypes<'a>> ContainsTypes<'a> for Vec<T> {
+    fn fix_types(&mut self, interfaces: &HashSet<&'a str>, structs: &HashSet<&'a str>) {
+        for x in self {
+            x.fix_types(interfaces, structs);
+        }
     }
 }
 
@@ -246,108 +243,6 @@ pub fn rust_escape_name(name: &str) -> &str {
         "type" => "type_",
         "yield" => "yield_",
         _ => name,
-    }
-}
-
-pub fn parse_drvli(text: &str) -> Drvli<'_> {
-    let mut lines = text.lines().peekable();
-    let mut structs = Vec::new();
-    let mut interfaces = Vec::new();
-    let mut syscalls = Vec::new();
-    while let Some(line) = lines.next() {
-        if let Some(name) = line.strip_prefix("struct ") {
-            let mut members = Vec::new();
-            while let Some(line) = lines.peek()
-                && let Some(line) = line.strip_prefix("    ")
-            {
-                members.push(line.split_once(' ').unwrap());
-                lines.next();
-            }
-            structs.push(Struct { name, members });
-        } else if let Some(line) = line.strip_prefix("app ") {
-            let name_len = line.find(['(', ' ']).unwrap_or(line.len());
-            let name = &line[..name_len];
-            let line = &line[name_len..];
-            let (args, line) = if let Some(line) = line.strip_prefix("(") {
-                let (args, line) = line.split_once(')').unwrap();
-                let args = args
-                    .split(", ")
-                    .filter(|arg| !arg.is_empty())
-                    .map(|arg| arg.split_once(' ').unwrap())
-                    .collect();
-                (args, line)
-            } else {
-                (Vec::new(), line)
-            };
-            let line = line.trim();
-            let implements = line.strip_prefix("implements ");
-            let interface =
-                parse_interface(name, &mut lines, InterfaceDetails::App { args, implements });
-            interfaces.push(interface);
-        } else if let Some(name) = line.strip_prefix("interface ") {
-            let interface = parse_interface(name, &mut lines, InterfaceDetails::Interface);
-            interfaces.push(interface);
-        } else if let Some(line) = line.strip_prefix("syscall ") {
-            syscalls.push(parse_syscall(line));
-        }
-    }
-    Drvli {
-        interfaces,
-        structs,
-        syscalls,
-    }
-}
-
-pub fn parse_interface<'a>(
-    name: &'a str,
-    lines: &mut Peekable<Lines<'a>>,
-    details: InterfaceDetails<'a>,
-) -> Interface<'a> {
-    let mut methods = Vec::new();
-    let mut streams = Vec::new();
-    while let Some(line) = lines.next()
-        && let Some(line) = line.strip_prefix("    ")
-    {
-        if let Some(line) = line.strip_prefix("func ") {
-            let (name, line) = line.split_once('(').unwrap();
-            let (method_args, line) = line.split_once(")").unwrap();
-            let args: Vec<_> = method_args
-                .split(", ")
-                .filter(|s| !s.is_empty())
-                .map(|arg| arg.split_once(' ').unwrap())
-                .collect();
-            let return_type = line.strip_prefix(" ");
-            methods.push(Method {
-                name,
-                args,
-                return_type,
-            });
-        } else if let Some(line) = line.strip_prefix("stream ") {
-            let (name, type_) = line.split_once(' ').unwrap();
-            streams.push(Stream { name, type_ });
-        }
-    }
-    Interface {
-        name,
-        methods,
-        streams,
-        details,
-    }
-}
-
-fn parse_syscall(line: &str) -> Syscall<'_> {
-    let (name, line) = line.split_once('(').unwrap();
-    let (args, return_type) = line.split_once(')').unwrap();
-    let args = args
-        .split(", ")
-        .filter(|arg| !arg.is_empty())
-        .map(|arg| arg.split_once(' ').unwrap())
-        .collect();
-    let return_type = return_type.strip_prefix(' ');
-    Syscall {
-        name,
-        args,
-        return_type,
     }
 }
 
@@ -360,25 +255,26 @@ pub fn camel_case(name: &str) -> String {
     camel
 }
 
-pub fn split_syscall_arg(type_: &str) -> impl Iterator<Item = (&'static str, &str)> {
+pub fn split_syscall_arg<'a>(type_: &Type<'a>) -> impl Iterator<Item = (&'static str, Type<'a>)> {
     match type_ {
-        "array u8" => Box::new([("_ptr", "ptr u8"), ("_size", "usize")].into_iter())
-            as Box<dyn Iterator<Item = (&'static str, &str)>>,
-        "const_array u8" => Box::new([("_ptr", "const_ptr u8"), ("_size", "usize")].into_iter()),
-        _ => Box::new(once(("", type_))),
+        Type::Array(inner) => {
+            Box::new([("_ptr", Type::Ptr(inner.clone())), ("_size", Type::Usize)].into_iter())
+                as Box<dyn Iterator<Item = (&'static str, Type<'a>)>>
+        }
+        Type::ConstArray(inner) => Box::new(
+            [
+                ("_ptr", Type::ConstPtr(inner.clone())),
+                ("_size", Type::Usize),
+            ]
+            .into_iter(),
+        ),
+        _ => Box::new(once(("", type_.clone()))),
     }
 }
 
-pub fn split_syscall_ret(type_: &str) -> impl Iterator<Item = &str> {
+pub fn split_syscall_ret<'a, 'b>(type_: &'b Type<'a>) -> impl Iterator<Item = &'b Type<'a>> {
     match type_ {
-        "array u8" => Box::new(["ptr u8", "usize"].into_iter()) as Box<dyn Iterator<Item = &str>>,
-        "const_array u8" => Box::new(["const_ptr u8", "usize"].into_iter()),
-        "ptr u8, usize" => Box::new(["ptr u8", "usize"].into_iter()),
-        "ptr u8, shared_memory" => Box::new(["ptr u8", "shared_memory"].into_iter()),
-        "ptr, usize" => Box::new(["ptr", "usize"].into_iter()),
-        "option capability, usize, usize, option pid" => {
-            Box::new(["option capability", "usize", "usize", "option pid"].into_iter())
-        }
-        _ => Box::new(once(type_)),
+        Type::Tuple(inner) => inner.as_slice().iter(),
+        _ => core::slice::from_ref(type_).iter(),
     }
 }

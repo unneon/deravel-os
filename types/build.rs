@@ -1,6 +1,6 @@
-use deravel_codegen::{
-    Interface, InterfaceDetails, camel_case, parse_drvli, rust_escape_name, rust_member_type,
-};
+use deravel_codegen::RustTypeCtx::*;
+use deravel_codegen::parse::parse_drvli;
+use deravel_codegen::{Interface, InterfaceDetails, camel_case, rust_escape_name};
 use std::fmt::Write;
 
 fn main() {
@@ -20,7 +20,7 @@ fn main() {
         writeln!(&mut output, "pub struct {name_camel} {{").unwrap();
         for (member_name, member_type) in &struct_.members {
             let member_name = rust_escape_name(member_name);
-            let member_type = rust_member_type(member_type, &drvli.structs);
+            let member_type = member_type.rust(Member);
             writeln!(&mut output, "    pub {member_name}: {member_type},").unwrap();
         }
         writeln!(&mut output, "}}").unwrap();
@@ -42,7 +42,7 @@ fn main() {
             writeln!(&mut output, "#[derive(Debug, Deserialize)]").unwrap();
             writeln!(&mut output, "pub struct {name_camel}Args {{").unwrap();
             for (arg_name, arg_type) in args {
-                let arg_type = rust_member_type(arg_type, &drvli.structs);
+                let arg_type = arg_type.rust(Member);
                 writeln!(&mut output, "    pub {arg_name}: {arg_type},").unwrap();
             }
             writeln!(&mut output, "}}").unwrap();

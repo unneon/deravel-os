@@ -1,7 +1,7 @@
+use deravel_codegen::RustTypeCtx::*;
+use deravel_codegen::parse::parse_drvli;
 use deravel_codegen::{
-    Drvli, Interface, InterfaceDetails, camel_case, parse_drvli, rust_arg_type,
-    rust_borrow_or_copy, rust_escape_name, rust_grantable_ret_type, rust_normal_ret_type,
-    rust_stream_type, rust_syscall_arg_type, rust_syscall_ret_type, split_syscall_arg,
+    Drvli, Interface, InterfaceDetails, camel_case, rust_escape_name, split_syscall_arg,
     split_syscall_ret,
 };
 use std::fmt::Write;
@@ -13,13 +13,13 @@ fn main() {
     let drvli = parse_drvli(&drvli_text);
     let mut out = String::new();
     for interface in &drvli.interfaces {
-        generate_client_trait(interface, &drvli, &mut out);
-        generate_client_impl(interface, &drvli, &mut out);
-        generate_server_trait(interface, &drvli, &mut out);
-        generate_server_handler_impl(interface, &drvli, &mut out);
+        generate_client_trait(interface, &mut out);
+        generate_client_impl(interface, &mut out);
+        generate_server_trait(interface, &mut out);
+        generate_server_handler_impl(interface, &mut out);
         if let InterfaceDetails::App { .. } = interface.details {
-            generate_spawner_trait(interface, &drvli, &mut out);
-            generate_spawner_impl(interface, &drvli, &mut out);
+            generate_spawner_trait(interface, &mut out);
+            generate_spawner_impl(interface, &mut out);
         }
     }
     generate_syscalls(&drvli, &mut out);
@@ -28,7 +28,7 @@ fn main() {
     println!("cargo::rerun-if-changed=../interfaces.drvli");
 }
 
-fn generate_client_impl(interface: &Interface, drvli: &Drvli, out: &mut String) {
+fn generate_client_impl(interface: &Interface, out: &mut String) {
     let name_camel = camel_case(interface.name);
     writeln!(
         out,
@@ -39,12 +39,12 @@ fn generate_client_impl(interface: &Interface, drvli: &Drvli, out: &mut String) 
         let name = &method.name;
         write!(out, "    fn {name}(self").unwrap();
         for (arg_name, arg_type) in &method.args {
-            let arg_type = rust_arg_type(arg_type, &drvli.structs);
+            let arg_type = arg_type.rust(Arg);
             write!(out, ", {arg_name}: {arg_type}").unwrap();
         }
         write!(out, ")").unwrap();
         if let Some(return_type) = &method.return_type {
-            let return_type = rust_normal_ret_type(return_type, &drvli.structs);
+            let return_type = return_type.rust(NormalRet);
             write!(out, " -> {return_type}").unwrap();
         }
         writeln!(out, " {{").unwrap();
@@ -64,7 +64,7 @@ fn generate_client_impl(interface: &Interface, drvli: &Drvli, out: &mut String) 
     }
     for (stream_id, stream) in interface.streams.iter().enumerate() {
         let name = &stream.name;
-        let type_ = camel_case(stream.type_);
+        let type_ = stream.type_.rust(Stream);
         writeln!(
             out,
             "    fn {name}(self) -> &'static RingBuffer<{type_}> {{"
@@ -86,26 +86,26 @@ fn generate_client_impl(interface: &Interface, drvli: &Drvli, out: &mut String) 
     writeln!(out, "}}").unwrap();
 }
 
-fn generate_client_trait(interface: &Interface, drvli: &Drvli, out: &mut String) {
+fn generate_client_trait(interface: &Interface, out: &mut String) {
     let name_camel = camel_case(interface.name);
     writeln!(out, "pub trait {name_camel}Client {{").unwrap();
     for method in &interface.methods {
         let method_name = &method.name;
         write!(out, "    fn {method_name}(self").unwrap();
         for (arg_name, arg_type) in &method.args {
-            let arg_type = rust_arg_type(arg_type, &drvli.structs);
+            let arg_type = arg_type.rust(Arg);
             write!(out, ", {arg_name}: {arg_type}").unwrap();
         }
         write!(out, ")").unwrap();
         if let Some(return_type) = &method.return_type {
-            let return_type = rust_normal_ret_type(return_type, &drvli.structs);
+            let return_type = return_type.rust(NormalRet);
             write!(out, " -> {return_type}").unwrap();
         }
         writeln!(out, ";").unwrap();
     }
     for stream in &interface.streams {
         let stream_name = &stream.name;
-        let stream_type = rust_stream_type(stream.type_, &drvli.structs);
+        let stream_type = stream.type_.rust(Stream);
         writeln!(
             out,
             "    fn {stream_name}(self) -> &'static RingBuffer<{stream_type}>;"
@@ -115,7 +115,7 @@ fn generate_client_trait(interface: &Interface, drvli: &Drvli, out: &mut String)
     writeln!(out, "}}").unwrap();
 }
 
-fn generate_server_trait(interface: &Interface, drvli: &Drvli, out: &mut String) {
+fn generate_server_trait(interface: &Interface, out: &mut String) {
     let name_camel = camel_case(interface.name);
     writeln!(out, "pub trait {name_camel}Server<O = ()> {{").unwrap();
     for method in &interface.methods {
@@ -126,12 +126,12 @@ fn generate_server_trait(interface: &Interface, drvli: &Drvli, out: &mut String)
         )
         .unwrap();
         for (arg_name, arg_type) in &method.args {
-            let arg_type = rust_arg_type(arg_type, &drvli.structs);
+            let arg_type = arg_type.rust(Arg);
             write!(out, ", {arg_name}: {arg_type}").unwrap();
         }
         write!(out, ")").unwrap();
         if let Some(return_type) = &method.return_type {
-            let return_type = rust_grantable_ret_type(return_type, &drvli.structs);
+            let return_type = return_type.rust(GrantableRet);
             write!(out, " -> {return_type}").unwrap();
         }
         writeln!(out, ";").unwrap();
@@ -147,7 +147,7 @@ fn generate_server_trait(interface: &Interface, drvli: &Drvli, out: &mut String)
     writeln!(out, "}}").unwrap();
 }
 
-fn generate_server_handler_impl(interface: &Interface, drvli: &Drvli, out: &mut String) {
+fn generate_server_handler_impl(interface: &Interface, out: &mut String) {
     let name_snake = &interface.name;
     let name_camel = camel_case(name_snake);
     writeln!(
@@ -170,7 +170,7 @@ fn generate_server_handler_impl(interface: &Interface, drvli: &Drvli, out: &mut 
         }
         write!(out, "): (").unwrap();
         for (_, arg_type) in &method.args {
-            let arg_type = rust_normal_ret_type(arg_type, &drvli.structs);
+            let arg_type = arg_type.rust(NormalRet);
             write!(out, "{arg_type},").unwrap();
         }
         writeln!(out, ") = serde_json::from_slice(_args).unwrap();").unwrap();
@@ -180,7 +180,7 @@ fn generate_server_handler_impl(interface: &Interface, drvli: &Drvli, out: &mut 
         )
         .unwrap();
         for (arg_name, arg_type) in &method.args {
-            let borrow = rust_borrow_or_copy(arg_type);
+            let borrow = arg_type.rust_borrow_or_copy();
             write!(out, "{borrow}{arg_name},").unwrap();
         }
         writeln!(out, ");").unwrap();
@@ -224,24 +224,24 @@ fn generate_syscalls(drvli: &Drvli, out: &mut String) {
         for (arg_name, arg_suffix, arg_type) in syscall.args.iter().flat_map(|(name, type_)| {
             split_syscall_arg(type_).map(move |(suffix, type_)| (name, suffix, type_))
         }) {
-            let arg_type = rust_syscall_arg_type(arg_type, &drvli.structs);
+            let arg_type = arg_type.rust(SyscallArg);
             write!(out, "{arg_name}{arg_suffix}: {arg_type}, ").unwrap();
         }
         write!(out, ")").unwrap();
-        if let Some(return_type) = syscall.return_type {
+        if let Some(return_type) = &syscall.return_type {
             if syscall
                 .return_type
-                .into_iter()
+                .iter()
                 .flat_map(split_syscall_ret)
                 .count()
                 == 1
             {
-                let return_type = rust_syscall_ret_type(return_type, &drvli.structs);
+                let return_type = return_type.rust(SyscallRet);
                 write!(out, " -> {return_type}").unwrap();
             } else {
                 write!(out, " -> (").unwrap();
                 for ret_type in split_syscall_ret(return_type) {
-                    let ret_type = rust_syscall_ret_type(ret_type, &drvli.structs);
+                    let ret_type = ret_type.rust(SyscallRet);
                     write!(out, "{ret_type}, ").unwrap();
                 }
                 writeln!(out, "            )").unwrap();
@@ -250,7 +250,7 @@ fn generate_syscalls(drvli: &Drvli, out: &mut String) {
         writeln!(out, " {{").unwrap();
         for (ret_index, _) in syscall
             .return_type
-            .into_iter()
+            .iter()
             .flat_map(split_syscall_ret)
             .enumerate()
         {
@@ -276,7 +276,7 @@ fn generate_syscalls(drvli: &Drvli, out: &mut String) {
         writeln!(out, "                in(\"a6\") {syscall_number},").unwrap();
         for (ret_index, _) in syscall
             .return_type
-            .into_iter()
+            .iter()
             .flat_map(split_syscall_ret)
             .enumerate()
         {
@@ -290,7 +290,7 @@ fn generate_syscalls(drvli: &Drvli, out: &mut String) {
         if syscall.return_type.is_none() {
         } else if syscall
             .return_type
-            .into_iter()
+            .iter()
             .flat_map(split_syscall_ret)
             .count()
             == 1
@@ -300,7 +300,7 @@ fn generate_syscalls(drvli: &Drvli, out: &mut String) {
             write!(out, "            (").unwrap();
             for (ret_index, _) in syscall
                 .return_type
-                .into_iter()
+                .iter()
                 .flat_map(split_syscall_ret)
                 .enumerate()
             {
@@ -314,7 +314,7 @@ fn generate_syscalls(drvli: &Drvli, out: &mut String) {
     writeln!(out, "}}").unwrap();
 }
 
-fn generate_spawner_impl(interface: &Interface, drvli: &Drvli, out: &mut String) {
+fn generate_spawner_impl(interface: &Interface, out: &mut String) {
     let name_camel = camel_case(interface.name);
     writeln!(
         out,
@@ -326,7 +326,7 @@ fn generate_spawner_impl(interface: &Interface, drvli: &Drvli, out: &mut String)
     };
     write!(out, "    fn spawn(self").unwrap();
     for (arg_name, arg_type) in args {
-        let arg_type = rust_arg_type(arg_type, &drvli.structs);
+        let arg_type = arg_type.rust(Arg);
         write!(out, ", {arg_name}: {arg_type}").unwrap();
     }
     write!(out, ")").unwrap();
@@ -353,7 +353,7 @@ fn generate_spawner_impl(interface: &Interface, drvli: &Drvli, out: &mut String)
     writeln!(out, "}}").unwrap();
 }
 
-fn generate_spawner_trait(interface: &Interface, drvli: &Drvli, out: &mut String) {
+fn generate_spawner_trait(interface: &Interface, out: &mut String) {
     let InterfaceDetails::App { args, implements } = &interface.details else {
         unreachable!()
     };
@@ -361,7 +361,7 @@ fn generate_spawner_trait(interface: &Interface, drvli: &Drvli, out: &mut String
     writeln!(out, "pub trait {name_camel}SpawnerClient {{").unwrap();
     write!(out, "    fn spawn(self").unwrap();
     for (arg_name, arg_type) in args {
-        let arg_type = rust_arg_type(arg_type, &drvli.structs);
+        let arg_type = arg_type.rust(Arg);
         write!(out, ", {arg_name}: {arg_type}").unwrap();
     }
     write!(out, ")").unwrap();
