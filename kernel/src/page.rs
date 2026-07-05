@@ -8,11 +8,13 @@ pub struct PageAligned<T>(pub T);
 #[derive(Clone, Copy)]
 pub struct PageFlags(usize);
 
+#[repr(align(4096))]
 pub struct PageTable<const LEVEL: usize>(
     pub [PageTableEntry<LEVEL>; PAGE_SIZE / size_of::<usize>()],
 );
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[repr(transparent)]
 pub struct PageTableEntry<const LEVEL: usize>(pub usize);
 
 const PAGE_V: usize = 1 << 0;
@@ -109,7 +111,9 @@ pub fn initialize_memory_mapping() {
     map_kernel_identity_mapping(table);
     map_kernel_memory(table);
     let _ = table;
+    riscv::asm::sfence_vma_all();
     unsafe { riscv::register::satp::write(satp(&raw mut INITIAL_PAGE_TABLE)) }
+    riscv::asm::sfence_vma_all();
 }
 
 pub fn map_kernel_identity_mapping(page_table: &mut PageTable<2>) {

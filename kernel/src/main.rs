@@ -75,6 +75,7 @@ fn main(_hart_id: u64, device_tree_ptr: *const u8) -> ! {
     let device_tree = unsafe { Fdt::from_ptr(device_tree_ptr) }.unwrap();
     initialize_timebase_frequency(&device_tree);
     initialize_log();
+    initialize_hart_stack();
     initialize_trap_handler();
     initialize_memory_mapping();
     log_sbi_metadata();
@@ -84,7 +85,6 @@ fn main(_hart_id: u64, device_tree_ptr: *const u8) -> ! {
     let (virtio_blk, virtio_net, virtio_gpu, virtio_keyboard, virtio_mouse) =
         initialize_all_pci(&device_tree);
     initialize_plic(&device_tree);
-    initialize_hart_stack();
     enable_interrupts();
 
     let fs_tar = reserve_process::<TarFs>(elf!("CARGO_BIN_FILE_DERAVEL_FILESYSTEM_TAR"));
