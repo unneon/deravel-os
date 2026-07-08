@@ -106,7 +106,6 @@ impl<const LEVEL: usize> Default for PageTable<LEVEL> {
 }
 
 pub fn initialize_memory_mapping() {
-    #[allow(clippy::deref_addrof)]
     let table = unsafe { &mut *&raw mut INITIAL_PAGE_TABLE };
     map_identity_mapping(table);
     map_kernel_image(table);

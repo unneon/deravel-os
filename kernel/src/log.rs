@@ -1,6 +1,5 @@
 use crate::device_tree::timebase_frequency;
 use crate::sbi;
-use alloc::boxed::Box;
 use alloc::format;
 use deravel_types::ProcessId;
 use log::{Level, LevelFilter, Metadata, Record};
@@ -13,6 +12,11 @@ struct Logger {
 struct PrettyLogLevel(Level);
 
 struct PrettyModulePath<'a>(Option<&'a str>);
+
+static mut LOGGER: Logger = Logger {
+    start_time: 0,
+    timebase_frequency: 0.,
+};
 
 impl log::Log for Logger {
     fn enabled(&self, metadata: &Metadata) -> bool {
@@ -80,11 +84,12 @@ impl core::fmt::Display for PrettyModulePath<'_> {
 }
 
 pub fn initialize_log() {
-    let logger = Logger {
-        start_time: riscv::register::time::read64(),
-        timebase_frequency: timebase_frequency(),
-    };
-    log::set_logger(Box::leak(Box::new(logger))).unwrap();
+    // Log is initialized before the heap, so this is kind of the best option. Later one, I might
+    // add some typestate tokens that can ensure each subsystem gets initialized only once.
+    let logger = unsafe { &mut *&raw mut LOGGER };
+    logger.start_time = riscv::register::time::read64();
+    logger.timebase_frequency = timebase_frequency();
+    log::set_logger(logger).unwrap();
     log::set_max_level(LevelFilter::Debug);
 }
 
