@@ -15,79 +15,50 @@ pub struct Page(pub [u8; 4096]);
 #[repr(C, align(4096))]
 pub struct PageAligned<T>(pub T);
 
-static mut INITIAL_PAGE_TABLE: TopPageTable = PageTable::new();
-
-unsafe extern "C" {
-    static text_start: u8;
-    static text_end: u8;
-    static rodata_start: u8;
-    static rodata_end: u8;
-    static readwrite_start: u8;
-    static readwrite_end: u8;
-}
+static mut KERNEL_PAGE_TABLE: TopPageTable = PageTable::new();
 
 pub fn initialize_memory_mapping() {
-    let table = unsafe { &mut *&raw mut INITIAL_PAGE_TABLE };
+    let table = unsafe { &mut *&raw mut KERNEL_PAGE_TABLE };
     map_identity_mapping(table);
     map_kernel_image(table);
-    let _ = table;
 
     // No need for SFENCE.VMA when changing from Bare mode (RISC-V Privileged 12.2.1).
     debug_assert_eq!(riscv::register::satp::read().mode(), Mode::Bare);
 
-    unsafe { riscv::register::satp::write(satp(&raw mut INITIAL_PAGE_TABLE)) }
+    unsafe { riscv::register::satp::write(satp(table)) }
 }
 
-pub fn map_identity_mapping(page_table: &mut TopPageTable) {
-    let pages_per_level = page_table.0.len();
+pub fn map_identity_mapping(table: &mut TopPageTable) {
+    let pages_per_level = table.0.len();
     let total_pages = pages_per_level.pow(3);
     let total_identity_mapped = total_pages / 2;
     let virtual_addr = total_identity_mapped * PAGE_SIZE;
-    map_pages(
-        page_table,
-        virtual_addr,
-        0,
-        PageFlags::readwrite(),
-        total_identity_mapped * PAGE_SIZE,
-    );
+    let size = total_identity_mapped * PAGE_SIZE;
+    map_pages(table, virtual_addr, 0, PageFlags::readwrite(), size);
 }
 
-pub fn map_kernel_image(page_table: &mut TopPageTable) {
-    map_kernel_image_section(
-        page_table,
-        &raw const text_start,
-        &raw const text_end,
-        PageFlags::executable(),
-    );
-    map_kernel_image_section(
-        page_table,
-        &raw const rodata_start,
-        &raw const rodata_end,
-        PageFlags::readonly(),
-    );
-    map_kernel_image_section(
-        page_table,
-        &raw const readwrite_start,
-        &raw const readwrite_end,
-        PageFlags::readwrite(),
-    )
+pub fn map_kernel_image(table: &mut TopPageTable) {
+    unsafe extern "C" {
+        static text_start: u8;
+        static text_end: u8;
+        static rodata_start: u8;
+        static rodata_end: u8;
+        static readwrite_start: u8;
+        static readwrite_end: u8;
+    }
+    let text = &raw const text_start..&raw const text_end;
+    let rodata = &raw const rodata_start..&raw const rodata_end;
+    let readwrite = &raw const readwrite_start..&raw const readwrite_end;
+    map_kernel_image_section(table, text, PageFlags::executable());
+    map_kernel_image_section(table, rodata, PageFlags::readonly());
+    map_kernel_image_section(table, readwrite, PageFlags::readwrite());
 }
 
-fn map_kernel_image_section(
-    page_table: &mut TopPageTable,
-    start: *const u8,
-    end: *const u8,
-    flags: PageFlags,
-) {
-    let start = start as usize;
+fn map_kernel_image_section(table: &mut TopPageTable, range: Range<*const u8>, flags: PageFlags) {
+    let start = range.start as usize;
+    let size = (range.end as usize - start).next_multiple_of(PAGE_SIZE);
     assert!(start.is_multiple_of(PAGE_SIZE));
-    map_pages(
-        page_table,
-        start,
-        start,
-        flags,
-        (end as usize - start).next_multiple_of(PAGE_SIZE),
-    );
+    map_pages(table, start, start, flags, size);
 }
 
 pub fn map_pages(
