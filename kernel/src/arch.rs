@@ -64,9 +64,11 @@ pub fn initialize_trap_handler() {
 }
 
 pub fn switch_to_userspace_full(mut next: MutexGuard<Process>) -> ! {
-    riscv::asm::sfence_vma_all();
     unsafe { riscv::register::satp::write(satp(next.page_table)) };
+
+    // SFENCE.VMA is required after SATP write. (RISC-V Privileged 12.2.1).
     riscv::asm::sfence_vma_all();
+
     unsafe { riscv::register::sepc::write(next.pc) };
     let mut status = riscv::register::sstatus::read();
     status.set_spie(true);

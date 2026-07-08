@@ -108,15 +108,17 @@ impl<const LEVEL: usize> Default for PageTable<LEVEL> {
 pub fn initialize_memory_mapping() {
     #[allow(clippy::deref_addrof)]
     let table = unsafe { &mut *&raw mut INITIAL_PAGE_TABLE };
-    map_kernel_identity_mapping(table);
-    map_kernel_memory(table);
+    map_identity_mapping(table);
+    map_kernel_image(table);
     let _ = table;
-    riscv::asm::sfence_vma_all();
+
+    // No need for SFENCE.VMA when changing from Bare mode (RISC-V Privileged 12.2.1).
+    debug_assert_eq!(riscv::register::satp::read().mode(), Mode::Bare);
+
     unsafe { riscv::register::satp::write(satp(&raw mut INITIAL_PAGE_TABLE)) }
-    riscv::asm::sfence_vma_all();
 }
 
-pub fn map_kernel_identity_mapping(page_table: &mut PageTable<2>) {
+pub fn map_identity_mapping(page_table: &mut PageTable<2>) {
     let pages_per_level = page_table.0.len();
     let total_pages = pages_per_level.pow(3);
     let total_identity_mapped = total_pages / 2;
@@ -130,20 +132,20 @@ pub fn map_kernel_identity_mapping(page_table: &mut PageTable<2>) {
     );
 }
 
-pub fn map_kernel_memory(page_table: &mut PageTable<2>) {
-    map_kernel_memory_section(
+pub fn map_kernel_image(page_table: &mut PageTable<2>) {
+    map_kernel_image_section(
         page_table,
         &raw const text_start,
         &raw const text_end,
         PageFlags::executable(),
     );
-    map_kernel_memory_section(
+    map_kernel_image_section(
         page_table,
         &raw const rodata_start,
         &raw const rodata_end,
         PageFlags::readonly(),
     );
-    map_kernel_memory_section(
+    map_kernel_image_section(
         page_table,
         &raw const readwrite_start,
         &raw const readwrite_end,
@@ -151,7 +153,7 @@ pub fn map_kernel_memory(page_table: &mut PageTable<2>) {
     )
 }
 
-fn map_kernel_memory_section(
+fn map_kernel_image_section(
     page_table: &mut PageTable<2>,
     start: *const u8,
     end: *const u8,

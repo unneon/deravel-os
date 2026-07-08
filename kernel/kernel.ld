@@ -1,8 +1,8 @@
 ENTRY(boot)
 
 SECTIONS {
-    . = 0x80050000;
-    kernel_start = .;
+    . = 0x80200000;
+    image_start = .;
 
     .text :{
         text_start = .;
@@ -21,12 +21,10 @@ SECTIONS {
     readwrite_start = .;
 
     .data :{
-        data_start = .;
         *(.data .data.*);
-        data_end = .;
     }
 
-    .bss : ALIGN(4) {
+    .bss :{
         bss_start = .;
         *(.bss .bss.* .sbss .sbss.*);
         bss_end = .;
@@ -42,5 +40,5 @@ SECTIONS {
     heap_end = .;
 
     readwrite_end = .;
-    kernel_end = .;
+    image_end = .;
 }

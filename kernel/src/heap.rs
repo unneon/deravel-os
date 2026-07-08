@@ -9,8 +9,8 @@ use log::*;
 pub struct Heap;
 
 unsafe extern "C" {
-    static mut kernel_start: u8;
-    static mut kernel_end: u8;
+    static image_start: u8;
+    static image_end: u8;
     static mut heap_start: u8;
     static mut heap_end: u8;
 }
@@ -65,8 +65,8 @@ fn reserve_ranges_from_dt(dt: &Fdt, available: &mut Vec<Range<*const u8>>) {
 }
 
 fn reserve_kernel_range(available: &mut Vec<Range<*const u8>>) {
-    let start = &raw const kernel_start;
-    let end = &raw const kernel_end;
+    let start = &raw const image_start;
+    let end = &raw const image_end;
     reserve_range(start..end, available);
 }
 
