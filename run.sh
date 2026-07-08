@@ -2,8 +2,20 @@
 
 (mkdir -p disk && cd disk && tar cf ../disk.tar --format=ustar *.txt)
 
-#timeout -f 5 \
-qemu-system-riscv64 \
+if [[ -n "${DERAVEL_GDB+x}" ]] ; then
+    export DERAVEL_GDB_FLAGS="-S -gdb tcp::${DERAVEL_GDB}"
+else
+    export DERAVEL_GDB_FLAGS=""
+fi
+
+if [[ -n "${DERAVEL_TIMEOUT+x}" ]] ; then
+    export DERAVEL_TIMEOUT_CMD="timeout -f ${DERAVEL_TIMEOUT}"
+else
+    export DERAVEL_TIMEOUT_CMD=""
+fi
+
+${DERAVEL_TIMEOUT_CMD} qemu-system-riscv64 \
+    ${DERAVEL_GDB_FLAGS} \
     -machine virt \
     -bios default \
     -serial mon:stdio \
