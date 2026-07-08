@@ -1,27 +1,22 @@
+mod entry;
+
+pub use entry::PageFlags;
+
+use crate::page::entry::{PageTableEntry, PageTableEntryUnpacked};
 use alloc::boxed::Box;
 use deravel_types::{LEVEL_2_PAGE_SIZE, PAGE_SIZE};
 use riscv::register::satp::{Mode, Satp};
 
 #[repr(C, align(4096))]
-pub struct PageAligned<T>(pub T);
+pub struct Page(pub [u8; 4096]);
 
-#[derive(Clone, Copy)]
-pub struct PageFlags(usize);
+#[repr(C, align(4096))]
+pub struct PageAligned<T>(pub T);
 
 #[repr(align(4096))]
 pub struct PageTable<const LEVEL: usize>(
     pub [PageTableEntry<LEVEL>; PAGE_SIZE / size_of::<usize>()],
 );
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-#[repr(transparent)]
-pub struct PageTableEntry<const LEVEL: usize>(pub usize);
-
-const PAGE_V: usize = 1 << 0;
-const PAGE_R: usize = 1 << 1;
-const PAGE_W: usize = 1 << 2;
-const PAGE_X: usize = 1 << 3;
-const PAGE_U: usize = 1 << 4;
 
 static mut INITIAL_PAGE_TABLE: PageTable<2> = PageTable::new();
 
@@ -34,28 +29,6 @@ unsafe extern "C" {
     static readwrite_end: u8;
 }
 
-impl PageFlags {
-    pub fn readonly() -> PageFlags {
-        PageFlags(PAGE_R)
-    }
-
-    pub fn readwrite() -> PageFlags {
-        PageFlags(PAGE_R | PAGE_W)
-    }
-
-    pub fn executable() -> PageFlags {
-        PageFlags(PAGE_R | PAGE_X)
-    }
-
-    pub fn user(self) -> PageFlags {
-        PageFlags(self.0 | PAGE_U)
-    }
-
-    pub fn is_writable(&self) -> bool {
-        self.0 & PAGE_W != 0
-    }
-}
-
 impl<const LEVEL: usize> PageTable<LEVEL> {
     pub const fn new() -> PageTable<LEVEL> {
         PageTable([PageTableEntry(0); _])
@@ -65,37 +38,15 @@ impl<const LEVEL: usize> PageTable<LEVEL> {
         &mut self,
         vpn_segment: usize,
     ) -> &'static mut PageTable<{ LEVEL - 1 }> {
-        if !self.0[vpn_segment].is_valid() {
-            let indirect = Box::leak(Box::new(PageTable::new()));
-            self.0[vpn_segment] =
-                PageTableEntry::indirect(indirect as *mut PageTable<{ LEVEL - 1 }>);
-            indirect
-        } else {
-            unsafe { &mut *self.0[vpn_segment].unwrap_indirect() }
+        match self.0[vpn_segment].unpack() {
+            PageTableEntryUnpacked::Invalid => {
+                let indirect = Box::leak(Box::new(PageTable::new()));
+                self.0[vpn_segment] = PageTableEntry::indirect(indirect as *mut _);
+                indirect
+            }
+            PageTableEntryUnpacked::Indirect { phys_ptr } => unsafe { &mut *phys_ptr },
+            PageTableEntryUnpacked::Leaf { .. } => unreachable!(),
         }
-    }
-}
-
-impl<const LEVEL: usize> PageTableEntry<LEVEL> {
-    fn indirect(table: *mut PageTable<{ LEVEL - 1 }>) -> PageTableEntry<LEVEL> {
-        PageTableEntry(((table as usize / PAGE_SIZE) << 10) | PAGE_V)
-    }
-
-    fn leaf(physical_addr: usize, flags: PageFlags) -> PageTableEntry<LEVEL> {
-        PageTableEntry(((physical_addr / PAGE_SIZE) << 10) | PAGE_V | flags.0)
-    }
-
-    fn is_indirect(&self) -> bool {
-        self.is_valid() && self.0 & (PAGE_R | PAGE_W | PAGE_X) == 0
-    }
-
-    fn is_valid(&self) -> bool {
-        self.0 & PAGE_V != 0
-    }
-
-    fn unwrap_indirect(&mut self) -> *mut PageTable<{ LEVEL - 1 }> {
-        assert!(self.is_indirect());
-        ((self.0 >> 10) * PAGE_SIZE) as *mut PageTable<{ LEVEL - 1 }>
     }
 }
 
