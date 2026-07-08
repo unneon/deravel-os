@@ -1,6 +1,7 @@
 mod entry;
 mod table;
 
+use core::ops::Range;
 pub use entry::PageFlags;
 pub use table::{PageTable, TopPageTable};
 
@@ -100,32 +101,32 @@ pub fn map_pages(
     assert!(physical_start.is_multiple_of(PAGE_SIZE));
     assert!(size.is_multiple_of(PAGE_SIZE));
     let virtual_end = virtual_start + size;
-    let vl2_start = virtual_start.next_multiple_of(LEVEL_2_PAGE_SIZE);
-    let vl2_end = {
-        let nmo = virtual_end.next_multiple_of(LEVEL_2_PAGE_SIZE);
-        let pmo = if nmo > virtual_end {
-            nmo - LEVEL_2_PAGE_SIZE
-        } else {
-            nmo
-        };
-        pmo.max(vl2_start)
-    };
-    assert!(vl2_start.is_multiple_of(LEVEL_2_PAGE_SIZE));
-    assert!(vl2_end.is_multiple_of(LEVEL_2_PAGE_SIZE));
-    assert!(vl2_start / LEVEL_2_PAGE_SIZE < PAGE_SIZE / size_of::<usize>());
-    assert!(vl2_end / LEVEL_2_PAGE_SIZE <= PAGE_SIZE / size_of::<usize>());
-    let prefix_end = vl2_start.min(virtual_end);
-    let suffix_start = vl2_end.min(virtual_end);
-    for v in (virtual_start..prefix_end).step_by(PAGE_SIZE) {
+    let (prefix, l2p_aligned, suffix) = align_by(virtual_start..virtual_end, LEVEL_2_PAGE_SIZE);
+    for v in prefix.step_by(PAGE_SIZE) {
         table.map_page(v, physical_start + (v - virtual_start), flags);
     }
-    for v in (vl2_start..vl2_end).step_by(LEVEL_2_PAGE_SIZE) {
+    for v in l2p_aligned.step_by(LEVEL_2_PAGE_SIZE) {
         table.0[v / LEVEL_2_PAGE_SIZE] =
             PageTableEntry::leaf(physical_start + (v - virtual_start), flags);
     }
-    for v in (suffix_start..virtual_end).step_by(PAGE_SIZE) {
+    for v in suffix.step_by(PAGE_SIZE) {
         table.map_page(v, physical_start + (v - virtual_start), flags);
     }
+}
+
+fn align_by(range: Range<usize>, align: usize) -> (Range<usize>, Range<usize>, Range<usize>) {
+    let aligned_start = range.start.next_multiple_of(align);
+    if aligned_start >= range.end {
+        return (range, 0..0, 0..0);
+    }
+    let unaligned_prefix = range.start..aligned_start;
+    let mut aligned_end = range.end.next_multiple_of(align);
+    if aligned_end > range.end {
+        aligned_end -= align;
+    }
+    let aligned = aligned_start..aligned_end;
+    let unaligned_suffix = aligned_end..range.end;
+    (unaligned_prefix, aligned, unaligned_suffix)
 }
 
 pub fn physical_to_identity_mapped<T>(physical: *mut T) -> *mut T {
