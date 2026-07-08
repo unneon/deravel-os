@@ -1,5 +1,4 @@
-use crate::page::PageFlags;
-use crate::{PageTable, map_pages};
+use crate::page::{PageFlags, TopPageTable, map_pages};
 use alloc::vec;
 use alloc::vec::Vec;
 use deravel_types::PAGE_SIZE;
@@ -20,7 +19,7 @@ pub macro elf($env:literal) {{
 const USER_START: usize = 0x1000000;
 const USER_END: usize = 0x2000000;
 
-pub fn load_elf(elf_bytes: &[u8], page_table: &mut PageTable<2>) -> usize {
+pub fn load_elf(elf_bytes: &[u8], page_table: &mut TopPageTable) -> usize {
     let elf = ElfBytes::<LittleEndian>::minimal_parse(elf_bytes).unwrap();
     assert_eq!(elf.ehdr.class, Class::ELF64);
     assert_eq!(elf.ehdr.endianness, LittleEndian);

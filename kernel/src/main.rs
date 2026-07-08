@@ -49,9 +49,7 @@ use crate::hart::{HartContext, HartStack};
 use crate::heap::initialize_heap;
 use crate::interrupt::INTERRUPTS;
 use crate::log::{initialize_log, log_userspace};
-use crate::page::{
-    PageFlags, PageTable, initialize_memory_mapping, map_pages, physical_to_identity_mapped,
-};
+use crate::page::{PageFlags, initialize_memory_mapping, map_pages, physical_to_identity_mapped};
 use crate::pci::initialize_all_pci;
 use crate::plic::{initialize_plic, plic_claim, plic_complete};
 use crate::process::{

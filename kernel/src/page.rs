@@ -1,9 +1,10 @@
 mod entry;
+mod table;
 
 pub use entry::PageFlags;
+pub use table::{PageTable, TopPageTable};
 
-use crate::page::entry::{PageTableEntry, PageTableEntryUnpacked};
-use alloc::boxed::Box;
+use crate::page::entry::PageTableEntry;
 use deravel_types::{LEVEL_2_PAGE_SIZE, PAGE_SIZE};
 use riscv::register::satp::{Mode, Satp};
 
@@ -13,12 +14,7 @@ pub struct Page(pub [u8; 4096]);
 #[repr(C, align(4096))]
 pub struct PageAligned<T>(pub T);
 
-#[repr(align(4096))]
-pub struct PageTable<const LEVEL: usize>(
-    pub [PageTableEntry<LEVEL>; PAGE_SIZE / size_of::<usize>()],
-);
-
-static mut INITIAL_PAGE_TABLE: PageTable<2> = PageTable::new();
+static mut INITIAL_PAGE_TABLE: TopPageTable = PageTable::new();
 
 unsafe extern "C" {
     static text_start: u8;
@@ -27,33 +23,6 @@ unsafe extern "C" {
     static rodata_end: u8;
     static readwrite_start: u8;
     static readwrite_end: u8;
-}
-
-impl<const LEVEL: usize> PageTable<LEVEL> {
-    pub const fn new() -> PageTable<LEVEL> {
-        PageTable([PageTableEntry(0); _])
-    }
-
-    unsafe fn get_or_create_indirect(
-        &mut self,
-        vpn_segment: usize,
-    ) -> &'static mut PageTable<{ LEVEL - 1 }> {
-        match self.0[vpn_segment].unpack() {
-            PageTableEntryUnpacked::Invalid => {
-                let indirect = Box::leak(Box::new(PageTable::new()));
-                self.0[vpn_segment] = PageTableEntry::indirect(indirect as *mut _);
-                indirect
-            }
-            PageTableEntryUnpacked::Indirect { phys_ptr } => unsafe { &mut *phys_ptr },
-            PageTableEntryUnpacked::Leaf { .. } => unreachable!(),
-        }
-    }
-}
-
-impl<const LEVEL: usize> Default for PageTable<LEVEL> {
-    fn default() -> PageTable<LEVEL> {
-        PageTable([PageTableEntry::default(); _])
-    }
 }
 
 pub fn initialize_memory_mapping() {
@@ -68,7 +37,7 @@ pub fn initialize_memory_mapping() {
     unsafe { riscv::register::satp::write(satp(&raw mut INITIAL_PAGE_TABLE)) }
 }
 
-pub fn map_identity_mapping(page_table: &mut PageTable<2>) {
+pub fn map_identity_mapping(page_table: &mut TopPageTable) {
     let pages_per_level = page_table.0.len();
     let total_pages = pages_per_level.pow(3);
     let total_identity_mapped = total_pages / 2;
@@ -82,7 +51,7 @@ pub fn map_identity_mapping(page_table: &mut PageTable<2>) {
     );
 }
 
-pub fn map_kernel_image(page_table: &mut PageTable<2>) {
+pub fn map_kernel_image(page_table: &mut TopPageTable) {
     map_kernel_image_section(
         page_table,
         &raw const text_start,
@@ -104,7 +73,7 @@ pub fn map_kernel_image(page_table: &mut PageTable<2>) {
 }
 
 fn map_kernel_image_section(
-    page_table: &mut PageTable<2>,
+    page_table: &mut TopPageTable,
     start: *const u8,
     end: *const u8,
     flags: PageFlags,
@@ -121,7 +90,7 @@ fn map_kernel_image_section(
 }
 
 pub fn map_pages(
-    table: &mut PageTable<2>,
+    table: &mut TopPageTable,
     virtual_start: usize,
     physical_start: usize,
     flags: PageFlags,
@@ -148,14 +117,14 @@ pub fn map_pages(
     let prefix_end = vl2_start.min(virtual_end);
     let suffix_start = vl2_end.min(virtual_end);
     for v in (virtual_start..prefix_end).step_by(PAGE_SIZE) {
-        map_page(table, v, physical_start + (v - virtual_start), flags);
+        table.map_page(v, physical_start + (v - virtual_start), flags);
     }
     for v in (vl2_start..vl2_end).step_by(LEVEL_2_PAGE_SIZE) {
         table.0[v / LEVEL_2_PAGE_SIZE] =
             PageTableEntry::leaf(physical_start + (v - virtual_start), flags);
     }
     for v in (suffix_start..virtual_end).step_by(PAGE_SIZE) {
-        map_page(table, v, physical_start + (v - virtual_start), flags);
+        table.map_page(v, physical_start + (v - virtual_start), flags);
     }
 }
 
@@ -168,28 +137,9 @@ pub fn physical_to_identity_mapped<T>(physical: *mut T) -> *mut T {
     })
 }
 
-pub fn satp(table: *mut PageTable<2>) -> Satp {
+pub fn satp(table: *mut TopPageTable) -> Satp {
     let mut satp = Satp::from_bits(0);
     satp.set_mode(Mode::Sv39);
     satp.set_ppn(table as usize / PAGE_SIZE);
     satp
-}
-
-fn map_page(
-    table2: &mut PageTable<2>,
-    virtual_addr: usize,
-    physical_addr: usize,
-    flags: PageFlags,
-) {
-    assert!(virtual_addr.is_multiple_of(PAGE_SIZE));
-    assert!(physical_addr.is_multiple_of(PAGE_SIZE));
-
-    let vpn2 = (virtual_addr >> 30) & ((1 << 9) - 1);
-    let table1 = unsafe { table2.get_or_create_indirect(vpn2) };
-    let vpn1 = (virtual_addr >> 21) & ((1 << 9) - 1);
-    let table0 = unsafe { table1.get_or_create_indirect(vpn1) };
-
-    let vpn0 = (virtual_addr >> 12) & ((1 << 9) - 1);
-    assert!(!table0.0[vpn0].is_valid());
-    table0.0[vpn0] = PageTableEntry::leaf(physical_addr, flags);
 }

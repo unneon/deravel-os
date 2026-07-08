@@ -7,7 +7,9 @@ use crate::device_tree::timebase_frequency;
 use crate::elf::load_elf;
 use crate::hart::HartContext;
 use crate::heap::log_heap_statistics;
-use crate::page::{PageFlags, PageTable, map_identity_mapping, map_kernel_image, map_pages};
+use crate::page::{
+    PageFlags, PageTable, TopPageTable, map_identity_mapping, map_kernel_image, map_pages,
+};
 use crate::sbi;
 use crate::sbi::{ResetReason, ResetType};
 use crate::sync::Mutex;
@@ -33,7 +35,7 @@ pub struct Process {
     pub state: ProcessState,
     pub registers: Option<RiscvRegisters>,
     pub pc: usize,
-    pub page_table: *mut PageTable<2>,
+    pub page_table: *mut TopPageTable,
     pub virtual_memory: BumpAllocator,
     pub messages: Option<Box<VecDeque<(RawCapability, usize, Vec<u8>, ProcessId)>>>,
     #[allow(clippy::box_collection)]
@@ -129,7 +131,7 @@ pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: Pro
     proc.virtual_memory = BumpAllocator::new(0x4000000..0x5000000);
 }
 
-fn map_capability_memory(pages: &mut PageTable<2>, pid: ProcessId) {
+fn map_capability_memory(pages: &mut TopPageTable, pid: ProcessId) {
     let pre_v = CAPABILITIES_START;
     let pre_p = capability_pages_physical_address();
     let own_v = pre_v + pid.as_u16() as usize * PAGE_SIZE;
@@ -160,7 +162,7 @@ fn map_capability_memory(pages: &mut PageTable<2>, pid: ProcessId) {
     );
 }
 
-fn map_inputs_memory<T: ProcessTag>(pages: &mut PageTable<2>, inputs: ProcessInputs<T>) {
+fn map_inputs_memory<T: ProcessTag>(pages: &mut TopPageTable, inputs: ProcessInputs<T>) {
     let page = Box::leak(Box::new(inputs));
     map_pages(
         pages,
