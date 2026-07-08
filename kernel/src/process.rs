@@ -1,5 +1,5 @@
-use crate::allocators::TrivialAllocator;
 use crate::arch::{RiscvRegisters, switch_to_userspace_full};
+use crate::bump::BumpAllocator;
 use crate::capability::{
     capability_page, capability_pages_physical_address, kernel_capability_page,
 };
@@ -34,7 +34,7 @@ pub struct Process {
     pub registers: Option<RiscvRegisters>,
     pub pc: usize,
     pub page_table: *mut PageTable<2>,
-    pub virtual_memory: TrivialAllocator,
+    pub virtual_memory: BumpAllocator,
     pub messages: Option<Box<VecDeque<(RawCapability, usize, Vec<u8>, ProcessId)>>>,
     #[allow(clippy::box_collection)]
     pub reply: Option<Box<Vec<u8>>>,
@@ -126,7 +126,7 @@ pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: Pro
     proc.registers = Some(RiscvRegisters::default());
     proc.pc = entry_point;
     proc.page_table = Box::leak(page_table);
-    proc.virtual_memory = TrivialAllocator::new_range(0x4000000, 0x5000000);
+    proc.virtual_memory = BumpAllocator::new(0x4000000..0x5000000);
 }
 
 fn map_capability_memory(pages: &mut PageTable<2>, pid: ProcessId) {

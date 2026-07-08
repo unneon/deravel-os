@@ -1,17 +1,13 @@
 use core::ops::Range;
 
 #[derive(Debug)]
-pub struct TrivialAllocator {
+pub struct BumpAllocator {
     range: Range<usize>,
 }
 
-impl TrivialAllocator {
-    pub const fn new(size: usize) -> TrivialAllocator {
-        TrivialAllocator { range: 0..size }
-    }
-
-    pub const fn new_range(start: usize, end: usize) -> TrivialAllocator {
-        TrivialAllocator { range: start..end }
+impl BumpAllocator {
+    pub const fn new(range: Range<usize>) -> BumpAllocator {
+        BumpAllocator { range }
     }
 
     pub fn allocate(&mut self, size: usize, alignment: usize) -> usize {

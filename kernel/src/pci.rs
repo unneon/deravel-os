@@ -1,7 +1,7 @@
 pub mod capability;
 pub mod config;
 
-use crate::allocators::TrivialAllocator;
+use crate::bump::BumpAllocator;
 use crate::interrupt::register_interrupt;
 use crate::page::physical_to_identity_mapped;
 use crate::pci::config::{Config, GeneralDeviceConfig};
@@ -48,9 +48,9 @@ pub fn initialize_all_pci(
     let soc = device_tree.find_node("/soc").unwrap();
     let pci = device_tree.find_node("/soc/pci").unwrap();
     let pci_ranges = find_pci_ranges(&soc, &pci);
-    let mut io = TrivialAllocator::new(pci_ranges.io.length);
-    let mut mem32 = TrivialAllocator::new(pci_ranges.mem32.length);
-    let mut mem64 = TrivialAllocator::new(pci_ranges.mem64.length);
+    let mut io = BumpAllocator::new(0..pci_ranges.io.length);
+    let mut mem32 = BumpAllocator::new(0..pci_ranges.mem32.length);
+    let mut mem64 = BumpAllocator::new(0..pci_ranges.mem64.length);
     let region = pci.reg().unwrap().next().unwrap();
     let configs = physical_to_identity_mapped(region.starting_address as *mut Config);
     let configs = configs..configs.wrapping_byte_add(region.size.unwrap());
@@ -133,9 +133,9 @@ pub fn initialize_all_pci(
 fn allocate_all_bars(
     config: &mut GeneralDeviceConfig,
     pci_ranges: &PciRanges,
-    io: &mut TrivialAllocator,
-    mem32: &mut TrivialAllocator,
-    mem64: &mut TrivialAllocator,
+    io: &mut BumpAllocator,
+    mem32: &mut BumpAllocator,
+    mem64: &mut BumpAllocator,
 ) -> [AllocatedRange; 6] {
     let mut i = 0;
     let mut allocated: [AllocatedRange; 6] = Default::default();
