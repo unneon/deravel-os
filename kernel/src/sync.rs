@@ -20,7 +20,10 @@ impl<T> Mutex<T> {
     }
 
     pub fn lock(&self) -> MutexGuard<'_, T> {
-        while self.locked.swap(true, Ordering::Acquire) {}
+        #[allow(clippy::never_loop)]
+        while self.locked.swap(true, Ordering::Acquire) {
+            panic!("deadlock detected as SMP not implemented yet");
+        }
         MutexGuard { lock: self }
     }
 }
