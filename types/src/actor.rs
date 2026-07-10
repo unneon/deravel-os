@@ -6,6 +6,16 @@ pub enum Actor {
     Kernel,
 }
 
+impl Actor {
+    #[track_caller]
+    pub fn unwrap_user(self) -> ProcessId {
+        match self {
+            Actor::Userspace(pid) => pid,
+            Actor::Kernel => unreachable!(),
+        }
+    }
+}
+
 impl From<ProcessId> for Actor {
     fn from(value: ProcessId) -> Self {
         Actor::Userspace(value)

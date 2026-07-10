@@ -1,5 +1,5 @@
 use crate::capability::{Handler, capability_page};
-use crate::process::reserve_process;
+use crate::process::{get_process, reserve_process};
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 use core::sync::atomic::Ordering;
@@ -32,7 +32,10 @@ impl<T: ProcessTag> Handler<T::Spawner> for ProcessSpawnerService<T> {
         );
         let args: <T as ProcessTag>::Args = serde_json::from_slice(args).unwrap();
         args.for_all(|cap| {
-            assert_eq!(cap.certifier(), Actor::from(sender));
+            assert_eq!(cap.certifier(), Actor::from(sender), "process {}[{sender:?}] tried to pass capability {cap:?} that was granted by {:?}, not itself",
+                get_process(sender).lock().name.unwrap(),
+                cap.certifier()
+            );
             let slot = &capability_page(sender).0[cap.local_index()];
             let preforward = slot.load(Ordering::Relaxed).unpack();
             match preforward {
