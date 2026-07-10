@@ -14,10 +14,10 @@ fn main() {
     width: usize,
     height: usize,
     leftpad: usize,
-    characters: [Character; 94],
+    glyphs: [Glyph; 94],
 }}
 
-struct Character {{
+struct Glyph {{
     ascii: u8,
     xmin: i32,
     ymin: i32,
@@ -27,7 +27,7 @@ struct Character {{
 }}
 
 static FONT: Font = Font {{
-    characters: ["#
+    glyphs: ["#
     )
     .unwrap();
     let mut min_xmin = 0;
@@ -37,7 +37,7 @@ static FONT: Font = Font {{
     for c in u8::MIN..=u8::MAX {
         if c.is_ascii_graphic() {
             let (metrics, bitmap) = font.rasterize(c as char, 17.0);
-            writeln!(out, "        Character {{ ascii: {c}, xmin: {}, ymin: {}, width: {}, height: {}, bitmap: &{bitmap:?} }},", metrics.xmin, metrics.ymin, metrics.width, metrics.height).unwrap();
+            writeln!(out, "        Glyph {{ ascii: {c}, xmin: {}, ymin: {}, width: {}, height: {}, bitmap: &{bitmap:?} }},", metrics.xmin, metrics.ymin, metrics.width, metrics.height).unwrap();
             min_xmin = min_xmin.min(metrics.xmin);
             min_ymin = min_ymin.min(metrics.ymin);
             max_xmax = max_xmax.max(metrics.xmin + metrics.width as i32);

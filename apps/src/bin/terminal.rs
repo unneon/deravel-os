@@ -25,28 +25,8 @@ impl Renderer {
         } else if c == b'\n' {
             self.cursor_x = FONT.leftpad as i32;
             self.cursor_y += FONT.height as i32;
-        } else if let Some(glyph) = FONT
-            .characters
-            .iter()
-            .find(|character| character.ascii == c)
-        {
-            for bitmap_y in 0..glyph.height as i32 {
-                for bitmap_x in 0..glyph.width as i32 {
-                    let fb_x = self.cursor_x + bitmap_x + glyph.xmin;
-                    let fb_y = self.cursor_y + FONT.height as i32 - glyph.height as i32 + bitmap_y
-                        - glyph.ymin;
-                    if fb_x >= 0
-                        && fb_x < self.window_width
-                        && fb_y >= 0
-                        && fb_y < self.window_height
-                    {
-                        let color =
-                            glyph.bitmap[bitmap_y as usize * glyph.width + bitmap_x as usize];
-                        self.framebuffer
-                            .set_pixel(fb_x as usize, fb_y as usize, 0, color, 0, 255);
-                    }
-                }
-            }
+        } else if let Some(glyph) = find_glyph(c) {
+            self.render_glyph(glyph);
             self.cursor_x += FONT.width as i32;
         }
 
@@ -60,6 +40,21 @@ impl Renderer {
             self.cursor_y -= FONT.height as i32;
         }
         self.window.draw();
+    }
+
+    fn render_glyph(&mut self, glyph: &Glyph) {
+        for bitmap_y in 0..glyph.height as i32 {
+            for bitmap_x in 0..glyph.width as i32 {
+                let fb_x = self.cursor_x + bitmap_x + glyph.xmin;
+                let fb_y = self.cursor_y + FONT.height as i32 - glyph.height as i32 + bitmap_y
+                    - glyph.ymin;
+                if fb_x >= 0 && fb_x < self.window_width && fb_y >= 0 && fb_y < self.window_height {
+                    let color = glyph.bitmap[bitmap_y as usize * glyph.width + bitmap_x as usize];
+                    self.framebuffer
+                        .set_pixel(fb_x as usize, fb_y as usize, 0, color, 0, 255);
+                }
+            }
+        }
     }
 
     fn scroll_up(&mut self) {
@@ -131,6 +126,10 @@ impl ConsoleServer for Renderer {
     fn putchar(&mut self, _: &mut Ctx<Self>, _: (), c: u8) {
         self.render_char(c);
     }
+}
+
+fn find_glyph(c: u8) -> Option<&'static Glyph> {
+    FONT.glyphs.iter().find(|character| character.ascii == c)
 }
 
 fn main(args: Args) {
