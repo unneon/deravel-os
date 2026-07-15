@@ -161,9 +161,9 @@ pub fn yield_() {
 }
 
 fn stdio() -> Capability<Console> {
-    let stdio = STDIO.load(Ordering::SeqCst) as *mut CapabilityCertificate;
+    let stdio = STDIO.load(Ordering::SeqCst) as *const CapabilityCertificate;
     assert!(!stdio.is_null(), "standard input/output not set");
-    unsafe { Capability::new(RawCapability::from_ptr(stdio)) }
+    unsafe { Capability::new(RawCapability::try_from(stdio).unwrap()) }
 }
 
 fn initialize_log() {

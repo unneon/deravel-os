@@ -8,6 +8,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 #[repr(transparent)]
 pub struct RawCapability(&'static CapabilityCertificate);
 
+#[derive(Debug)]
+pub struct InvalidCapabilityError(pub *const CapabilityCertificate);
+
 impl RawCapability {
     pub fn new(certifier: impl Into<Actor>, local_index: usize) -> RawCapability {
         assert!(local_index < PAGE_SIZE / size_of::<CapabilityCertificate>());
@@ -17,12 +20,6 @@ impl RawCapability {
     pub fn from_ref(ptr: &'static CapabilityCertificate) -> RawCapability {
         assert!(is_ptr_valid(ptr));
         RawCapability(ptr)
-    }
-
-    #[allow(clippy::not_unsafe_ptr_arg_deref)]
-    pub fn from_ptr(ptr: *const CapabilityCertificate) -> RawCapability {
-        assert!(is_ptr_valid(ptr));
-        RawCapability(unsafe { &*ptr })
     }
 
     pub fn certifier(self) -> Actor {
@@ -43,6 +40,19 @@ impl RawCapability {
     }
 }
 
+impl TryFrom<*const CapabilityCertificate> for RawCapability {
+    type Error = InvalidCapabilityError;
+
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    fn try_from(ptr: *const CapabilityCertificate) -> Result<Self, Self::Error> {
+        if is_ptr_valid(ptr) {
+            Ok(RawCapability(unsafe { &*ptr }))
+        } else {
+            Err(InvalidCapabilityError(ptr))
+        }
+    }
+}
+
 impl core::fmt::Debug for RawCapability {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{:#x}", self.as_usize())
@@ -52,13 +62,19 @@ impl core::fmt::Debug for RawCapability {
 impl<'de> Deserialize<'de> for RawCapability {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let cap = usize::deserialize(deserializer)? as *const CapabilityCertificate;
-        Ok(RawCapability::from_ptr(cap))
+        Ok(RawCapability::try_from(cap).unwrap())
     }
 }
 
 impl Serialize for RawCapability {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         self.as_usize().serialize(serializer)
+    }
+}
+
+impl core::fmt::Display for InvalidCapabilityError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "invalid capability {:?}", self.0)
     }
 }
 

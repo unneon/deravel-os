@@ -163,7 +163,7 @@ fn generate_syscall_trait(drvli: &Drvli, out: &mut String) {
 }
 
 fn generate_syscall_dispatch(drvli: &Drvli, out: &mut String) {
-    writeln!(out, "pub fn dispatch_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut HartContext) -> ! {{").unwrap();
+    writeln!(out, "pub fn dispatch_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut HartContext) -> Result<!, InvalidCapabilityError> {{").unwrap();
     writeln!(out, "    #![allow(clippy::diverging_sub_expression)]").unwrap();
     writeln!(out, "    match registers.a6 {{").unwrap();
     for (syscall_number, syscall) in drvli.syscalls.iter().enumerate() {
@@ -176,10 +176,10 @@ fn generate_syscall_dispatch(drvli: &Drvli, out: &mut String) {
         for (arg_name, arg_type) in &syscall.args {
             let value = match arg_type {
                 Type::UntypedCapability => format!(
-                    "RawCapability::from_ptr(registers.a{used_arg_registers} as *mut CapabilityCertificate)"
+                    "RawCapability::try_from(registers.a{used_arg_registers} as *const CapabilityCertificate)?"
                 ),
                 Type::SharedMemory => format!(
-                    "unsafe {{ Capability::new(RawCapability::from_ptr(registers.a{used_arg_registers} as *mut CapabilityCertificate)) }}"
+                    "unsafe {{ Capability::new(RawCapability::try_from(registers.a{used_arg_registers} as *const CapabilityCertificate)?) }}"
                 ),
                 Type::U64 => format!("registers.a{used_arg_registers} as u64"),
                 Type::Usize => format!("registers.a{used_arg_registers}"),

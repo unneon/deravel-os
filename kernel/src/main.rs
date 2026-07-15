@@ -52,7 +52,7 @@ use crate::page::{PageFlags, initialize_memory_mapping, map_pages, physical_to_i
 use crate::pci::initialize_all_pci;
 use crate::plic::{initialize_plic, plic_claim, plic_complete};
 use crate::process::{
-    ProcessState, get_process, reserve_process, schedule_and_switch_to_userspace,
+    ProcessState, get_process, kill_process, reserve_process, schedule_and_switch_to_userspace,
 };
 use crate::process_spawner::ProcessSpawnerService;
 use crate::sbi::{ResetReason, ResetType, SbiShutdown, log_sbi_metadata};
@@ -142,7 +142,14 @@ fn handle_trap(registers: &mut RiscvRegisters, hart: &mut HartContext) -> ! {
     let stval = riscv::register::stval::read();
     let user_pc = riscv::register::sepc::read();
     if scause == Trap::Exception(Exception::UserEnvCall) {
-        dispatch_syscall(user_pc, registers, hart);
+        let Err(err) = dispatch_syscall(user_pc, registers, hart);
+        error!(
+            "killed {}[{:?}] due to {err}",
+            hart.current_process().name.unwrap(),
+            hart.current_pid()
+        );
+        kill_process(hart.current_pid());
+        schedule_and_switch_to_userspace(hart)
     } else if scause == Trap::Interrupt(Interrupt::SupervisorTimer) {
         sbi::set_timer(u64::MAX);
         switch_to_userspace_registers_only(registers)

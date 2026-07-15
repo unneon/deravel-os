@@ -214,3 +214,7 @@ pub fn find_runnable_process(hart: &HartContext) -> Option<ProcessId> {
 
     None
 }
+
+pub fn kill_process(pid: ProcessId) {
+    get_process(pid).lock().state = ProcessState::Finished;
+}

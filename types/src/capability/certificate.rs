@@ -79,7 +79,8 @@ impl CapabilityCertificateValue {
         } else {
             CapabilityCertificateUnpacked::Forwarded {
                 forwardee: grantee_or_forwardee,
-                inner: RawCapability::from_ptr(self.payload as *const CapabilityCertificate),
+                inner: RawCapability::try_from(self.payload as *const CapabilityCertificate)
+                    .unwrap(),
             }
         }
     }
