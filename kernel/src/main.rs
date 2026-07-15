@@ -34,7 +34,6 @@ mod process_spawner;
 mod sbi;
 mod shared_memory;
 mod sync;
-mod uart;
 mod util;
 mod virtio;
 

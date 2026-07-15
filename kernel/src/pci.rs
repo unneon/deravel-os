@@ -6,8 +6,6 @@ use crate::interrupt::register_interrupt;
 use crate::page::physical_to_identity_mapped;
 use crate::pci::config::{Config, GeneralDeviceConfig};
 use crate::sync::Mutex;
-use crate::uart::{Uart16550, Uart16550Mmio};
-use crate::util::volatile::Volatile;
 use crate::virtio;
 use crate::virtio::blk::VirtioBlk;
 use crate::virtio::gpu::VirtioGpu;
@@ -65,18 +63,7 @@ pub fn initialize_all_pci(
             continue;
         }
 
-        if config.vendor_id == 0x1B36 && config.device_id == 0x2 {
-            let config = config.as_general_device().unwrap();
-            let bars = allocate_all_bars(config, &pci_ranges, &mut io, &mut mem32, &mut mem64);
-            config.command.write_bitor(0b111);
-            let bar = unsafe {
-                Volatile::new(physical_to_identity_mapped(
-                    bars[0].soc_offset as *mut Uart16550Mmio,
-                ))
-            };
-            let mut uart = Uart16550::new(bar);
-            uart.demo();
-        } else if config.vendor_id == 0x1AF4 && config.device_id == 0x1041 {
+        if config.vendor_id == 0x1AF4 && config.device_id == 0x1041 {
             let config = config.as_general_device().unwrap();
             let bars = allocate_all_bars(config, &pci_ranges, &mut io, &mut mem32, &mut mem64);
             config.command.write_bitor(0b111);

@@ -5,4 +5,4 @@ bindeps = true
 target = "riscv64gc-unknown-none-elf"
 
 [target.riscv64gc-unknown-none-elf]
-runner = "./run.sh"
+runner = "kernel/qemu-wrapper.sh"
