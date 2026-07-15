@@ -63,7 +63,7 @@ pub fn initialize_trap_handler() {
     unsafe { riscv::register::stvec::write(Stvec::new(address, TrapMode::Direct)) }
 }
 
-pub fn switch_to_userspace_full(mut next: MutexGuard<Process>) -> ! {
+pub fn switch_to_userspace_full(next: MutexGuard<Process>) -> ! {
     unsafe { riscv::register::satp::write(satp(next.page_table)) };
 
     // SFENCE.VMA is required after SATP write. (RISC-V Privileged 12.2.1).
@@ -74,8 +74,7 @@ pub fn switch_to_userspace_full(mut next: MutexGuard<Process>) -> ! {
     status.set_spie(true);
     status.set_sum(true);
     unsafe { riscv::register::sstatus::write(status) };
-    let registers = next.registers.take().unwrap();
-    let registers = &registers as *const _;
+    let registers = &next.registers as *const _;
     drop(next);
     switch_to_userspace_registers_only(registers)
 }

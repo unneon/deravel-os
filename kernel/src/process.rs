@@ -33,7 +33,7 @@ pub enum ProcessState {
 pub struct Process {
     pub name: Option<&'static str>,
     pub state: ProcessState,
-    pub registers: Option<RiscvRegisters>,
+    pub registers: RiscvRegisters,
     pub pc: usize,
     pub page_table: *mut TopPageTable,
     pub virtual_memory: BumpAllocator,
@@ -125,7 +125,7 @@ pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: Pro
     let mut proc = get_process(pid).lock();
     proc.name = Some(name);
     proc.state = ProcessState::Runnable;
-    proc.registers = Some(RiscvRegisters::default());
+    proc.registers = RiscvRegisters::default();
     proc.pc = entry_point;
     proc.page_table = Box::leak(page_table);
     proc.virtual_memory = BumpAllocator::new(0x4000000..0x5000000);

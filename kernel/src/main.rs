@@ -186,7 +186,7 @@ impl SyscallHandler for () {
             reply.len()
         } else {
             current_proc.state = ProcessState::WaitingForReply;
-            current_proc.registers = Some(registers.clone());
+            current_proc.registers = registers.clone();
             current_proc.pc = user_pc;
 
             let original = validate_untrusted_capability(farthest_cap, hart.current_pid());
@@ -281,7 +281,7 @@ impl SyscallHandler for () {
                     (virtual_addr as *mut (), declared_size)
                 } else {
                     current_proc.state = ProcessState::WaitingForStreamMap;
-                    current_proc.registers = Some(registers.clone());
+                    current_proc.registers = registers.clone();
                     current_proc.pc = user_pc;
                     let mut dest = get_process(original_pid).lock();
                     dest.messages.get_or_insert_default().push_back((
@@ -391,7 +391,7 @@ impl SyscallHandler for () {
 
     fn yield_(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut HartContext) {
         let mut current_proc = hart.current_process();
-        current_proc.registers = Some(registers.clone());
+        current_proc.registers = registers.clone();
         current_proc.pc = user_pc + 4;
 
         drop(current_proc);
