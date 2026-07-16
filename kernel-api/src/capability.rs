@@ -1,8 +1,8 @@
 use crate::current_pid;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use deravel_types::{
-    Actor, Capability, CapabilityCertificate, CapabilityCertificateUnpacked,
-    CapabilityCertificateValue, Interface, RawCapability, get_capability_certificate_page,
+    Actor, Capability, CapabilityCertificate, CapabilityCertificateValue, Interface, RawCapability,
+    get_capability_certificate_page,
 };
 use log::*;
 
@@ -32,34 +32,6 @@ pub fn forward<T: Interface>(cap: Capability<T>, forwardee: impl Into<Actor>) ->
     let t_name = T::NAME;
     trace!("forwarded {cap:?} {t_name} as {forwarded:?} to {forwardee:?}");
     forwarded
-}
-
-pub fn validate_capability(cap: RawCapability, claimer: Actor) -> RawCapability {
-    trace!("validating capability {cap:?} from process {claimer:?}");
-    let mut capability = cap;
-    let mut sender = claimer;
-    let original = loop {
-        let certifier = capability.certifier();
-        match read_certificate(capability).unpack() {
-            CapabilityCertificateUnpacked::Granted { grantee } => {
-                trace!("... granted from {certifier:?} to {grantee:?}");
-                assert!(grantee == sender);
-                break capability;
-            }
-            CapabilityCertificateUnpacked::Forwarded { forwardee, inner } => {
-                trace!("... forwarded {inner:?} from {certifier:?} to {forwardee:?}");
-                assert!(forwardee == sender);
-                capability = inner;
-                sender = certifier;
-            }
-        }
-    };
-    assert!(original.certifier() == current_pid().into());
-    original
-}
-
-fn read_certificate(cap: RawCapability) -> CapabilityCertificateValue {
-    get_capability_certificate_page(cap.certifier())[cap.local_index()].load(Ordering::Relaxed)
 }
 
 fn allocate_certificate() -> &'static CapabilityCertificate {

@@ -1,7 +1,9 @@
 use crate::capability::pages::{
     CAPABILITIES_END, CAPABILITIES_START, get_capability_certificate_page,
 };
-use crate::{Actor, CapabilityCertificate, PAGE_SIZE, ProcessId};
+use crate::{Actor, CapabilityCertificate, CapabilityCertificateUnpacked, PAGE_SIZE, ProcessId};
+use core::sync::atomic::Ordering;
+use log::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Clone, Copy)]
@@ -37,6 +39,29 @@ impl RawCapability {
 
     pub fn as_usize(self) -> usize {
         self.0 as *const CapabilityCertificate as usize
+    }
+
+    pub fn validate(self, current_pid: ProcessId) -> RawCapability {
+        trace!("validating capability {self:?} presented by {current_pid:?}");
+        let mut capability = self;
+        let mut sender = Actor::Userspace(current_pid);
+        loop {
+            let certifier = capability.certifier();
+            let certificate = &get_capability_certificate_page(certifier)[capability.local_index()];
+            match certificate.load(Ordering::Relaxed).unpack() {
+                CapabilityCertificateUnpacked::Granted { grantee } => {
+                    trace!("... granted by {certifier:?} to {grantee:?}");
+                    assert!(grantee == sender);
+                    break capability;
+                }
+                CapabilityCertificateUnpacked::Forwarded { forwardee, inner } => {
+                    trace!("... forwarded {inner:?} by {certifier:?} to {forwardee:?}");
+                    assert!(forwardee == sender);
+                    capability = inner;
+                    sender = certifier;
+                }
+            }
+        }
     }
 }
 

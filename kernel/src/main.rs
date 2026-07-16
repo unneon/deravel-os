@@ -39,9 +39,7 @@ mod util;
 mod virtio;
 
 use crate::arch::{RiscvRegisters, initialize_trap_handler, switch_to_userspace_registers_only};
-use crate::capability::{
-    grant_kernel_capability, reserve_kernel_capability, validate_untrusted_capability,
-};
+use crate::capability::{grant_kernel_capability, reserve_kernel_capability};
 use crate::device_tree::initialize_timebase_frequency;
 use crate::drvli::{SyscallHandler, dispatch_syscall};
 use crate::elf::elf;
@@ -187,7 +185,7 @@ impl SyscallHandler for () {
         user_pc: usize,
         registers: &mut RiscvRegisters,
         hart: &mut HartContext,
-        farthest_cap: RawCapability,
+        cap: RawCapability,
         method: usize,
         args_buffer: UserPtr<[u8]>,
         mut result_buffer: UserPtr<[u8]>,
@@ -205,8 +203,8 @@ impl SyscallHandler for () {
             proc.registers = registers.clone();
             proc.pc = user_pc;
 
-            let original = validate_untrusted_capability(farthest_cap, hart.current_pid());
-            match original.certifier() {
+            let cap = cap.validate(proc.id);
+            match cap.certifier() {
                 Actor::Userspace(dest) => {
                     let Some(mut dest) = get_process(dest).lock_if_some() else {
                         // This can't actually happen because capability validation will catch this
@@ -215,7 +213,7 @@ impl SyscallHandler for () {
                     };
 
                     dest.messages.push_back(Message {
-                        cap: original,
+                        cap,
                         method,
                         args: args_buffer.copy_to_kernel(),
                         sender: hart.current_pid(),
@@ -227,7 +225,7 @@ impl SyscallHandler for () {
                 }
                 Actor::Kernel => {
                     drop(proc);
-                    let handler = capability::get_handler(original.local_index());
+                    let handler = capability::get_handler(cap.local_index());
                     let result = handler.call_method(
                         method,
                         &args_buffer.copy_to_kernel(),
@@ -290,16 +288,16 @@ impl SyscallHandler for () {
         user_pc: usize,
         registers: &mut RiscvRegisters,
         hart: &mut HartContext,
-        farthest_cap: RawCapability,
+        cap: RawCapability,
         stream: usize,
     ) -> (*mut (), usize) {
         let mut proc = hart.current_process();
-        let original = validate_untrusted_capability(farthest_cap, hart.current_pid());
-        match original.certifier() {
+        let cap = cap.validate(proc.id);
+        match cap.certifier() {
             Actor::Userspace(original_pid) => {
                 if proc.state == ProcessState::WaitingForStreamMap {
                     let (ring, declared_size) = proc.stream_map.take().unwrap();
-                    let ring = validate_untrusted_capability(ring, original_pid);
+                    let ring = ring.validate(original_pid);
                     if ring.certifier() != Actor::Kernel {
                         kill!(hart, proc, "non-kernel shared memory capability")
                     }
@@ -330,7 +328,7 @@ impl SyscallHandler for () {
                     proc.pc = user_pc;
                     let mut dest = get_process(original_pid).lock_if_some().unwrap();
                     dest.messages.push_back(Message {
-                        cap: original,
+                        cap,
                         method: 1000 + stream,
                         args: Vec::new(),
                         sender: hart.current_pid(),
@@ -342,7 +340,7 @@ impl SyscallHandler for () {
                 }
             }
             Actor::Kernel => {
-                let handler = capability::get_handler(original.local_index());
+                let handler = capability::get_handler(cap.local_index());
                 let ring_buffer = handler.map_stream(stream);
                 let ring_buffer_size = size_of_val(ring_buffer);
 
@@ -405,15 +403,15 @@ impl SyscallHandler for () {
         _: usize,
         _: &mut RiscvRegisters,
         hart: &mut HartContext,
-        farthest_cap: Capability<SharedMemory>,
+        cap: Capability<SharedMemory>,
     ) -> (*mut u8, usize) {
         let mut proc = hart.current_process();
-        let original = validate_untrusted_capability(farthest_cap.as_raw(), hart.current_pid());
-        if original.certifier() != Actor::Kernel {
+        let cap = cap.validate(proc.id);
+        if cap.certifier() != Actor::Kernel {
             kill!(hart, proc, "non-kernel shared memory capability")
         }
 
-        let handler = capability::get_handler(original.local_index());
+        let handler = capability::get_handler(cap.local_index());
         let (physical_address, length) = handler.shared_memory();
         let padded_length = length.next_multiple_of(PAGE_SIZE);
 
