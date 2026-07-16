@@ -203,17 +203,16 @@ fn find_free_process_slot() -> Option<(ProcessId, MutexGuard<'static, Option<Pro
 }
 
 pub fn schedule_and_switch_to_userspace(hart: &mut HartContext) -> ! {
-    let Some(next_pid) = find_runnable_process(hart) else {
+    let Some(next) = find_runnable_process(hart) else {
         log_heap_statistics();
         sbi::system_reset(ResetType::Shutdown, ResetReason::NoReason).unwrap()
     };
-    let next = get_process(next_pid).lock_if_some().unwrap();
-    hart.set_current_pid(next_pid);
+    hart.set_current_pid(next.id);
 
     switch_to_userspace_full(next);
 }
 
-pub fn find_runnable_process(hart: &HartContext) -> Option<ProcessId> {
+pub fn find_runnable_process(hart: &HartContext) -> Option<MutexGuard<'static, Process>> {
     let scan_start = match hart.try_current_pid() {
         Some(current) => current.as_u16() + 1,
         None => 0,
@@ -229,7 +228,7 @@ pub fn find_runnable_process(hart: &HartContext) -> Option<ProcessId> {
                 || (process.state == ProcessState::WaitingForStreamMap
                     && process.stream_map.is_some()))
         {
-            return Some(ProcessId::new(scan_index));
+            return Some(process);
         }
     }
 
