@@ -32,9 +32,13 @@ impl<'a, T, Access> Volatile<'a, T, Access> {
     }
 }
 
-impl<T: Copy, Access: Readable> Volatile<'_, T, Access> {
+impl<'a, T: Copy, Access: Readable> Volatile<'a, T, Access> {
     pub fn read(&self) -> T {
         unsafe { self.0.read_volatile() }
+    }
+
+    pub unsafe fn assume_pure_reads(&self) -> &'a T {
+        unsafe { &*self.0 }
     }
 }
 

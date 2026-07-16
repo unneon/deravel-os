@@ -10,6 +10,7 @@ use crate::virtio::input::types::ConfigSelect;
 use crate::virtio::queue::Queue;
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK};
 use crate::virtio::{Capabilities, Isr};
+use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -53,7 +54,8 @@ impl VirtioInput {
         eventq.available.index = QUEUE_SIZE as u16;
         riscv::asm::fence();
 
-        let name = config_str(&mut caps.device, ConfigSelect::IdName, 0);
+        // TODO: Remove allocation once I fugre out SBI physical address situation.
+        let name = config_str(&mut caps.device, ConfigSelect::IdName, 0).to_owned();
         info!("found {name}");
 
         let ring = Box::leak(RingBuffer::new_single_page());
@@ -72,13 +74,12 @@ impl VirtioInput {
 
     pub fn is_keyboard(&self) -> bool {
         let mut state = self.state.lock();
-        config_str(&mut state.device, ConfigSelect::IdName, 0).as_str() == "QEMU Virtio Keyboard"
+        config_str(&mut state.device, ConfigSelect::IdName, 0) == "QEMU Virtio Keyboard"
     }
 
     pub fn is_mouse(&self) -> bool {
         let mut state = self.state.lock();
         let name = config_str(&mut state.device, ConfigSelect::IdName, 0);
-        let name = name.as_str();
         name == "QEMU Virtio Mouse" || name == "QEMU Virtio Tablet"
     }
 }
@@ -103,7 +104,8 @@ impl InterruptHandler for VirtioInput {
 
 impl InputDeviceServer for VirtioInput {
     fn absinfo(&self, _: ProcessId, axis: u16) -> InputAbsinfo {
-        let info = config_absinfo(&mut self.state.lock().device, axis);
+        let mut state = self.state.lock();
+        let info = config_absinfo(&mut state.device, axis);
         InputAbsinfo {
             min: info.min,
             max: info.max,

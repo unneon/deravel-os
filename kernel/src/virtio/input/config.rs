@@ -1,4 +1,3 @@
-use crate::util::forward_fmt;
 use crate::util::volatile::{Volatile, volatile_struct};
 use crate::virtio::input::types::{AbsInfo, ConfigSelect, Devids};
 
@@ -10,11 +9,6 @@ volatile_struct! { pub Config
     u: Readonly ConfigU,
 }
 
-pub struct ConfigString {
-    u: ConfigU,
-    len: u8,
-}
-
 #[allow(dead_code)]
 #[derive(Clone, Copy)]
 pub union ConfigU {
@@ -24,24 +18,16 @@ pub union ConfigU {
     pub ids: Devids,
 }
 
-impl ConfigString {
-    pub fn as_str(&self) -> &str {
-        unsafe { str::from_utf8_unchecked(&self.u.string[..self.len as usize - 1]) }
-    }
+pub fn config_str<'a>(dev: &'a mut Volatile<Config>, select: ConfigSelect, subsel: u8) -> &'a str {
+    dev.select().write(select as u8);
+    dev.subsel().write(subsel);
+    let len = dev.size().read();
+    let string = unsafe { &dev.u().assume_pure_reads().string };
+    str::from_utf8(&string[..len as usize - 1]).unwrap()
 }
 
-forward_fmt! { impl Debug, Display for ConfigString as as_str; }
-
-pub fn config_str(device: &mut Volatile<Config>, select: ConfigSelect, subsel: u8) -> ConfigString {
-    device.select().write(select as u8);
-    device.subsel().write(subsel);
-    let u = device.u().read();
-    let len = device.size().read();
-    ConfigString { u, len }
-}
-
-pub fn config_absinfo(device: &mut Volatile<Config>, axis: u16) -> AbsInfo {
-    device.select().write(ConfigSelect::AbsInfo as u8);
-    device.subsel().write(axis as u8);
-    unsafe { device.u().read().abs }
+pub fn config_absinfo<'a>(dev: &'a mut Volatile<Config>, axis: u16) -> &'a AbsInfo {
+    dev.select().write(ConfigSelect::AbsInfo as u8);
+    dev.subsel().write(axis as u8);
+    unsafe { &dev.u().assume_pure_reads().abs }
 }
