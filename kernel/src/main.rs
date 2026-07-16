@@ -200,7 +200,13 @@ impl SyscallHandler for () {
             let original = validate_untrusted_capability(farthest_cap, hart.current_pid());
             match original.certifier() {
                 Actor::Userspace(dest) => {
-                    let mut dest = get_process(dest).lock_if_some().unwrap();
+                    let Some(mut dest) = get_process(dest).lock_if_some() else {
+                        // This can't actually happen because capability validation will catch this
+                        // earlier, but let's check in case the design changes later.
+                        kill_process(current_proc, "ipc send to nonexistent process");
+                        schedule_and_switch_to_userspace(hart)
+                    };
+
                     dest.messages.push_back((
                         original,
                         method,
