@@ -58,8 +58,7 @@ pub fn load_elf(elf_bytes: &[u8], page_table: &mut TopPageTable) -> usize {
                 size,
             );
 
-            let flat_pointer = Vec::leak(pages).as_mut_ptr();
-            let flat_memory = unsafe { core::slice::from_raw_parts_mut(flat_pointer, size) };
+            let flat_memory = Vec::leak(pages);
             flat_memory[..segment.p_filesz as usize].copy_from_slice(data);
             flat_memory[segment.p_memsz as usize..].fill(0);
         } else {
