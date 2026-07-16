@@ -32,7 +32,7 @@ impl ConfigString {
 
 forward_fmt! { impl Debug, Display for ConfigString as as_str; }
 
-pub fn config_str(device: Volatile<Config>, select: ConfigSelect, subsel: u8) -> ConfigString {
+pub fn config_str(device: &mut Volatile<Config>, select: ConfigSelect, subsel: u8) -> ConfigString {
     device.select().write(select as u8);
     device.subsel().write(subsel);
     let u = device.u().read();
@@ -40,7 +40,7 @@ pub fn config_str(device: Volatile<Config>, select: ConfigSelect, subsel: u8) ->
     ConfigString { u, len }
 }
 
-pub fn config_absinfo(device: Volatile<Config>, axis: u16) -> AbsInfo {
+pub fn config_absinfo(device: &mut Volatile<Config>, axis: u16) -> AbsInfo {
     device.select().write(ConfigSelect::AbsInfo as u8);
     device.subsel().write(axis as u8);
     unsafe { device.u().read().abs }

@@ -10,7 +10,7 @@ pub macro volatile_struct($struct_vis:vis $struct:ident $(<$($param:ident),*>)? 
 
     impl$(<$($param),*>)? $struct $(<$($param),*>)? $(where $param0: $req0)? {
         $(#[allow(dead_code)]
-        $field_vis fn $field_name(self: Volatile<Self>) -> Volatile<$field_type, crate::util::volatile::$access> {
+        $field_vis fn $field_name<'a, Access>(self: &'a mut Volatile<Self, Access>) -> Volatile<'a, $field_type, crate::util::volatile::$access> {
             unsafe { Volatile::new(self.0.byte_add(core::mem::offset_of!($struct, $field_name)) as *mut $field_type) }
         })*
     }
@@ -19,39 +19,40 @@ pub macro volatile_struct($struct_vis:vis $struct:ident $(<$($param:ident),*>)? 
 pub trait Readable {}
 pub trait Writable {}
 
-pub struct Volatile<T, Access = ReadWrite>(*mut T, PhantomData<Access>);
+pub struct Volatile<'a, T, Access = ReadWrite>(*mut T, PhantomData<(&'a mut T, Access)>);
 
 pub struct VolatileCellWithPureReads<T>(UnsafeCell<T>);
 
 pub struct Readonly;
 pub struct ReadWrite;
 
-impl<T, Access> Volatile<T, Access> {
-    pub unsafe fn new(pointer: *mut T) -> Volatile<T, Access> {
+impl<'a, T, Access> Volatile<'a, T, Access> {
+    pub unsafe fn new(pointer: *mut T) -> Volatile<'a, T, Access> {
         Volatile(pointer, PhantomData)
     }
 }
 
-impl<T: Copy, Access: Readable> Volatile<T, Access> {
+impl<T: Copy, Access: Readable> Volatile<'_, T, Access> {
     pub fn read(&self) -> T {
         unsafe { self.0.read_volatile() }
     }
 }
 
-impl<T, Access: Writable> Volatile<T, Access> {
-    pub fn write(&self, value: T) {
+impl<T, Access: Writable> Volatile<'_, T, Access> {
+    pub fn write(&mut self, value: T) {
         unsafe { self.0.write_volatile(value) }
     }
 }
 
-impl<T: BitOr<Output = T>, Access: Readable + Writable> Volatile<T, Access> {
-    pub fn write_bitor(&self, value: T) {
+impl<T: BitOr<Output = T>, Access: Readable + Writable> Volatile<'_, T, Access> {
+    pub fn write_bitor(&mut self, value: T) {
         unsafe { self.0.write_volatile(self.0.read_volatile() | value) }
     }
 }
 
-impl<T, Access, const N: usize> Volatile<[T; N], Access> {
-    pub fn index(&self, index: usize) -> Volatile<T, Access> {
+impl<'a, T: 'a, Access, const N: usize> Volatile<'a, [T; N], Access> {
+    pub fn index(&self, index: usize) -> Volatile<'a, T, Access> {
+        assert!(index < N);
         unsafe { Volatile::new((self.0 as *mut T).add(index)) }
     }
 }
@@ -80,13 +81,7 @@ impl Readable for ReadWrite {}
 
 impl Writable for ReadWrite {}
 
-impl<T, Access> From<Volatile<T, Access>> for *mut T {
-    fn from(value: Volatile<T, Access>) -> Self {
-        value.0
-    }
-}
-
-impl<T, Access> Deref for Volatile<T, Access> {
+impl<T, Access> Deref for Volatile<'_, T, Access> {
     type Target = T;
 
     #[track_caller]
@@ -95,20 +90,6 @@ impl<T, Access> Deref for Volatile<T, Access> {
     }
 }
 
-impl<T, Access> Clone for Volatile<T, Access> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
+unsafe impl<T: Send, Access> Send for Volatile<'_, T, Access> {}
 
-impl<T, Access> Copy for Volatile<T, Access> {}
-
-impl<T, Access> core::fmt::Display for Volatile<T, Access> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{:#x}", self.0 as usize)
-    }
-}
-
-unsafe impl<T, Access> Send for Volatile<T, Access> {}
-
-unsafe impl<T, Access> Sync for Volatile<T, Access> {}
+unsafe impl<T: Send> Sync for Volatile<'_, T, Readonly> {}

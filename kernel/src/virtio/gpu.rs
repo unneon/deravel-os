@@ -4,11 +4,11 @@ use crate::capability::grant_kernel_capability;
 use crate::drvli::DisplayServer;
 use crate::interrupt::InterruptHandler;
 use crate::sync::Mutex;
-use crate::util::volatile::{Readonly, Volatile, volatile_struct};
-use crate::virtio::Capabilities;
+use crate::util::volatile::volatile_struct;
 use crate::virtio::gpu::types::*;
 use crate::virtio::queue::Queue;
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, features};
+use crate::virtio::{Capabilities, Isr};
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -31,7 +31,7 @@ features! { VirtioGpu Features 0
 }
 
 pub struct VirtioGpu {
-    isr: Volatile<u8, Readonly>,
+    isr: Isr,
     controlq: Queue<0>,
     cursorq: Queue<1>,
     width: u32,
@@ -43,12 +43,12 @@ pub struct VirtioGpu {
 
 impl VirtioGpu {
     pub fn new(capabilities: Capabilities<Config>) -> VirtioGpu {
-        let common = capabilities.common;
+        let mut common = capabilities.common;
         common.device_status().write(0);
         common.device_status().write_bitor(STATUS_ACKNOWLEDGE as u8);
         common.device_status().write_bitor(STATUS_DRIVER as u8);
-        let controlq = Queue::new(common, &capabilities.notify, 4);
-        let cursorq = Queue::new(common, &capabilities.notify, 4);
+        let controlq = Queue::new(&mut common, &capabilities.notify, 4);
+        let cursorq = Queue::new(&mut common, &capabilities.notify, 4);
         common.device_status().write_bitor(STATUS_DRIVER_OK as u8);
 
         let mut gpu = VirtioGpu {
@@ -145,7 +145,7 @@ impl VirtioGpu {
 
 impl InterruptHandler for Mutex<VirtioGpu> {
     fn handle(&self) {
-        self.lock().isr.read();
+        self.lock().isr.clear();
     }
 }
 

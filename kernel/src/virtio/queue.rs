@@ -43,7 +43,7 @@ pub struct Queue<const INDEX: u16> {
     pub descriptors: Vec<Descriptor>,
     pub available: Box<AvailableRing>,
     pub used: Box<UsedRing>,
-    notify: Volatile<u16>,
+    notify: Volatile<'static, u16>,
 }
 
 const VIRTQ_DESC_F_NEXT: u16 = 1;
@@ -75,7 +75,7 @@ impl UsedRing {
 
 impl<const INDEX: u16> Queue<INDEX> {
     pub fn new(
-        common: Volatile<VirtioCommonConfig>,
+        common: &mut Volatile<VirtioCommonConfig>,
         notify: &NotifySlot,
         size: usize,
     ) -> Queue<INDEX> {

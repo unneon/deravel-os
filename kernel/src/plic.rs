@@ -28,7 +28,7 @@ const MAX_SOURCES: usize = 1024;
 static PLIC: AtomicPtr<Plic> = AtomicPtr::null();
 
 pub fn initialize_plic(device_tree: &Fdt) {
-    let plic = find_plic(device_tree).unwrap();
+    let mut plic = find_plic(device_tree).unwrap();
     let supported_external = supported_external_interrupts(device_tree).unwrap();
     for e in 1..=supported_external.min(MAX_SOURCES - 1) {
         plic.priority().index(e).write(1);
@@ -47,7 +47,7 @@ pub fn plic_complete(irq: u32) {
     get_plic().contexts().index(1).claim_complete().write(irq);
 }
 
-fn find_plic(device_tree: &Fdt) -> Option<Volatile<Plic>> {
+fn find_plic(device_tree: &Fdt) -> Option<Volatile<'static, Plic>> {
     let address = device_tree
         .find_node("/soc/plic")?
         .reg()?
@@ -58,7 +58,7 @@ fn find_plic(device_tree: &Fdt) -> Option<Volatile<Plic>> {
     Some(unsafe { Volatile::new(address) })
 }
 
-fn get_plic() -> Volatile<Plic> {
+fn get_plic() -> Volatile<'static, Plic> {
     let address = PLIC.load(Ordering::Relaxed);
     assert!(!address.is_null());
     let address = physical_to_identity_mapped(address);

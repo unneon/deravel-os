@@ -2,9 +2,9 @@ use crate::drvli::NetworkServer;
 use crate::interrupt::InterruptHandler;
 use crate::sync::Mutex;
 use crate::util::volatile::{Readonly, Volatile, volatile_struct};
-use crate::virtio::Capabilities;
 use crate::virtio::queue::{QUEUE_SIZE, Queue};
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, features};
+use crate::virtio::{Capabilities, Isr};
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use deravel_types::ProcessId;
@@ -48,12 +48,12 @@ pub struct PacketReceiveToken<'a>(&'a mut Queue<0>, &'a mut [Packet<[u8; 1514]>;
 pub struct PacketTransmitToken<'a>(&'a mut Queue<1>, &'a mut [Packet<[u8; 1514]>; QUEUE_SIZE]);
 
 pub struct VirtioNet {
-    isr: Volatile<u8, Readonly>,
-    device: Volatile<Config>,
+    isr: Isr,
     state: Mutex<State>,
 }
 
 struct State {
+    device: Volatile<'static, Config, Readonly>,
     rx_queue: Queue<0>,
     tx_queue: Queue<1>,
     rx_buffers: Box<[Packet<[u8; 1514]>; QUEUE_SIZE]>,
@@ -61,8 +61,8 @@ struct State {
 }
 
 impl VirtioNet {
-    pub fn new(caps: Capabilities<Config>) -> VirtioNet {
-        let common = caps.common;
+    pub fn new(caps: Capabilities<Config, Readonly>) -> VirtioNet {
+        let mut common = caps.common;
         common.device_status().write(0);
         common.device_status().write_bitor(STATUS_ACKNOWLEDGE as u8);
         common.device_status().write_bitor(STATUS_DRIVER as u8);
@@ -76,8 +76,8 @@ impl VirtioNet {
         common.driver_feature_select().write(0);
         common.driver_feature().write(driver_features.into());
 
-        let mut rx_queue = Queue::new(common, &caps.notify, QUEUE_SIZE);
-        let mut tx_queue = Queue::new(common, &caps.notify, QUEUE_SIZE);
+        let mut rx_queue = Queue::new(&mut common, &caps.notify, QUEUE_SIZE);
+        let mut tx_queue = Queue::new(&mut common, &caps.notify, QUEUE_SIZE);
 
         let rx_buffers = initialize_receive_buffers(&mut rx_queue);
         let tx_buffers = initialize_transmit_buffers(&mut tx_queue);
@@ -86,8 +86,8 @@ impl VirtioNet {
 
         VirtioNet {
             isr: caps.isr,
-            device: caps.device,
             state: Mutex::new(State {
+                device: caps.device,
                 rx_queue,
                 tx_queue,
                 rx_buffers,
@@ -101,7 +101,7 @@ impl NetworkServer for VirtioNet {
     fn dns(&self, _: ProcessId, domain: &str) -> String {
         let mut state = self.state.lock();
         let mut iface = Interface::new(
-            smoltcp::iface::Config::new(HardwareAddress::Ethernet(self.device.mac().read())),
+            smoltcp::iface::Config::new(HardwareAddress::Ethernet(state.device.mac().read())),
             &mut *state,
             Instant::from_secs(0),
         );
@@ -146,7 +146,7 @@ impl NetworkServer for VirtioNet {
 
 impl InterruptHandler for VirtioNet {
     fn handle(&self) {
-        self.isr.read();
+        self.isr.clear();
     }
 }
 

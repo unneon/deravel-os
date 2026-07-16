@@ -4,12 +4,12 @@ mod types;
 use crate::drvli::InputDeviceServer;
 use crate::interrupt::InterruptHandler;
 use crate::sync::Mutex;
-use crate::util::volatile::{Readonly, Volatile};
-use crate::virtio::Capabilities;
+use crate::util::volatile::Volatile;
 use crate::virtio::input::config::{Config, config_absinfo, config_str};
 use crate::virtio::input::types::ConfigSelect;
 use crate::virtio::queue::Queue;
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK};
+use crate::virtio::{Capabilities, Isr};
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -19,11 +19,11 @@ use log::info;
 struct State {
     eventq: Queue<0>,
     buffers: Vec<InputEvent>,
-    device: Volatile<Config>,
+    device: Volatile<'static, Config>,
 }
 
 pub struct VirtioInput {
-    isr: Volatile<u8, Readonly>,
+    isr: Isr,
     ring: &'static RingBuffer<InputEvent>,
     state: Mutex<State>,
 }
@@ -31,8 +31,8 @@ pub struct VirtioInput {
 const QUEUE_SIZE: usize = 64;
 
 impl VirtioInput {
-    pub fn new(caps: Capabilities<Config>) -> VirtioInput {
-        let common = caps.common;
+    pub fn new(mut caps: Capabilities<Config>) -> VirtioInput {
+        let mut common = caps.common;
         common.device_status().write(0);
         common.device_status().write_bitor(STATUS_ACKNOWLEDGE as u8);
         common.device_status().write_bitor(STATUS_DRIVER as u8);
@@ -45,7 +45,7 @@ impl VirtioInput {
             };
             QUEUE_SIZE
         ];
-        let mut eventq = Queue::new(common, &caps.notify, QUEUE_SIZE);
+        let mut eventq = Queue::new(&mut common, &caps.notify, QUEUE_SIZE);
         for (i, buffer) in buffers.iter_mut().enumerate() {
             eventq.descriptor_writeonly(i as u16, buffer, None);
             eventq.available.ring[i] = i as u16;
@@ -53,7 +53,7 @@ impl VirtioInput {
         eventq.available.index = QUEUE_SIZE as u16;
         riscv::asm::fence();
 
-        let name = config_str(caps.device, ConfigSelect::IdName, 0);
+        let name = config_str(&mut caps.device, ConfigSelect::IdName, 0);
         info!("found {name}");
 
         let ring = Box::leak(RingBuffer::new_single_page());
@@ -71,13 +71,13 @@ impl VirtioInput {
     }
 
     pub fn is_keyboard(&self) -> bool {
-        let state = self.state.lock();
-        config_str(state.device, ConfigSelect::IdName, 0).as_str() == "QEMU Virtio Keyboard"
+        let mut state = self.state.lock();
+        config_str(&mut state.device, ConfigSelect::IdName, 0).as_str() == "QEMU Virtio Keyboard"
     }
 
     pub fn is_mouse(&self) -> bool {
-        let state = self.state.lock();
-        let name = config_str(state.device, ConfigSelect::IdName, 0);
+        let mut state = self.state.lock();
+        let name = config_str(&mut state.device, ConfigSelect::IdName, 0);
         let name = name.as_str();
         name == "QEMU Virtio Mouse" || name == "QEMU Virtio Tablet"
     }
@@ -86,7 +86,7 @@ impl VirtioInput {
 impl InterruptHandler for VirtioInput {
     fn handle(&self) {
         let mut state = self.state.lock();
-        self.isr.read();
+        self.isr.clear();
         let used_start = state.eventq.available.index - QUEUE_SIZE as u16;
         let used_end = unsafe { (&raw const state.eventq.used.index).read_volatile() };
         riscv::asm::fence();
@@ -103,7 +103,7 @@ impl InterruptHandler for VirtioInput {
 
 impl InputDeviceServer for VirtioInput {
     fn absinfo(&self, _: ProcessId, axis: u16) -> InputAbsinfo {
-        let info = config_absinfo(self.state.lock().device, axis);
+        let info = config_absinfo(&mut self.state.lock().device, axis);
         InputAbsinfo {
             min: info.min,
             max: info.max,

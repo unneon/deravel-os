@@ -2,15 +2,15 @@ use crate::drvli::DriveServer;
 use crate::interrupt::InterruptHandler;
 use crate::sync::Mutex;
 use crate::util::volatile::{Readonly, Volatile, volatile_struct};
-use crate::virtio::Capabilities;
 use crate::virtio::queue::{QUEUE_SIZE, Queue};
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK};
+use crate::virtio::{Capabilities, Isr};
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use deravel_types::ProcessId;
 use log::*;
 
-volatile_struct! { pub VirtioBlkConfig
+volatile_struct! { pub Config
     capacity: Readonly u64,
 }
 
@@ -22,12 +22,12 @@ struct Header {
 }
 
 pub struct VirtioBlk {
-    isr: Volatile<u8, Readonly>,
-    device: Volatile<VirtioBlkConfig>,
+    isr: Isr,
     state: Mutex<State>,
 }
 
 struct State {
+    device: Volatile<'static, Config, Readonly>,
     queue: Queue<0>,
 }
 
@@ -38,8 +38,8 @@ pub const VIRTIO_BLK_T_IN: u32 = 0;
 pub const VIRTIO_BLK_T_OUT: u32 = 1;
 
 impl VirtioBlk {
-    pub fn new(caps: Capabilities<VirtioBlkConfig>) -> VirtioBlk {
-        let common = caps.common;
+    pub fn new(mut caps: Capabilities<Config, Readonly>) -> VirtioBlk {
+        let mut common = caps.common;
         common.device_status().write(0);
         common.device_status().write_bitor(STATUS_ACKNOWLEDGE as u8);
         common.device_status().write_bitor(STATUS_DRIVER as u8);
@@ -47,13 +47,15 @@ impl VirtioBlk {
         let capacity = caps.device.capacity().read();
         info!("drive has a capacity of {capacity} sectors");
 
-        let queue = Queue::new(common, &caps.notify, QUEUE_SIZE);
+        let queue = Queue::new(&mut common, &caps.notify, QUEUE_SIZE);
         common.device_status().write_bitor(STATUS_DRIVER_OK as u8);
 
         VirtioBlk {
             isr: caps.isr,
-            device: caps.device,
-            state: Mutex::new(State { queue }),
+            state: Mutex::new(State {
+                device: caps.device,
+                queue,
+            }),
         }
     }
 
@@ -88,13 +90,13 @@ impl VirtioBlk {
     }
 
     pub fn capacity(&self) -> usize {
-        self.device.capacity().read() as usize
+        self.state.lock().device.capacity().read() as usize
     }
 }
 
 impl InterruptHandler for VirtioBlk {
     fn handle(&self) {
-        self.isr.read();
+        self.isr.clear();
     }
 }
 

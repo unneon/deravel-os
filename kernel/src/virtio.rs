@@ -3,7 +3,7 @@ use crate::pci::AllocatedRange;
 use crate::pci::capability::{PciCapability, VendorPciCapability};
 use crate::pci::config::GeneralDeviceConfig;
 use crate::sync::Mutex;
-use crate::util::volatile::{Readonly, Volatile, volatile_struct};
+use crate::util::volatile::{ReadWrite, Readonly, Volatile, volatile_struct};
 use crate::virtio::blk::VirtioBlk;
 use crate::virtio::gpu::VirtioGpu;
 use crate::virtio::input::VirtioInput;
@@ -17,11 +17,15 @@ pub mod net;
 pub mod queue;
 pub mod registers;
 
-pub struct Capabilities<T> {
-    common: Volatile<VirtioCommonConfig>,
+pub struct Capabilities<T: 'static, Access = ReadWrite> {
+    common: Volatile<'static, VirtioCommonConfig>,
     notify: NotifySlot,
-    isr: Volatile<u8, Readonly>,
-    device: Volatile<T>,
+    isr: Isr,
+    device: Volatile<'static, T, Access>,
+}
+
+pub struct Isr {
+    ptr: Volatile<'static, u8, Readonly>,
 }
 
 pub struct NotifySlot {
@@ -73,12 +77,20 @@ const VIRTIO_PCI_CAP_NOTIFY_CFG: u8 = 2;
 const VIRTIO_PCI_CAP_ISR_CFG: u8 = 3;
 const VIRTIO_PCI_CAP_DEVICE_CFG: u8 = 4;
 
+impl Isr {
+    fn clear(&self) {
+        self.ptr.read();
+    }
+}
+
 impl NotifySlot {
-    unsafe fn select(&self, common: Volatile<VirtioCommonConfig>) -> Volatile<u16> {
+    unsafe fn select(&self, common: &mut Volatile<VirtioCommonConfig>) -> Volatile<'static, u16> {
         let offset = common.queue_notify_off().read() as usize * self.off_multiplier as usize;
         unsafe { Volatile::new(physical_to_identity_mapped(self.base.byte_add(offset))) }
     }
 }
+
+unsafe impl Sync for Isr {}
 
 unsafe impl VendorPciCapability for VirtioPciCapability {}
 
@@ -118,10 +130,10 @@ pub fn initialize_net(
     Box::leak(Box::new(virtio_net))
 }
 
-fn extract_capabilities<T>(
+fn extract_capabilities<T, Access>(
     config: &GeneralDeviceConfig,
     bars: &[AllocatedRange; 6],
-) -> Capabilities<T> {
+) -> Capabilities<T, Access> {
     let mut common = None;
     let mut notify = None;
     let mut isr = None;
@@ -144,7 +156,9 @@ fn extract_capabilities<T>(
                 });
             } else if cap.cfg_type == VIRTIO_PCI_CAP_ISR_CFG {
                 let address = physical_to_identity_mapped(address as *mut u8);
-                isr = Some(unsafe { Volatile::<_, Readonly>::new(address) });
+                isr = Some(Isr {
+                    ptr: unsafe { Volatile::<_, Readonly>::new(address) },
+                });
             } else if cap.cfg_type == VIRTIO_PCI_CAP_DEVICE_CFG {
                 assert!(device.is_none());
                 let address = physical_to_identity_mapped(address as *mut T);
