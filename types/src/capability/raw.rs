@@ -9,7 +9,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 pub struct RawCapability(&'static CapabilityCertificate);
 
 #[derive(Debug)]
-pub struct InvalidCapabilityError(pub *const CapabilityCertificate);
+pub struct InvalidCapabilityError;
 
 impl RawCapability {
     pub fn new(certifier: impl Into<Actor>, local_index: usize) -> RawCapability {
@@ -45,11 +45,10 @@ impl TryFrom<*const CapabilityCertificate> for RawCapability {
 
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
     fn try_from(ptr: *const CapabilityCertificate) -> Result<Self, Self::Error> {
-        if is_ptr_valid(ptr) {
-            Ok(RawCapability(unsafe { &*ptr }))
-        } else {
-            Err(InvalidCapabilityError(ptr))
+        if !is_ptr_valid(ptr) {
+            return Err(InvalidCapabilityError);
         }
+        Ok(RawCapability(unsafe { &*ptr }))
     }
 }
 
@@ -74,7 +73,7 @@ impl Serialize for RawCapability {
 
 impl core::fmt::Display for InvalidCapabilityError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "invalid capability {:?}", self.0)
+        write!(f, "invalid capability")
     }
 }
 

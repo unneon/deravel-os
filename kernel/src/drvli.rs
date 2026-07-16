@@ -5,6 +5,7 @@
 use crate::RiscvRegisters;
 use crate::capability::Handler;
 use crate::hart::HartContext;
+use crate::user::{UserPtr, UserSyscallError};
 use alloc::string::String;
 use alloc::vec::Vec;
 use deravel_types::abi::to_reg;

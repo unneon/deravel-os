@@ -100,7 +100,7 @@ impl Type<'_> {
         use Type::*;
         match (self, ctx) {
             (Array(inner) | ConstArray(inner), SyscallKernelArg) => {
-                format!("&mut [{}]", inner.rust(ctx)).into()
+                format!("UserPtr<[{}]>", inner.rust(ctx)).into()
             }
             (Bytes, Arg) => "&[u8]".into(),
             (Bytes, NormalRet | GrantableRet) => "Vec<u8>".into(),

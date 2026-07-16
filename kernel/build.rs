@@ -163,7 +163,7 @@ fn generate_syscall_trait(drvli: &Drvli, out: &mut String) {
 }
 
 fn generate_syscall_dispatch(drvli: &Drvli, out: &mut String) {
-    writeln!(out, "pub fn dispatch_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut HartContext) -> Result<!, InvalidCapabilityError> {{").unwrap();
+    writeln!(out, "pub fn dispatch_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut HartContext) -> Result<!, UserSyscallError> {{").unwrap();
     writeln!(out, "    #![allow(clippy::diverging_sub_expression)]").unwrap();
     writeln!(out, "    match registers.a6 {{").unwrap();
     for (syscall_number, syscall) in drvli.syscalls.iter().enumerate() {
@@ -186,7 +186,7 @@ fn generate_syscall_dispatch(drvli: &Drvli, out: &mut String) {
                 Type::Array(inner) | Type::ConstArray(inner) if **inner == Type::U8 => {
                     let ap = format!("registers.a{used_arg_registers}");
                     let as_ = format!("registers.a{}", used_arg_registers + 1);
-                    format!("unsafe {{ core::slice::from_raw_parts_mut({ap} as *mut u8, {as_}) }}")
+                    format!("UserPtr::from_slice({ap} as *mut u8, {as_})?")
                 }
                 _ => unimplemented!("syscall argument {arg_name:?} {arg_type:?}"),
             };

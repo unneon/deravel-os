@@ -6,6 +6,7 @@
 #![feature(never_type)]
 #![feature(ptr_metadata)]
 #![feature(slice_from_ptr_range)]
+#![feature(slice_ptr_get)]
 #![feature(unsafe_cell_access)]
 #![allow(incomplete_features)]
 #![allow(clippy::deref_addrof)]
@@ -34,6 +35,7 @@ mod process_spawner;
 mod sbi;
 mod shared_memory;
 mod sync;
+mod user;
 mod util;
 mod virtio;
 
@@ -56,6 +58,7 @@ use crate::process::{
 };
 use crate::process_spawner::ProcessSpawnerService;
 use crate::sbi::{ResetReason, ResetType, SbiShutdown, log_sbi_metadata};
+use crate::user::UserPtr;
 use ::log::*;
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
@@ -182,13 +185,22 @@ impl SyscallHandler for () {
         hart: &mut HartContext,
         farthest_cap: RawCapability,
         method: usize,
-        args_buffer: &mut [u8],
-        result_buffer: &mut [u8],
+        args_buffer: UserPtr<[u8]>,
+        mut result_buffer: UserPtr<[u8]>,
     ) -> usize {
         let mut current_proc = hart.current_process();
         if current_proc.state == ProcessState::WaitingForReply {
             let reply = current_proc.reply.take().unwrap();
-            result_buffer[..reply.len()].copy_from_slice(&reply);
+            if let Err(err) = result_buffer.write(&reply) {
+                error!(
+                    "killed {}[{:?}] due to {err}",
+                    hart.current_process().name.unwrap(),
+                    hart.current_pid()
+                );
+                drop(current_proc);
+                kill_process(hart.current_pid());
+                schedule_and_switch_to_userspace(hart)
+            };
             current_proc.state = ProcessState::Runnable;
             reply.len()
         } else {
@@ -203,7 +215,7 @@ impl SyscallHandler for () {
                     dest.messages.get_or_insert_default().push_back((
                         original,
                         method,
-                        args_buffer.to_owned(),
+                        args_buffer.copy(),
                         hart.current_pid(),
                     ));
 
@@ -214,8 +226,17 @@ impl SyscallHandler for () {
                 Actor::Kernel => {
                     drop(current_proc);
                     let handler = capability::get_handler(original.local_index());
-                    let result = handler.call_method(method, args_buffer, hart.current_pid());
-                    result_buffer[..result.len()].copy_from_slice(&result);
+                    let result =
+                        handler.call_method(method, &args_buffer.copy(), hart.current_pid());
+                    if let Err(err) = result_buffer.write(&result) {
+                        error!(
+                            "killed {}[{:?}] due to {err}",
+                            hart.current_process().name.unwrap(),
+                            hart.current_pid()
+                        );
+                        kill_process(hart.current_pid());
+                        schedule_and_switch_to_userspace(hart)
+                    };
                     hart.current_process().state = ProcessState::Runnable;
                     result.len()
                 }
@@ -227,14 +248,23 @@ impl SyscallHandler for () {
         _: usize,
         _: &mut RiscvRegisters,
         hart: &mut HartContext,
-        args_buffer: &mut [u8],
+        mut args_buffer: UserPtr<[u8]>,
     ) -> (Option<RawCapability>, usize, usize, Option<ProcessId>) {
         let mut current_proc = hart.current_process();
         assert!(current_proc.currently_serving.is_none());
         if let Some((cap, method, args, sender)) =
             current_proc.messages.as_mut().and_then(|q| q.pop_front())
         {
-            args_buffer[..args.len()].copy_from_slice(&args);
+            if let Err(err) = args_buffer.write(&args) {
+                error!(
+                    "killed {}[{:?}] due to {err}",
+                    current_proc.name.unwrap(),
+                    hart.current_pid()
+                );
+                drop(current_proc);
+                kill_process(hart.current_pid());
+                schedule_and_switch_to_userspace(hart)
+            };
             current_proc.currently_serving = Some(sender);
             (Some(cap), method, args.len(), Some(sender))
         } else {
@@ -242,13 +272,13 @@ impl SyscallHandler for () {
         }
     }
 
-    fn ipc_reply(_: usize, _: &mut RiscvRegisters, hart: &mut HartContext, result: &mut [u8]) {
+    fn ipc_reply(_: usize, _: &mut RiscvRegisters, hart: &mut HartContext, result: UserPtr<[u8]>) {
         let caller = hart.current_process().currently_serving.take().unwrap();
         let mut caller = get_process(caller).lock();
         if caller.state == ProcessState::WaitingForReply {
-            caller.reply = Some(Box::new(result.to_owned()));
+            caller.reply = Some(Box::new(result.copy()));
         } else if caller.state == ProcessState::WaitingForStreamMap {
-            caller.stream_map = Some(serde_json::from_slice(result).unwrap());
+            caller.stream_map = Some(serde_json::from_slice(&result.copy()).unwrap());
         } else {
             unimplemented!()
         }
@@ -409,10 +439,10 @@ impl SyscallHandler for () {
         _: usize,
         _: &mut RiscvRegisters,
         hart: &mut HartContext,
-        message: &mut [u8],
+        message: UserPtr<[u8]>,
         level: u64,
     ) {
-        let text = str::from_utf8(message).unwrap().to_owned();
+        let text = str::from_utf8(&message.copy()).unwrap().to_owned();
         let level = match level {
             0 => Level::Error,
             1 => Level::Warn,
