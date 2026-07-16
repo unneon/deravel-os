@@ -39,3 +39,9 @@ pub fn config_str(device: Volatile<Config>, select: ConfigSelect, subsel: u8) ->
     let len = device.size().read();
     ConfigString { u, len }
 }
+
+pub fn config_absinfo(device: Volatile<Config>, axis: u16) -> AbsInfo {
+    device.select().write(ConfigSelect::AbsInfo as u8);
+    device.subsel().write(axis as u8);
+    unsafe { device.u().read().abs }
+}

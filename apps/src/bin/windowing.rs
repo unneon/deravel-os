@@ -5,7 +5,8 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 use deravel_kernel_api::input::{
-    BTN_LEFT, EV_KEY, EV_REL, EV_SYN, KEY_ESC, KEY_LEFTALT, KEY_Q, KEY_T, REL_X, REL_Y,
+    ABS_X, ABS_Y, BTN_LEFT, EV_ABS, EV_KEY, EV_REL, EV_SYN, KEY_ESC, KEY_LEFTALT, KEY_Q, KEY_T,
+    REL_X, REL_Y,
 };
 use deravel_kernel_api::*;
 use log::*;
@@ -31,6 +32,8 @@ struct Server {
     global_shortcut: Shortcut,
     shell_spawner: Capability<ShellSpawner>,
     terminal_spawner: Capability<TerminalSpawner>,
+    abs_x_info: InputAbsinfo,
+    abs_y_info: InputAbsinfo,
 }
 
 struct WindowData {
@@ -182,6 +185,12 @@ impl Observer<InputEvent, MouseTag> for Server {
                     .saturating_add_signed(delta)
                     .min(self.display_height);
             }
+        } else if event.type_ == EV_ABS {
+            if event.code == ABS_X {
+                self.cursor_x = from_abs(event.value, &self.abs_x_info, self.display_width);
+            } else if event.code == ABS_Y {
+                self.cursor_y = from_abs(event.value, &self.abs_y_info, self.display_height);
+            }
         } else if event.type_ == EV_SYN {
             self.display
                 .update_cursor(self.cursor_x as u32, self.cursor_y as u32);
@@ -215,6 +224,8 @@ fn main(args: Args) {
         global_shortcut: Shortcut::NotStarted,
         shell_spawner: args.shell,
         terminal_spawner: args.terminal,
+        abs_x_info: args.mouse.absinfo(ABS_X),
+        abs_y_info: args.mouse.absinfo(ABS_Y),
     };
 
     let mut dispatch = Dispatch::new(server);
@@ -231,6 +242,10 @@ fn initialize_cursor(red: u8, green: u8, blue: u8, size: usize, display: Capabil
         }
     }
     display.set_cursor_image(&image);
+}
+
+fn from_abs(value: u32, info: &InputAbsinfo, res: usize) -> usize {
+    (((value - info.min) as u64 * res as u64) / (info.max - info.min) as u64) as usize
 }
 
 app! { main Windowing }

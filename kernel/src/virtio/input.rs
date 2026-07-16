@@ -6,24 +6,24 @@ use crate::interrupt::InterruptHandler;
 use crate::sync::Mutex;
 use crate::util::volatile::{Readonly, Volatile};
 use crate::virtio::Capabilities;
-use crate::virtio::input::config::{Config, config_str};
+use crate::virtio::input::config::{Config, config_absinfo, config_str};
 use crate::virtio::input::types::ConfigSelect;
 use crate::virtio::queue::Queue;
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK};
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
-use deravel_types::{InputEvent, RingBuffer};
+use deravel_types::{InputAbsinfo, InputEvent, ProcessId, RingBuffer};
 use log::info;
 
 struct State {
     eventq: Queue<0>,
     buffers: Vec<InputEvent>,
+    device: Volatile<Config>,
 }
 
 pub struct VirtioInput {
     isr: Volatile<u8, Readonly>,
-    device: Volatile<Config>,
     ring: &'static RingBuffer<InputEvent>,
     state: Mutex<State>,
 }
@@ -61,18 +61,25 @@ impl VirtioInput {
         common.device_status().write_bitor(STATUS_DRIVER_OK as u8);
         VirtioInput {
             isr: caps.isr,
-            device: caps.device,
             ring,
-            state: Mutex::new(State { eventq, buffers }),
+            state: Mutex::new(State {
+                eventq,
+                buffers,
+                device: caps.device,
+            }),
         }
     }
 
     pub fn is_keyboard(&self) -> bool {
-        config_str(self.device, ConfigSelect::IdName, 0).as_str() == "QEMU Virtio Keyboard"
+        let state = self.state.lock();
+        config_str(state.device, ConfigSelect::IdName, 0).as_str() == "QEMU Virtio Keyboard"
     }
 
     pub fn is_mouse(&self) -> bool {
-        config_str(self.device, ConfigSelect::IdName, 0).as_str() == "QEMU Virtio Mouse"
+        let state = self.state.lock();
+        let name = config_str(state.device, ConfigSelect::IdName, 0);
+        let name = name.as_str();
+        name == "QEMU Virtio Mouse" || name == "QEMU Virtio Tablet"
     }
 }
 
@@ -95,6 +102,17 @@ impl InterruptHandler for VirtioInput {
 }
 
 impl InputDeviceServer for VirtioInput {
+    fn absinfo(&self, _: ProcessId, axis: u16) -> InputAbsinfo {
+        let info = config_absinfo(self.state.lock().device, axis);
+        InputAbsinfo {
+            min: info.min,
+            max: info.max,
+            fuzz: info.fuzz,
+            flat: info.flat,
+            res: info.res,
+        }
+    }
+
     fn events(&self) -> &'static RingBuffer<InputEvent> {
         self.ring
     }

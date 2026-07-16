@@ -12,9 +12,9 @@ qemu-system-riscv64 \
     -netdev user,id=net0,net=192.168.100.0/24,host=192.168.100.1 \
     -device virtio-net-pci,netdev=net0,disable-legacy=on \
     -device virtio-gpu \
-    -display gtk,full-screen=on,show-cursor=on \
+    -display gtk,full-screen=on,show-cursor=on,gl=on \
     -device virtio-keyboard \
-    -device virtio-mouse \
+    -device virtio-tablet \
     --no-reboot \
     -kernel \
     $@

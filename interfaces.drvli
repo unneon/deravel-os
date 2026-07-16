@@ -34,7 +34,15 @@ struct input_event
     code u16
     value u32
 
+struct input_absinfo
+    min u32
+    max u32
+    fuzz u32
+    flat u32
+    res u32
+
 interface input_device
+    func absinfo(axis u16) input_absinfo
     stream events input_event
 
 interface window

@@ -157,8 +157,6 @@ pub fn parse_type(src: &str) -> Type<'_> {
         "u32" => U32,
         "u64" => U64,
         "usize" => Usize,
-        "input_event" | "windowing" | "window" | "input_device" | "display" | "drive"
-        | "console" | "shutdown" | "filesystem" | "network" => Unknown(src),
-        _ => unimplemented!("unimplemented type {src:?}"),
+        _ => Unknown(src),
     }
 }
