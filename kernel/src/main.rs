@@ -462,9 +462,15 @@ impl SyscallHandler for () {
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    let location = info.location().unwrap();
+    let location_slot;
+    let location = if let Some(location) = info.location() {
+        location_slot = location;
+        format_args!(" at {location_slot}")
+    } else {
+        format_args!("")
+    };
     let message = info.message();
-    error!("panicked at {location}: {message}");
+    error!("panicked{location}: {message}");
     let _ = sbi::system_reset(ResetType::Shutdown, ResetReason::SystemFailure);
     loop {}
 }
