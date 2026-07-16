@@ -53,7 +53,8 @@ use crate::page::{PageFlags, initialize_memory_mapping, map_pages, physical_to_i
 use crate::pci::initialize_all_pci;
 use crate::plic::{initialize_plic, plic_claim, plic_complete};
 use crate::process::{
-    ProcessState, get_process, kill_process, reserve_process, schedule_and_switch_to_userspace,
+    ProcessState, get_process, kill_process, kill_process_by_id, reserve_process,
+    schedule_and_switch_to_userspace,
 };
 use crate::process_spawner::ProcessSpawnerService;
 use crate::sbi::{ResetReason, ResetType, SbiShutdown, log_sbi_metadata};
@@ -61,6 +62,7 @@ use crate::user::UserPtr;
 use ::log::*;
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
+use alloc::string::ToString;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::panic::PanicInfo;
@@ -144,12 +146,7 @@ fn handle_trap(registers: &mut RiscvRegisters, hart: &mut HartContext) -> ! {
     let user_pc = riscv::register::sepc::read();
     if scause == Ok(Trap::Exception(Exception::UserEnvCall)) {
         let Err(err) = dispatch_syscall(user_pc, registers, hart);
-        error!(
-            "killed {}[{:?}] due to {err}",
-            hart.current_process().name,
-            hart.current_pid()
-        );
-        kill_process(hart.current_pid());
+        kill_process_by_id(hart.current_pid(), &err.to_string());
         schedule_and_switch_to_userspace(hart)
     } else if scause == Ok(Trap::Interrupt(Interrupt::SupervisorTimer)) {
         sbi::set_timer(u64::MAX);
@@ -190,13 +187,7 @@ impl SyscallHandler for () {
         if current_proc.state == ProcessState::WaitingForReply {
             let reply = current_proc.reply.take().unwrap();
             if let Err(err) = result_buffer.write(&reply) {
-                error!(
-                    "killed {}[{:?}] due to {err}",
-                    hart.current_process().name,
-                    hart.current_pid()
-                );
-                drop(current_proc);
-                kill_process(hart.current_pid());
+                kill_process(current_proc, &err.to_string());
                 schedule_and_switch_to_userspace(hart)
             };
             current_proc.state = ProcessState::Runnable;
@@ -227,12 +218,7 @@ impl SyscallHandler for () {
                     let result =
                         handler.call_method(method, &args_buffer.copy(), hart.current_pid());
                     if let Err(err) = result_buffer.write(&result) {
-                        error!(
-                            "killed {}[{:?}] due to {err}",
-                            hart.current_process().name,
-                            hart.current_pid()
-                        );
-                        kill_process(hart.current_pid());
+                        kill_process_by_id(hart.current_pid(), &err.to_string());
                         schedule_and_switch_to_userspace(hart)
                     };
                     hart.current_process().state = ProcessState::Runnable;
@@ -252,13 +238,7 @@ impl SyscallHandler for () {
         assert!(current_proc.currently_serving.is_none());
         if let Some((cap, method, args, sender)) = current_proc.messages.pop_front() {
             if let Err(err) = args_buffer.write(&args) {
-                error!(
-                    "killed {}[{:?}] due to {err}",
-                    current_proc.name,
-                    hart.current_pid()
-                );
-                drop(current_proc);
-                kill_process(hart.current_pid());
+                kill_process(current_proc, &err.to_string());
                 schedule_and_switch_to_userspace(hart)
             };
             current_proc.currently_serving = Some(sender);
@@ -269,7 +249,11 @@ impl SyscallHandler for () {
     }
 
     fn ipc_reply(_: usize, _: &mut RiscvRegisters, hart: &mut HartContext, result: UserPtr<[u8]>) {
-        let caller = hart.current_process().currently_serving.take().unwrap();
+        let mut proc = hart.current_process();
+        let Some(caller) = proc.currently_serving.take() else {
+            kill_process(proc, "ipc_reply called without matching ipc_serve");
+            schedule_and_switch_to_userspace(hart)
+        };
         let mut caller = get_process(caller).lock_if_some().unwrap();
         if caller.state == ProcessState::WaitingForReply {
             caller.reply = Some(result.copy());

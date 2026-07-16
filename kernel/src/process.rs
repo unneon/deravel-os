@@ -12,12 +12,13 @@ use crate::page::{
 };
 use crate::sbi;
 use crate::sbi::{ResetReason, ResetType};
-use crate::sync::Mutex;
+use crate::sync::{Mutex, MutexGuard};
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 use core::sync::atomic::Ordering;
 use deravel_types::*;
+use log::error;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ProcessState {
@@ -31,6 +32,7 @@ pub enum ProcessState {
 }
 
 pub struct Process {
+    pub id: ProcessId,
     pub name: &'static str,
     pub state: ProcessState,
     pub registers: RiscvRegisters,
@@ -124,6 +126,7 @@ pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: Pro
 
     let mut proc = get_process(pid).lock();
     *proc = Some(Process {
+        id: pid,
         name,
         state: ProcessState::Runnable,
         registers: RiscvRegisters::default(),
@@ -222,6 +225,13 @@ pub fn find_runnable_process(hart: &HartContext) -> Option<ProcessId> {
     None
 }
 
-pub fn kill_process(pid: ProcessId) {
-    get_process(pid).lock_if_some().unwrap().state = ProcessState::Finished;
+pub fn kill_process(mut proc: MutexGuard<'_, Process>, cause: &str) {
+    let pid = proc.id;
+    let name = proc.name;
+    error!("killed {name}[{pid:?}]: {cause}");
+    proc.state = ProcessState::Finished;
+}
+
+pub fn kill_process_by_id(pid: ProcessId, cause: &str) {
+    kill_process(get_process(pid).lock_if_some().unwrap(), cause);
 }
