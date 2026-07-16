@@ -140,11 +140,10 @@ fn enable_interrupts() {
 fn handle_trap(registers: &mut RiscvRegisters, hart: &mut HartContext) -> ! {
     let scause = riscv::register::scause::read()
         .cause()
-        .try_into::<Interrupt, Exception>()
-        .unwrap();
+        .try_into::<Interrupt, Exception>();
     let stval = riscv::register::stval::read();
     let user_pc = riscv::register::sepc::read();
-    if scause == Trap::Exception(Exception::UserEnvCall) {
+    if scause == Ok(Trap::Exception(Exception::UserEnvCall)) {
         let Err(err) = dispatch_syscall(user_pc, registers, hart);
         error!(
             "killed {}[{:?}] due to {err}",
@@ -153,10 +152,10 @@ fn handle_trap(registers: &mut RiscvRegisters, hart: &mut HartContext) -> ! {
         );
         kill_process(hart.current_pid());
         schedule_and_switch_to_userspace(hart)
-    } else if scause == Trap::Interrupt(Interrupt::SupervisorTimer) {
+    } else if scause == Ok(Trap::Interrupt(Interrupt::SupervisorTimer)) {
         sbi::set_timer(u64::MAX);
         switch_to_userspace_registers_only(registers)
-    } else if scause == Trap::Interrupt(Interrupt::SupervisorExternal) {
+    } else if scause == Ok(Trap::Interrupt(Interrupt::SupervisorExternal)) {
         let irq = plic_claim();
         for ie in &INTERRUPTS {
             let ie = ie.lock();
