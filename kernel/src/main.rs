@@ -203,7 +203,10 @@ impl SyscallHandler for () {
             proc.registers = registers.clone();
             proc.pc = user_pc;
 
-            let cap = cap.validate(proc.id).unwrap();
+            let cap = match cap.validate(proc.id) {
+                Ok(cap) => cap,
+                Err(err) => kill!(hart, proc, "{err}"),
+            };
             match cap.certifier() {
                 Actor::Userspace(dest) => {
                     let Some(mut dest) = get_process(dest).lock_if_some() else {
@@ -292,12 +295,18 @@ impl SyscallHandler for () {
         stream: usize,
     ) -> (*mut (), usize) {
         let mut proc = hart.current_process();
-        let cap = cap.validate(proc.id).unwrap();
+        let cap = match cap.validate(proc.id) {
+            Ok(cap) => cap,
+            Err(err) => kill!(hart, proc, "{err}"),
+        };
         match cap.certifier() {
             Actor::Userspace(original_pid) => {
                 if proc.state == ProcessState::WaitingForStreamMap {
                     let (ring, declared_size) = proc.stream_map.take().unwrap();
-                    let ring = ring.validate(original_pid).unwrap();
+                    let ring = match ring.validate(original_pid) {
+                        Ok(ring) => ring,
+                        Err(err) => kill!(hart, proc, "{err}"),
+                    };
                     if ring.certifier() != Actor::Kernel {
                         kill!(hart, proc, "non-kernel shared memory capability")
                     }
@@ -406,7 +415,10 @@ impl SyscallHandler for () {
         cap: Capability<SharedMemory>,
     ) -> (*mut u8, usize) {
         let mut proc = hart.current_process();
-        let cap = cap.validate(proc.id).unwrap();
+        let cap = match cap.validate(proc.id) {
+            Ok(cap) => cap,
+            Err(err) => kill!(hart, proc, "{err}"),
+        };
         if cap.certifier() != Actor::Kernel {
             kill!(hart, proc, "non-kernel shared memory capability")
         }

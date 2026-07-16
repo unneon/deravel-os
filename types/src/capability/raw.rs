@@ -66,7 +66,7 @@ impl RawCapability {
 
 impl core::fmt::Display for CapabilityError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "[{:?}] claimed {:?}", self.1, self.0)?;
+        write!(f, "{:?} claimed {:?}", self.1, self.0)?;
         let mut capability = self.0;
         let mut claimer = Actor::Userspace(self.1);
         loop {
@@ -74,11 +74,11 @@ impl core::fmt::Display for CapabilityError {
             let certificate = &get_capability_certificate_page(certifier)[capability.local_index()];
             match certificate.load(Ordering::Relaxed).unpack() {
                 CapabilityCertificateUnpacked::Granted { grantee } => {
-                    return write!(f, " actually granted to {grantee:?}");
+                    return write!(f, " but it was granted to {grantee:?}");
                 }
                 CapabilityCertificateUnpacked::Forwarded { forwardee, inner } => {
                     if forwardee != claimer {
-                        return write!(f, " actually forwarded to {forwardee:?}");
+                        return write!(f, " but it was forwarded to {forwardee:?}");
                     } else {
                         write!(f, " forwarded by {:?} from {:?}", inner.certifier(), inner)?;
                         capability = inner;

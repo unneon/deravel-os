@@ -25,7 +25,7 @@ impl From<ProcessId> for Actor {
 impl core::fmt::Debug for Actor {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Actor::Userspace(pid) => write!(f, "{}", pid.as_u16()),
+            Actor::Userspace(pid) => <ProcessId as core::fmt::Debug>::fmt(pid, f),
             Actor::Kernel => write!(f, "kernel"),
         }
     }

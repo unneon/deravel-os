@@ -245,6 +245,6 @@ pub fn find_runnable_process(hart: &HartContext) -> Option<MutexGuard<'static, P
 pub fn kill_process(mut proc: MutexGuard<'_, Process>, cause: impl core::fmt::Display) {
     let pid = proc.id;
     let name = proc.name;
-    error!("killed {name}[{pid:?}], {cause}");
+    error!("killed {name}{pid:?}, {cause}");
     proc.state = ProcessState::Finished;
 }

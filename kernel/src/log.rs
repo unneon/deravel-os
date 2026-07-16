@@ -97,7 +97,7 @@ pub fn log_userspace(level: Level, proc: &Process, message: &str) {
     let args = format_args!("{message}");
     let name = proc.name;
     let pid = proc.id;
-    let target = format!("{name}[{pid:?}]");
+    let target = format!("{name}{pid:?}");
     let record = Record::builder()
         .args(args)
         .level(level)
