@@ -239,10 +239,6 @@ pub fn find_runnable_process(hart: &HartContext) -> Option<ProcessId> {
 pub fn kill_process(mut proc: MutexGuard<'_, Process>, cause: &str) {
     let pid = proc.id;
     let name = proc.name;
-    error!("killed {name}[{pid:?}]: {cause}");
+    error!("killed {name}[{pid:?}], {cause}");
     proc.state = ProcessState::Finished;
-}
-
-pub fn kill_process_by_id(pid: ProcessId, cause: &str) {
-    kill_process(get_process(pid).lock_if_some().unwrap(), cause);
 }

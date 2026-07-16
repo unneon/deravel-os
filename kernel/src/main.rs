@@ -53,16 +53,14 @@ use crate::page::{PageFlags, initialize_memory_mapping, map_pages, physical_to_i
 use crate::pci::initialize_all_pci;
 use crate::plic::{initialize_plic, plic_claim, plic_complete};
 use crate::process::{
-    ProcessState, get_process, kill_process, kill_process_by_id, reserve_process,
-    schedule_and_switch_to_userspace,
+    ProcessState, get_process, kill_process, reserve_process, schedule_and_switch_to_userspace,
 };
 use crate::process_spawner::ProcessSpawnerService;
 use crate::sbi::{ResetReason, ResetType, SbiShutdown, log_sbi_metadata};
 use crate::user::UserPtr;
 use ::log::*;
-use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
-use alloc::string::ToString;
+use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::panic::PanicInfo;
@@ -146,7 +144,7 @@ fn handle_trap(registers: &mut RiscvRegisters, hart: &mut HartContext) -> ! {
     let user_pc = riscv::register::sepc::read();
     if scause == Ok(Trap::Exception(Exception::UserEnvCall)) {
         let Err(err) = dispatch_syscall(user_pc, registers, hart);
-        kill_process_by_id(hart.current_pid(), &err.to_string());
+        kill_process(hart.current_process(), &err.to_string());
         schedule_and_switch_to_userspace(hart)
     } else if scause == Ok(Trap::Interrupt(Interrupt::SupervisorTimer)) {
         sbi::set_timer(u64::MAX);
@@ -224,7 +222,7 @@ impl SyscallHandler for () {
                     let result =
                         handler.call_method(method, &args_buffer.copy(), hart.current_pid());
                     if let Err(err) = result_buffer.write(&result) {
-                        kill_process_by_id(hart.current_pid(), &err.to_string());
+                        kill_process(hart.current_process(), &err.to_string());
                         schedule_and_switch_to_userspace(hart)
                     };
                     hart.current_process().state = ProcessState::Runnable;
@@ -428,7 +426,11 @@ impl SyscallHandler for () {
         message: UserPtr<[u8]>,
         level: u64,
     ) {
-        let text = str::from_utf8(&message.copy()).unwrap().to_owned();
+        let Ok(text) = String::from_utf8(message.copy()) else {
+            kill_process(hart.current_process(), "invalid utf-8");
+            schedule_and_switch_to_userspace(hart)
+        };
+
         let level = match level {
             0 => Level::Error,
             1 => Level::Warn,
