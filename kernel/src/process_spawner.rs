@@ -33,7 +33,7 @@ impl<T: ProcessTag> Handler<T::Spawner> for ProcessSpawnerService<T> {
         let args: <T as ProcessTag>::Args = serde_json::from_slice(args).unwrap();
         args.for_all(|cap| {
             assert_eq!(cap.certifier(), Actor::from(sender), "process {}[{sender:?}] tried to pass capability {cap:?} that was granted by {:?}, not itself",
-                get_process(sender).lock().name.unwrap(),
+                get_process(sender).lock().name,
                 cap.certifier()
             );
             let slot = &capability_page(sender).0[cap.local_index()];

@@ -147,7 +147,7 @@ fn handle_trap(registers: &mut RiscvRegisters, hart: &mut HartContext) -> ! {
         let Err(err) = dispatch_syscall(user_pc, registers, hart);
         error!(
             "killed {}[{:?}] due to {err}",
-            hart.current_process().name.unwrap(),
+            hart.current_process().name,
             hart.current_pid()
         );
         kill_process(hart.current_pid());
@@ -193,7 +193,7 @@ impl SyscallHandler for () {
             if let Err(err) = result_buffer.write(&reply) {
                 error!(
                     "killed {}[{:?}] due to {err}",
-                    hart.current_process().name.unwrap(),
+                    hart.current_process().name,
                     hart.current_pid()
                 );
                 drop(current_proc);
@@ -230,7 +230,7 @@ impl SyscallHandler for () {
                     if let Err(err) = result_buffer.write(&result) {
                         error!(
                             "killed {}[{:?}] due to {err}",
-                            hart.current_process().name.unwrap(),
+                            hart.current_process().name,
                             hart.current_pid()
                         );
                         kill_process(hart.current_pid());
@@ -257,7 +257,7 @@ impl SyscallHandler for () {
             if let Err(err) = args_buffer.write(&args) {
                 error!(
                     "killed {}[{:?}] due to {err}",
-                    current_proc.name.unwrap(),
+                    current_proc.name,
                     hart.current_pid()
                 );
                 drop(current_proc);
@@ -452,7 +452,7 @@ impl SyscallHandler for () {
         };
         log_userspace(
             level,
-            hart.current_process().name.unwrap(),
+            hart.current_process().name,
             hart.current_pid(),
             &text,
         );
