@@ -3,8 +3,9 @@ use crate::capability::pages::{
 };
 use crate::{Actor, CapabilityCertificate, CapabilityCertificateUnpacked, PAGE_SIZE, ProcessId};
 use core::sync::atomic::Ordering;
-use log::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+pub struct CapabilityError(RawCapability, ProcessId);
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
@@ -41,27 +42,57 @@ impl RawCapability {
         self.0 as *const CapabilityCertificate as usize
     }
 
-    pub fn validate(self, current_pid: ProcessId) -> RawCapability {
-        trace!("validating capability {self:?} presented by {current_pid:?}");
+    pub fn validate(self, orig_claimer: ProcessId) -> Result<RawCapability, CapabilityError> {
         let mut capability = self;
-        let mut sender = Actor::Userspace(current_pid);
+        let mut claimer = Actor::Userspace(orig_claimer);
+        loop {
+            let certifier = capability.certifier();
+            let certificate = &get_capability_certificate_page(certifier)[capability.local_index()];
+            match certificate.load(Ordering::Relaxed).unpack() {
+                CapabilityCertificateUnpacked::Granted { grantee } if grantee == claimer => {
+                    break Ok(capability);
+                }
+                CapabilityCertificateUnpacked::Forwarded { forwardee, inner }
+                    if forwardee == claimer =>
+                {
+                    capability = inner;
+                    claimer = certifier;
+                }
+                _ => return Err(CapabilityError(self, orig_claimer)),
+            }
+        }
+    }
+}
+
+impl core::fmt::Display for CapabilityError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "[{:?}] claimed {:?}", self.1, self.0)?;
+        let mut capability = self.0;
+        let mut claimer = Actor::Userspace(self.1);
         loop {
             let certifier = capability.certifier();
             let certificate = &get_capability_certificate_page(certifier)[capability.local_index()];
             match certificate.load(Ordering::Relaxed).unpack() {
                 CapabilityCertificateUnpacked::Granted { grantee } => {
-                    trace!("... granted by {certifier:?} to {grantee:?}");
-                    assert!(grantee == sender);
-                    break capability;
+                    return write!(f, " actually granted to {grantee:?}");
                 }
                 CapabilityCertificateUnpacked::Forwarded { forwardee, inner } => {
-                    trace!("... forwarded {inner:?} by {certifier:?} to {forwardee:?}");
-                    assert!(forwardee == sender);
-                    capability = inner;
-                    sender = certifier;
+                    if forwardee != claimer {
+                        return write!(f, " actually forwarded to {forwardee:?}");
+                    } else {
+                        write!(f, " forwarded by {:?} from {:?}", inner.certifier(), inner)?;
+                        capability = inner;
+                        claimer = certifier;
+                    }
                 }
             }
         }
+    }
+}
+
+impl core::fmt::Debug for CapabilityError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        <CapabilityError as core::fmt::Display>::fmt(self, f)
     }
 }
 
