@@ -26,7 +26,7 @@ impl HartContext {
     }
 
     pub fn current_process(&self) -> MutexGuard<'_, Process> {
-        get_process(self.current_pid()).lock()
+        get_process(self.current_pid()).lock_if_some().unwrap()
     }
 
     pub fn set_current_pid(&mut self, pid: ProcessId) {

@@ -7,7 +7,6 @@
 #![feature(ptr_metadata)]
 #![feature(slice_from_ptr_range)]
 #![feature(slice_ptr_get)]
-#![feature(unsafe_cell_access)]
 #![allow(incomplete_features)]
 #![allow(clippy::deref_addrof)]
 #![allow(clippy::missing_safety_doc)]
@@ -210,8 +209,8 @@ impl SyscallHandler for () {
             let original = validate_untrusted_capability(farthest_cap, hart.current_pid());
             match original.certifier() {
                 Actor::Userspace(dest) => {
-                    let mut dest = get_process(dest).lock();
-                    dest.messages.get_or_insert_default().push_back((
+                    let mut dest = get_process(dest).lock_if_some().unwrap();
+                    dest.messages.push_back((
                         original,
                         method,
                         args_buffer.copy(),
@@ -251,9 +250,7 @@ impl SyscallHandler for () {
     ) -> (Option<RawCapability>, usize, usize, Option<ProcessId>) {
         let mut current_proc = hart.current_process();
         assert!(current_proc.currently_serving.is_none());
-        if let Some((cap, method, args, sender)) =
-            current_proc.messages.as_mut().and_then(|q| q.pop_front())
-        {
+        if let Some((cap, method, args, sender)) = current_proc.messages.pop_front() {
             if let Err(err) = args_buffer.write(&args) {
                 error!(
                     "killed {}[{:?}] due to {err}",
@@ -273,9 +270,9 @@ impl SyscallHandler for () {
 
     fn ipc_reply(_: usize, _: &mut RiscvRegisters, hart: &mut HartContext, result: UserPtr<[u8]>) {
         let caller = hart.current_process().currently_serving.take().unwrap();
-        let mut caller = get_process(caller).lock();
+        let mut caller = get_process(caller).lock_if_some().unwrap();
         if caller.state == ProcessState::WaitingForReply {
-            caller.reply = Some(Box::new(result.copy()));
+            caller.reply = Some(result.copy());
         } else if caller.state == ProcessState::WaitingForStreamMap {
             caller.stream_map = Some(serde_json::from_slice(&result.copy()).unwrap());
         } else {
@@ -319,8 +316,8 @@ impl SyscallHandler for () {
                     current_proc.state = ProcessState::WaitingForStreamMap;
                     current_proc.registers = registers.clone();
                     current_proc.pc = user_pc;
-                    let mut dest = get_process(original_pid).lock();
-                    dest.messages.get_or_insert_default().push_back((
+                    let mut dest = get_process(original_pid).lock_if_some().unwrap();
+                    dest.messages.push_back((
                         original,
                         1000 + stream,
                         Vec::new(),

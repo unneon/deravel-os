@@ -37,9 +37,9 @@ pub struct Process {
     pub pc: usize,
     pub page_table: *mut TopPageTable,
     pub virtual_memory: BumpAllocator,
-    pub messages: Option<Box<VecDeque<(RawCapability, usize, Vec<u8>, ProcessId)>>>,
+    pub messages: VecDeque<(RawCapability, usize, Vec<u8>, ProcessId)>,
     #[allow(clippy::box_collection)]
-    pub reply: Option<Box<Vec<u8>>>,
+    pub reply: Option<Vec<u8>>,
     pub stream_map: Option<(RawCapability, usize)>,
     pub currently_serving: Option<ProcessId>,
 }
@@ -54,20 +54,7 @@ pub struct ProcessReservation<T: ProcessTag> {
 
 pub const PROCESS_COUNT: usize = 8;
 
-static PROCESSES: [Mutex<Process>; PROCESS_COUNT] = [const {
-    Mutex::new(Process {
-        name: "",
-        state: ProcessState::Unused,
-        registers: RiscvRegisters::new(),
-        pc: 0,
-        page_table: core::ptr::null_mut(),
-        virtual_memory: BumpAllocator::new(0..0),
-        messages: None,
-        reply: None,
-        stream_map: None,
-        currently_serving: None,
-    })
-}; _];
+static PROCESSES: [Mutex<Option<Process>>; PROCESS_COUNT] = [const { Mutex::new(None) }; _];
 
 impl<T: ProcessTag> ProcessReservation<T> {
     pub fn spawn(self, args: T::Args) {
@@ -111,13 +98,13 @@ impl<T: ProcessTag> ProcessReservation<T> {
     }
 }
 
-pub fn get_process(pid: ProcessId) -> &'static Mutex<Process> {
+pub fn get_process(pid: ProcessId) -> &'static Mutex<Option<Process>> {
     &PROCESSES[pid.as_u16() as usize]
 }
 
 pub fn reserve_process<T: ProcessTag>(elf: &'static [u8]) -> ProcessReservation<T> {
     let pid = find_free_process_slot().expect("exhausted all process slots");
-    let mut proc = get_process(pid).lock();
+    let mut proc = get_process(pid).lock_if_some().unwrap();
     proc.state = ProcessState::Reserved;
     ProcessReservation {
         id: pid,
@@ -136,12 +123,18 @@ pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: Pro
     map_inputs_memory(&mut page_table, inputs);
 
     let mut proc = get_process(pid).lock();
-    proc.name = name;
-    proc.state = ProcessState::Runnable;
-    proc.registers = RiscvRegisters::new();
-    proc.pc = entry_point;
-    proc.page_table = Box::leak(page_table);
-    proc.virtual_memory = BumpAllocator::new(0x4000000..0x5000000);
+    *proc = Some(Process {
+        name,
+        state: ProcessState::Runnable,
+        registers: RiscvRegisters::default(),
+        pc: entry_point,
+        page_table: Box::leak(page_table),
+        virtual_memory: BumpAllocator::new(0x4000000..0x5000000),
+        messages: VecDeque::new(),
+        reply: None,
+        stream_map: None,
+        currently_serving: None,
+    });
 }
 
 fn map_capability_memory(pages: &mut TopPageTable, pid: ProcessId) {
@@ -188,7 +181,9 @@ fn map_inputs_memory<T: ProcessTag>(pages: &mut TopPageTable, inputs: ProcessInp
 
 fn find_free_process_slot() -> Option<ProcessId> {
     for (i, process) in PROCESSES.iter().enumerate().skip(1) {
-        if process.lock().state == ProcessState::Unused {
+        if let Some(process) = process.lock_if_some()
+            && process.state == ProcessState::Unused
+        {
             return Some(ProcessId::new(i as u16));
         }
     }
@@ -200,7 +195,7 @@ pub fn schedule_and_switch_to_userspace(hart: &mut HartContext) -> ! {
         log_heap_statistics();
         sbi::system_reset(ResetType::Shutdown, ResetReason::NoReason).unwrap()
     };
-    let next = get_process(next_pid).lock();
+    let next = get_process(next_pid).lock_if_some().unwrap();
     hart.set_current_pid(next_pid);
 
     switch_to_userspace_full(next);
@@ -214,10 +209,9 @@ pub fn find_runnable_process(hart: &HartContext) -> Option<ProcessId> {
 
     for scan_offset in 0..PROCESS_COUNT as u16 {
         let scan_index = (scan_start + scan_offset) % PROCESS_COUNT as u16;
-        let process = PROCESSES[scan_index as usize].lock();
+        let process = PROCESSES[scan_index as usize].lock_if_some().unwrap();
         if process.state == ProcessState::Runnable
-            || (process.state == ProcessState::WaitingForMessage
-                && process.messages.as_ref().is_some_and(|q| !q.is_empty()))
+            || (process.state == ProcessState::WaitingForMessage && process.messages.is_empty())
             || (process.state == ProcessState::WaitingForReply && process.reply.is_some())
             || (process.state == ProcessState::WaitingForStreamMap && process.stream_map.is_some())
         {
@@ -229,5 +223,5 @@ pub fn find_runnable_process(hart: &HartContext) -> Option<ProcessId> {
 }
 
 pub fn kill_process(pid: ProcessId) {
-    get_process(pid).lock().state = ProcessState::Finished;
+    get_process(pid).lock_if_some().unwrap().state = ProcessState::Finished;
 }
