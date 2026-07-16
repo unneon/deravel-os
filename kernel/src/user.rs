@@ -39,7 +39,7 @@ impl<T: SafeUserType> UserPtr<[T]> {
         Ok(UserPtr(ptr))
     }
 
-    pub fn copy(&self) -> Vec<T> {
+    pub fn copy_to_kernel(&self) -> Vec<T> {
         let mut kernel = Vec::with_capacity(self.0.len());
         unsafe {
             core::ptr::copy_nonoverlapping(self.0.as_mut_ptr(), kernel.as_mut_ptr(), self.0.len());
@@ -48,7 +48,7 @@ impl<T: SafeUserType> UserPtr<[T]> {
         kernel
     }
 
-    pub fn write(&mut self, data: &[T]) -> Result<(), UserSliceTooSmall> {
+    pub fn write_to_user(&mut self, data: &[T]) -> Result<(), UserSliceTooSmall> {
         if self.0.len() < data.len() {
             return Err(UserSliceTooSmall);
         }

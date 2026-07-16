@@ -1,7 +1,7 @@
 use crate::device_tree::timebase_frequency;
+use crate::process::Process;
 use crate::sbi;
 use alloc::format;
-use deravel_types::ProcessId;
 use log::{Level, LevelFilter, Metadata, Record};
 
 struct Logger {
@@ -93,9 +93,11 @@ pub fn initialize_log() {
     log::set_max_level(LevelFilter::Debug);
 }
 
-pub fn log_userspace(level: Level, process_name: &str, pid: ProcessId, message: &str) {
+pub fn log_userspace(level: Level, proc: &Process, message: &str) {
     let args = format_args!("{message}");
-    let target = format!("{process_name}[{pid:?}]");
+    let name = proc.name;
+    let pid = proc.id;
+    let target = format!("{name}[{pid:?}]");
     let record = Record::builder()
         .args(args)
         .level(level)
