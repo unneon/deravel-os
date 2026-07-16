@@ -22,7 +22,6 @@ use log::error;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ProcessState {
-    Unused,
     Runnable,
     Finished,
     WaitingForMessage,
@@ -105,9 +104,20 @@ pub fn get_process(pid: ProcessId) -> &'static Mutex<Option<Process>> {
 }
 
 pub fn reserve_process<T: ProcessTag>(elf: &'static [u8]) -> ProcessReservation<T> {
-    let pid = find_free_process_slot().expect("exhausted all process slots");
-    let mut proc = get_process(pid).lock_if_some().unwrap();
-    proc.state = ProcessState::Reserved;
+    let (pid, mut proc) = find_free_process_slot().expect("exhausted all process slots");
+    *proc = Some(Process {
+        id: pid,
+        name: T::NAME,
+        state: ProcessState::Reserved,
+        registers: RiscvRegisters::default(),
+        pc: 0,
+        page_table: core::ptr::null_mut(),
+        virtual_memory: BumpAllocator::new(0..0),
+        messages: VecDeque::new(),
+        reply: None,
+        stream_map: None,
+        currently_serving: None,
+    });
     ProcessReservation {
         id: pid,
         elf,
@@ -182,12 +192,11 @@ fn map_inputs_memory<T: ProcessTag>(pages: &mut TopPageTable, inputs: ProcessInp
     );
 }
 
-fn find_free_process_slot() -> Option<ProcessId> {
-    for (i, process) in PROCESSES.iter().enumerate().skip(1) {
-        if let Some(process) = process.lock_if_some()
-            && process.state == ProcessState::Unused
-        {
-            return Some(ProcessId::new(i as u16));
+fn find_free_process_slot() -> Option<(ProcessId, MutexGuard<'static, Option<Process>>)> {
+    for (i, proc) in PROCESSES.iter().enumerate().skip(1) {
+        let lock = proc.lock();
+        if lock.is_none() {
+            return Some((ProcessId::new(i as u16), lock));
         }
     }
     None
@@ -212,11 +221,13 @@ pub fn find_runnable_process(hart: &HartContext) -> Option<ProcessId> {
 
     for scan_offset in 0..PROCESS_COUNT as u16 {
         let scan_index = (scan_start + scan_offset) % PROCESS_COUNT as u16;
-        let process = PROCESSES[scan_index as usize].lock_if_some().unwrap();
-        if process.state == ProcessState::Runnable
-            || (process.state == ProcessState::WaitingForMessage && process.messages.is_empty())
-            || (process.state == ProcessState::WaitingForReply && process.reply.is_some())
-            || (process.state == ProcessState::WaitingForStreamMap && process.stream_map.is_some())
+        if let Some(process) = PROCESSES[scan_index as usize].lock_if_some()
+            && (process.state == ProcessState::Runnable
+                || (process.state == ProcessState::WaitingForMessage
+                    && process.messages.is_empty())
+                || (process.state == ProcessState::WaitingForReply && process.reply.is_some())
+                || (process.state == ProcessState::WaitingForStreamMap
+                    && process.stream_map.is_some()))
         {
             return Some(ProcessId::new(scan_index));
         }
