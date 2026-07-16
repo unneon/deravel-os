@@ -53,14 +53,15 @@ use crate::page::{PageFlags, initialize_memory_mapping, map_pages, physical_to_i
 use crate::pci::initialize_all_pci;
 use crate::plic::{initialize_plic, plic_claim, plic_complete};
 use crate::process::{
-    ProcessState, get_process, kill_process, reserve_process, schedule_and_switch_to_userspace,
+    Message, ProcessState, get_process, kill_process, reserve_process,
+    schedule_and_switch_to_userspace,
 };
 use crate::process_spawner::ProcessSpawnerService;
 use crate::sbi::{ResetReason, ResetType, SbiShutdown, log_sbi_metadata};
 use crate::user::UserPtr;
 use ::log::*;
 use alloc::boxed::Box;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::panic::PanicInfo;
@@ -144,7 +145,7 @@ fn handle_trap(registers: &mut RiscvRegisters, hart: &mut HartContext) -> ! {
     let user_pc = riscv::register::sepc::read();
     if scause == Ok(Trap::Exception(Exception::UserEnvCall)) {
         let Err(err) = dispatch_syscall(user_pc, registers, hart);
-        kill_process(hart.current_process(), &err.to_string());
+        kill_process(hart.current_process(), err);
         schedule_and_switch_to_userspace(hart)
     } else if scause == Ok(Trap::Interrupt(Interrupt::SupervisorTimer)) {
         sbi::set_timer(u64::MAX);
@@ -185,7 +186,7 @@ impl SyscallHandler for () {
         if current_proc.state == ProcessState::WaitingForReply {
             let reply = current_proc.reply.take().unwrap();
             if let Err(err) = result_buffer.write(&reply) {
-                kill_process(current_proc, &err.to_string());
+                kill_process(current_proc, err);
                 schedule_and_switch_to_userspace(hart)
             };
             current_proc.state = ProcessState::Runnable;
@@ -205,12 +206,12 @@ impl SyscallHandler for () {
                         schedule_and_switch_to_userspace(hart)
                     };
 
-                    dest.messages.push_back((
-                        original,
+                    dest.messages.push_back(Message {
+                        cap: original,
                         method,
-                        args_buffer.copy(),
-                        hart.current_pid(),
-                    ));
+                        args: args_buffer.copy(),
+                        sender: hart.current_pid(),
+                    });
 
                     drop(current_proc);
                     drop(dest);
@@ -222,7 +223,7 @@ impl SyscallHandler for () {
                     let result =
                         handler.call_method(method, &args_buffer.copy(), hart.current_pid());
                     if let Err(err) = result_buffer.write(&result) {
-                        kill_process(hart.current_process(), &err.to_string());
+                        kill_process(hart.current_process(), err);
                         schedule_and_switch_to_userspace(hart)
                     };
                     hart.current_process().state = ProcessState::Runnable;
@@ -236,20 +237,27 @@ impl SyscallHandler for () {
         _: usize,
         _: &mut RiscvRegisters,
         hart: &mut HartContext,
-        mut args_buffer: UserPtr<[u8]>,
+        mut args: UserPtr<[u8]>,
     ) -> (Option<RawCapability>, usize, usize, Option<ProcessId>) {
-        let mut current_proc = hart.current_process();
-        assert!(current_proc.currently_serving.is_none());
-        if let Some((cap, method, args, sender)) = current_proc.messages.pop_front() {
-            if let Err(err) = args_buffer.write(&args) {
-                kill_process(current_proc, &err.to_string());
-                schedule_and_switch_to_userspace(hart)
-            };
-            current_proc.currently_serving = Some(sender);
-            (Some(cap), method, args.len(), Some(sender))
-        } else {
-            (None, 0, 0, None)
+        let mut proc = hart.current_process();
+        if proc.currently_serving.is_some() {
+            kill_process(proc, "ipc receive without replying to previous one");
+            schedule_and_switch_to_userspace(hart)
         }
+        let Some(message) = proc.messages.pop_front() else {
+            return (None, 0, 0, None);
+        };
+        if let Err(err) = args.write(&message.args) {
+            kill_process(proc, err);
+            schedule_and_switch_to_userspace(hart)
+        };
+        proc.currently_serving = Some(message.sender);
+        (
+            Some(message.cap),
+            message.method,
+            message.args.len(),
+            Some(message.sender),
+        )
     }
 
     fn ipc_reply(_: usize, _: &mut RiscvRegisters, hart: &mut HartContext, result: UserPtr<[u8]>) {
@@ -305,12 +313,12 @@ impl SyscallHandler for () {
                     current_proc.registers = registers.clone();
                     current_proc.pc = user_pc;
                     let mut dest = get_process(original_pid).lock_if_some().unwrap();
-                    dest.messages.push_back((
-                        original,
-                        1000 + stream,
-                        Vec::new(),
-                        hart.current_pid(),
-                    ));
+                    dest.messages.push_back(Message {
+                        cap: original,
+                        method: 1000 + stream,
+                        args: Vec::new(),
+                        sender: hart.current_pid(),
+                    });
 
                     drop(current_proc);
                     drop(dest);

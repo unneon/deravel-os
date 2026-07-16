@@ -38,7 +38,7 @@ pub struct Process {
     pub pc: usize,
     pub page_table: *mut TopPageTable,
     pub virtual_memory: BumpAllocator,
-    pub messages: VecDeque<(RawCapability, usize, Vec<u8>, ProcessId)>,
+    pub messages: VecDeque<Message>,
     #[allow(clippy::box_collection)]
     pub reply: Option<Vec<u8>>,
     pub stream_map: Option<(RawCapability, usize)>,
@@ -51,6 +51,13 @@ pub struct ProcessReservation<T: ProcessTag> {
     pub elf: &'static [u8],
     #[allow(dead_code)]
     pub export: Capability<T::Export>,
+}
+
+pub struct Message {
+    pub cap: RawCapability,
+    pub method: usize,
+    pub args: Vec<u8>,
+    pub sender: ProcessId,
 }
 
 pub const PROCESS_COUNT: usize = 8;
@@ -235,7 +242,7 @@ pub fn find_runnable_process(hart: &HartContext) -> Option<MutexGuard<'static, P
     None
 }
 
-pub fn kill_process(mut proc: MutexGuard<'_, Process>, cause: &str) {
+pub fn kill_process(mut proc: MutexGuard<'_, Process>, cause: impl core::fmt::Display) {
     let pid = proc.id;
     let name = proc.name;
     error!("killed {name}[{pid:?}], {cause}");
