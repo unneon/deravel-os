@@ -61,6 +61,7 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::mem::replace;
 use core::panic::PanicInfo;
 use deravel_types::*;
 use fdt::Fdt;
@@ -191,22 +192,27 @@ impl SyscallHandler for () {
         mut result_buffer: UserPtr<[u8]>,
     ) -> usize {
         let mut proc = hart.current_process();
-        if proc.state == ProcessState::WaitingForReply {
-            let reply = proc.reply.take().unwrap();
+        if let ProcessState::ReadyReply { reply } =
+            replace(&mut proc.state, ProcessState::Transitional)
+        {
             if let Err(err) = result_buffer.write_to_user(&reply) {
+                proc.state = ProcessState::Finished;
                 kill!(hart, proc, "{err}")
             };
             proc.state = ProcessState::Runnable;
             reply.len()
         } else {
-            proc.state = ProcessState::WaitingForReply;
-            proc.registers = registers.clone();
-            proc.pc = user_pc;
-
             let cap = match cap.validate(proc.id) {
                 Ok(cap) => cap,
                 Err(err) => kill!(hart, proc, "{err}"),
             };
+
+            proc.state = ProcessState::WaitingForReply {
+                from: cap.certifier(),
+            };
+            proc.registers = registers.clone();
+            proc.pc = user_pc;
+
             match cap.certifier() {
                 Actor::Userspace(dest) => {
                     let Some(mut dest) = get_process(dest).lock_if_some() else {
@@ -275,13 +281,21 @@ impl SyscallHandler for () {
             kill!(hart, proc, "ipc_reply called without matching ipc_serve")
         };
         let mut caller = get_process(caller).lock_if_some().unwrap();
-        if caller.state == ProcessState::WaitingForReply {
-            caller.reply = Some(result.copy_to_kernel());
-        } else if caller.state == ProcessState::WaitingForStreamMap {
+        if let ProcessState::WaitingForReply { from } = caller.state {
+            if from != Actor::Userspace(proc.id) {
+                kill!(hart, proc, "replied to process waiting for someone else");
+            }
+            caller.state = ProcessState::ReadyReply {
+                reply: result.copy_to_kernel(),
+            };
+        } else if let ProcessState::WaitingForStreamMap { from } = caller.state {
+            if from != Actor::Userspace(proc.id) {
+                kill!(hart, proc, "replied to process waiting for someone else");
+            }
             let Ok(stream) = serde_json::from_slice(&result.copy_to_kernel()) else {
                 kill!(hart, proc, "invalid stream map reply")
             };
-            caller.stream_map = Some(stream);
+            caller.state = ProcessState::ReadyStreamMap { stream };
         } else {
             unimplemented!()
         }
@@ -301,8 +315,10 @@ impl SyscallHandler for () {
         };
         match cap.certifier() {
             Actor::Userspace(original_pid) => {
-                if proc.state == ProcessState::WaitingForStreamMap {
-                    let (ring, declared_size) = proc.stream_map.take().unwrap();
+                if let ProcessState::ReadyStreamMap {
+                    stream: (ring, declared_size),
+                } = proc.state
+                {
                     let ring = match ring.validate(original_pid) {
                         Ok(ring) => ring,
                         Err(err) => kill!(hart, proc, "{err}"),
@@ -332,7 +348,9 @@ impl SyscallHandler for () {
                     proc.state = ProcessState::Runnable;
                     (virtual_addr as *mut (), declared_size)
                 } else {
-                    proc.state = ProcessState::WaitingForStreamMap;
+                    proc.state = ProcessState::WaitingForStreamMap {
+                        from: original_pid.into(),
+                    };
                     proc.registers = registers.clone();
                     proc.pc = user_pc;
                     let mut dest = get_process(original_pid).lock_if_some().unwrap();

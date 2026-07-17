@@ -18,16 +18,17 @@ use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 use core::sync::atomic::Ordering;
 use deravel_types::*;
-use log::error;
+use log::*;
 
-#[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ProcessState {
     Runnable,
     Finished,
-    WaitingForMessage,
     Reserved,
-    WaitingForReply,
-    WaitingForStreamMap,
+    WaitingForReply { from: Actor },
+    WaitingForStreamMap { from: Actor },
+    ReadyReply { reply: Vec<u8> },
+    ReadyStreamMap { stream: (RawCapability, usize) },
+    Transitional,
 }
 
 pub struct Process {
@@ -39,9 +40,6 @@ pub struct Process {
     pub page_table: *mut TopPageTable,
     pub virtual_memory: BumpAllocator,
     pub messages: VecDeque<Message>,
-    #[allow(clippy::box_collection)]
-    pub reply: Option<Vec<u8>>,
-    pub stream_map: Option<(RawCapability, usize)>,
     pub currently_serving: Option<ProcessId>,
 }
 unsafe impl Send for Process {}
@@ -121,8 +119,6 @@ pub fn reserve_process<T: ProcessTag>(elf: &'static [u8]) -> ProcessReservation<
         page_table: core::ptr::null_mut(),
         virtual_memory: BumpAllocator::new(0..0),
         messages: VecDeque::new(),
-        reply: None,
-        stream_map: None,
         currently_serving: None,
     });
     ProcessReservation {
@@ -151,8 +147,6 @@ pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: Pro
         page_table: Box::leak(page_table),
         virtual_memory: BumpAllocator::new(0x4000000..0x5000000),
         messages: VecDeque::new(),
-        reply: None,
-        stream_map: None,
         currently_serving: None,
     });
 }
@@ -227,19 +221,36 @@ pub fn find_runnable_process(hart: &HartContext) -> Option<MutexGuard<'static, P
 
     for scan_offset in 0..PROCESS_COUNT as u16 {
         let scan_index = (scan_start + scan_offset) % PROCESS_COUNT as u16;
-        if let Some(process) = PROCESSES[scan_index as usize].lock_if_some()
-            && (process.state == ProcessState::Runnable
-                || (process.state == ProcessState::WaitingForMessage
-                    && process.messages.is_empty())
-                || (process.state == ProcessState::WaitingForReply && process.reply.is_some())
-                || (process.state == ProcessState::WaitingForStreamMap
-                    && process.stream_map.is_some()))
-        {
-            return Some(process);
+        if let Some(mut proc) = PROCESSES[scan_index as usize].lock_if_some() {
+            inspect_can_progress(&mut proc);
+            if matches!(
+                proc.state,
+                ProcessState::Runnable
+                    | ProcessState::ReadyReply { .. }
+                    | ProcessState::ReadyStreamMap { .. }
+            ) {
+                return Some(proc);
+            }
         }
     }
 
     None
+}
+
+pub fn inspect_can_progress(proc: &mut Process) {
+    if let ProcessState::WaitingForReply { from } | ProcessState::WaitingForStreamMap { from } =
+        &proc.state
+        && let Actor::Userspace(from) = from
+    {
+        let from = get_process(*from).lock_if_some().unwrap();
+        if matches!(from.state, ProcessState::Finished) {
+            proc.state = ProcessState::Finished;
+            warn!(
+                "stopping {}{:?} waiting on finished {}{:?}",
+                proc.name, proc.id, from.name, from.id
+            );
+        }
+    }
 }
 
 pub fn kill_process(mut proc: MutexGuard<'_, Process>, cause: impl core::fmt::Display) {
