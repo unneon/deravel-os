@@ -1,3 +1,4 @@
+#![feature(allocator_api)]
 #![feature(arbitrary_self_types)]
 #![feature(atomic_ptr_null)]
 #![feature(decl_macro)]
@@ -17,6 +18,7 @@
 extern crate alloc;
 
 mod arch;
+mod buddy;
 mod bump;
 mod capability;
 mod device_tree;
