@@ -11,6 +11,7 @@ use crate::virtio::blk::VirtioBlk;
 use crate::virtio::gpu::VirtioGpu;
 use crate::virtio::input::VirtioInput;
 use crate::virtio::net::VirtioNet;
+use core::alloc::Layout;
 use fdt::Fdt;
 use fdt::node::FdtNode;
 use log::*;
@@ -142,7 +143,9 @@ fn allocate_all_bars(
         // TODO: Figure out the correct alignment here.
         if flags & 1 == 1 {
             let length = (!(readback & !1) + 1) as usize;
-            let offset = io.allocate(length, 4096);
+            let offset = io
+                .alloc(Layout::from_size_align(length, 4096).unwrap())
+                .unwrap();
             let pci_offset = pci_ranges.io.pci_base + offset;
             let soc_offset = pci_ranges.io.soc_base + offset;
             bar.write(pci_offset as u32 | 0x1);
@@ -150,7 +153,9 @@ fn allocate_all_bars(
             i += 1;
         } else if flags & 0b110 == 0b000 {
             let length = (!(readback & !0b1111) + 1) as usize;
-            let offset = mem32.allocate(length, 4096);
+            let offset = mem32
+                .alloc(Layout::from_size_align(length, 4096).unwrap())
+                .unwrap();
             let pci_offset = pci_ranges.mem32.pci_base + offset;
             let soc_offset = pci_ranges.mem32.soc_base + offset;
             bar.write(pci_offset as u32 | (flags & 0b1111));
@@ -165,7 +170,9 @@ fn allocate_all_bars(
             let readback = ((hi_readback as u64) << 32) | lo_readback as u64;
 
             let length = (!(readback & !0b1111) + 1) as usize;
-            let offset = mem64.allocate(length, 4096);
+            let offset = mem64
+                .alloc(Layout::from_size_align(length, 4096).unwrap())
+                .unwrap();
             let pci_offset = pci_ranges.mem64.pci_base + offset;
             let soc_offset = pci_ranges.mem64.soc_base + offset;
             lo_bar.write(pci_offset as u32 | (flags & 0b1111));

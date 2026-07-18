@@ -1,20 +1,46 @@
+use crate::sync::Mutex;
+use crate::util::address::Address;
+use core::alloc::{AllocError, Allocator, Layout};
 use core::ops::Range;
+use core::ptr::NonNull;
 
-#[derive(Debug)]
 pub struct BumpAllocator {
     range: Range<usize>,
 }
+
+pub struct BumpMemoryAllocator(BumpAllocator);
 
 impl BumpAllocator {
     pub const fn new(range: Range<usize>) -> BumpAllocator {
         BumpAllocator { range }
     }
 
-    pub fn allocate(&mut self, size: usize, alignment: usize) -> usize {
-        let pointer = self.range.start.next_multiple_of(alignment);
-        let new_start = pointer + size;
-        assert!(new_start <= self.range.end);
+    pub fn alloc(&mut self, layout: Layout) -> Result<usize, AllocError> {
+        let pointer = self.range.start.next_multiple_of(layout.align());
+        let new_start = pointer + layout.size();
+        if new_start > self.range.end {
+            return Err(AllocError);
+        }
         self.range.start = new_start;
-        pointer
+        Ok(pointer)
     }
+}
+
+impl BumpMemoryAllocator {
+    pub unsafe fn new(range: Range<*mut u8>) -> BumpMemoryAllocator {
+        BumpMemoryAllocator(BumpAllocator {
+            range: range.raw_addr(),
+        })
+    }
+}
+
+unsafe impl Allocator for Mutex<Option<BumpMemoryAllocator>> {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        let mut self_ = self.lock();
+        let ptr = self_.as_mut().unwrap().0.alloc(layout)?;
+        let ptr = core::ptr::slice_from_raw_parts_mut(ptr as *mut u8, layout.size());
+        Ok(NonNull::new(ptr).unwrap())
+    }
+
+    unsafe fn deallocate(&self, _: NonNull<u8>, _: Layout) {}
 }

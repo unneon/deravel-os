@@ -38,6 +38,7 @@ impl<A: Allocator + Copy> BuddyAllocator<A> {
     }
 
     pub fn alloc(&mut self, layout: Layout) -> Result<usize, AllocError> {
+        // TODO: Handle alignment with respect to containing range.
         let req_size = layout.size().max(layout.align());
         let unoffset_ptr = self.root.alloc(req_size, self.root_node_size, self.alloc)?;
         let ptr = self.range.start + unoffset_ptr;

@@ -1,4 +1,5 @@
 use crate::buddy::BuddyMemoryAllocator;
+use crate::bump::BumpMemoryAllocator;
 use crate::page::phys_to_idmp;
 use crate::sync::Mutex;
 use crate::util::fmt_memory;
@@ -8,8 +9,6 @@ use core::alloc::{AllocError, Allocator, GlobalAlloc, Layout};
 use core::iter::once;
 use core::ops::Range;
 use core::ptr::NonNull;
-use core::sync::atomic::{AtomicUsize, Ordering};
-use deravel_types::PAGE_SIZE;
 use fdt::Fdt;
 use log::*;
 
@@ -28,33 +27,36 @@ macro singleton_allocator($name:ident, $instance:path) {
 }
 
 singleton_allocator!(BuddyHeap, BUDDY);
+singleton_allocator!(EarlyBumpHeap, EARLY_BUMP);
 
-pub struct Heap;
-
-unsafe extern "C" {
-    static mut heap_start: u8;
-    static mut heap_end: u8;
-}
+pub struct GlobalAllocator;
 
 #[global_allocator]
-static HEAP: Heap = Heap;
+static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator;
 
 static BUDDY: Mutex<Option<BuddyMemoryAllocator<Global>>> = Mutex::new(None);
+static EARLY_BUMP: Mutex<Option<BumpMemoryAllocator>> = Mutex::new(None);
 
-static ALLOCATED_SO_FAR: AtomicUsize = AtomicUsize::new(0);
-
-unsafe impl GlobalAlloc for Heap {
+unsafe impl GlobalAlloc for GlobalAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        assert!(layout.align() <= PAGE_SIZE);
-        let page_count = layout.size().div_ceil(PAGE_SIZE);
-        let page_offset = ALLOCATED_SO_FAR.fetch_add(page_count, Ordering::Relaxed);
-        let max_pages =
-            ((&raw const heap_end) as usize - (&raw const heap_start) as usize) / PAGE_SIZE;
-        assert!(max_pages - page_offset >= page_count);
-        (&raw mut heap_start).wrapping_byte_add(PAGE_SIZE * page_offset)
+        EarlyBumpHeap
+            .allocate(layout)
+            .map(|p| p.as_mut_ptr())
+            .unwrap_or_default()
     }
 
-    unsafe fn dealloc(&self, _: *mut u8, _: Layout) {}
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        unsafe { EarlyBumpHeap.deallocate(NonNull::new(ptr).unwrap(), layout) }
+    }
+}
+
+pub fn initialize_early_heap() {
+    unsafe extern "C" {
+        static mut heap_start: u8;
+        static mut heap_end: u8;
+    }
+    *EARLY_BUMP.lock() =
+        Some(unsafe { BumpMemoryAllocator::new(&raw mut heap_start..&raw mut heap_end) });
 }
 
 pub fn initialize_heap(dt: &Fdt, dt_ptr: *const u8) {
