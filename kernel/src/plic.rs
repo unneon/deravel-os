@@ -1,4 +1,4 @@
-use crate::page::physical_to_identity_mapped;
+use crate::page::phys_to_idmp;
 use crate::util::volatile::{Volatile, volatile_struct};
 use core::sync::atomic::{AtomicPtr, Ordering};
 use fdt::Fdt;
@@ -54,14 +54,14 @@ fn find_plic(device_tree: &Fdt) -> Option<Volatile<'static, Plic>> {
         .next()?
         .starting_address;
     PLIC.store(address as *mut Plic, Ordering::Relaxed);
-    let address = physical_to_identity_mapped(address as *mut Plic);
+    let address = phys_to_idmp(address as *mut Plic);
     Some(unsafe { Volatile::new(address) })
 }
 
 fn get_plic() -> Volatile<'static, Plic> {
     let address = PLIC.load(Ordering::Relaxed);
     assert!(!address.is_null());
-    let address = physical_to_identity_mapped(address);
+    let address = phys_to_idmp(address);
     unsafe { Volatile::new(address) }
 }
 

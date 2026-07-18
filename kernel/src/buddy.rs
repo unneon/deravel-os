@@ -42,13 +42,23 @@ impl<A: Allocator + Copy> BuddyAllocator<A> {
         self.root
             .dealloc(ptr - self.range.start, size, self.root_node_size);
     }
+
+    pub fn reserve_range(&mut self, range: Range<usize>) {
+        let range = range.start - self.range.start..range.end - self.range.start;
+        self.root
+            .reserve_range(range, self.root_node_size, self.alloc);
+    }
 }
 
 impl<A: Allocator + Copy> BuddyMemoryAllocator<A> {
-    pub unsafe fn new<T>(range: *mut [T], alloc: A) -> BuddyMemoryAllocator<A> {
-        let start = range.as_mut_ptr() as usize;
-        let size = range.len() * size_of::<T>();
-        BuddyMemoryAllocator(BuddyAllocator::new(start..start + size, alloc))
+    pub unsafe fn new(range: Range<*mut u8>, alloc: A) -> BuddyMemoryAllocator<A> {
+        let range = range.start as usize..range.end as usize;
+        BuddyMemoryAllocator(BuddyAllocator::new(range, alloc))
+    }
+
+    pub fn reserve_range(&mut self, range: Range<*const u8>) {
+        let range = range.start as usize..range.end as usize;
+        self.0.reserve_range(range.clone());
     }
 }
 
@@ -117,13 +127,37 @@ impl<A: Allocator + Copy> Node<A> {
             self.max_available = node_size;
             return;
         }
-        let (left, right) = &mut **self.children.as_mut().unwrap();
+        let (left, right) = self.children.as_deref_mut().unwrap();
         if ptr < node_size / 2 {
             left.dealloc(ptr, req_size, node_size / 2);
         } else {
             right.dealloc(ptr - node_size / 2, req_size, node_size / 2);
         }
         self.update(node_size);
+    }
+
+    pub fn reserve_range(&mut self, range: Range<usize>, node_size: usize, alloc: A) {
+        if range == (0..node_size) {
+            assert_eq!(self.max_available, node_size);
+            self.max_available = 0;
+        } else {
+            let (left, right) = get_children(&mut self.children, node_size, alloc);
+            if range.start < node_size / 2 {
+                left.reserve_range(
+                    range.start..range.end.min(node_size / 2),
+                    node_size / 2,
+                    alloc,
+                );
+            }
+            if range.end > node_size / 2 {
+                right.reserve_range(
+                    range.start.max(node_size / 2) - node_size / 2..range.end - node_size / 2,
+                    node_size / 2,
+                    alloc,
+                );
+            }
+            self.update(node_size);
+        }
     }
 
     fn update(&mut self, node_size: usize) {

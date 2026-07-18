@@ -1,4 +1,4 @@
-use crate::page::physical_to_identity_mapped;
+use crate::page::phys_to_idmp;
 use crate::pci::AllocatedRange;
 use crate::pci::capability::{PciCapability, VendorPciCapability};
 use crate::pci::config::GeneralDeviceConfig;
@@ -86,7 +86,7 @@ impl Isr {
 impl NotifySlot {
     unsafe fn select(&self, common: &mut Volatile<VirtioCommonConfig>) -> Volatile<'static, u16> {
         let offset = common.queue_notify_off().read() as usize * self.off_multiplier as usize;
-        unsafe { Volatile::new(physical_to_identity_mapped(self.base.byte_add(offset))) }
+        unsafe { Volatile::new(phys_to_idmp(self.base.byte_add(offset))) }
     }
 }
 
@@ -143,7 +143,7 @@ fn extract_capabilities<T, Access>(
             let address = bars[cap.bar as usize].soc_offset + cap.offset as usize;
             if cap.cfg_type == VIRTIO_PCI_CAP_COMMON_CFG {
                 assert!(common.is_none());
-                let address = physical_to_identity_mapped(address as *mut VirtioCommonConfig);
+                let address = phys_to_idmp(address as *mut VirtioCommonConfig);
                 common = Some(unsafe { Volatile::new(address) });
             } else if cap.cfg_type == VIRTIO_PCI_CAP_NOTIFY_CFG {
                 assert!(notify.is_none());
@@ -155,13 +155,13 @@ fn extract_capabilities<T, Access>(
                     off_multiplier: cap.notify_off_multiplier,
                 });
             } else if cap.cfg_type == VIRTIO_PCI_CAP_ISR_CFG {
-                let address = physical_to_identity_mapped(address as *mut u8);
+                let address = phys_to_idmp(address as *mut u8);
                 isr = Some(Isr {
                     ptr: unsafe { Volatile::<_, Readonly>::new(address) },
                 });
             } else if cap.cfg_type == VIRTIO_PCI_CAP_DEVICE_CFG {
                 assert!(device.is_none());
-                let address = physical_to_identity_mapped(address as *mut T);
+                let address = phys_to_idmp(address as *mut T);
                 device = Some(unsafe { Volatile::new(address) });
             }
         }

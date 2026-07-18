@@ -49,7 +49,7 @@ use crate::hart::{HartContext, HartStack};
 use crate::heap::initialize_heap;
 use crate::interrupt::INTERRUPTS;
 use crate::log::{initialize_log, log_userspace};
-use crate::page::{PageFlags, initialize_memory_mapping, map_pages, physical_to_identity_mapped};
+use crate::page::{PageFlags, initialize_memory_mapping, map_pages, phys_to_idmp};
 use crate::pci::initialize_all_pci;
 use crate::plic::{initialize_plic, plic_claim, plic_complete};
 use crate::process::{
@@ -92,8 +92,7 @@ fn main(_hart_id: u64, device_tree_ptr: *const u8) -> ! {
     initialize_trap_handler();
     initialize_memory_mapping();
     log_sbi_metadata();
-    let device_tree =
-        unsafe { Fdt::from_ptr(physical_to_identity_mapped(device_tree_ptr as *mut u8)) }.unwrap();
+    let device_tree = unsafe { Fdt::from_ptr(phys_to_idmp(device_tree_ptr)) }.unwrap();
     initialize_heap(&device_tree, device_tree_ptr);
     let (virtio_blk, virtio_net, virtio_gpu, virtio_keyboard, virtio_mouse) =
         initialize_all_pci(&device_tree);

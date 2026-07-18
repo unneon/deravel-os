@@ -1,3 +1,11 @@
+use crate::util::address::Address;
+use core::fmt::Formatter;
+use core::ops::Range;
+
+struct Memory {
+    range: Range<usize>,
+}
+
 struct MemorySize {
     bytes: usize,
 }
@@ -27,6 +35,18 @@ impl MemorySize {
     }
 }
 
+impl core::fmt::Display for Memory {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "{:#x}..{:#x} ({})",
+            self.range.start,
+            self.range.end,
+            fmt_memory_size(self.range.end - self.range.start)
+        )
+    }
+}
+
 impl core::fmt::Display for MemorySize {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         if self.bytes < KIBIBYTE {
@@ -42,6 +62,12 @@ impl core::fmt::Display for MemorySize {
         } else {
             self.fmt_unit(PEBIBYTE, "PiB", f)
         }
+    }
+}
+
+pub fn fmt_memory<T: Address<Raw = usize>>(range: &Range<T>) -> impl core::fmt::Display {
+    Memory {
+        range: range.raw_addr(),
     }
 }
 

@@ -1,3 +1,4 @@
+pub mod address;
 mod fmt;
 pub mod volatile;
 

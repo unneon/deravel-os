@@ -6,6 +6,7 @@ pub use entry::PageFlags;
 pub use table::{PageTable, TopPageTable};
 
 use crate::page::entry::PageTableEntry;
+use crate::util::address::Address;
 use deravel_types::{LEVEL_2_PAGE_SIZE, PAGE_SIZE};
 use riscv::register::satp::{Mode, Satp};
 
@@ -106,15 +107,15 @@ fn align_by(range: Range<usize>, align: usize) -> (Range<usize>, Range<usize>, R
     (unaligned_prefix, aligned, unaligned_suffix)
 }
 
-pub fn physical_to_identity_mapped<T>(physical: *mut T) -> *mut T {
-    physical.map_addr(|physical| {
+pub fn phys_to_idmp<T: Address>(phys: T) -> T {
+    phys.deep_map_addr(|physical| {
         assert!(physical < IDENTITY_MAPPING_SIZE);
         (!(VIRTUAL_ADDRESS_SPACE_SIZE - 1)) | (physical + IDENTITY_MAPPING_START)
     })
 }
 
-pub fn idmp_to_phys<T>(phys: *mut T) -> *mut T {
-    phys.map_addr(|phys| {
+pub fn idmp_to_phys<T: Address>(phys: T) -> T {
+    phys.deep_map_addr(|phys| {
         let phys = phys & (VIRTUAL_ADDRESS_SPACE_SIZE - 1);
         assert!(phys >= IDENTITY_MAPPING_START);
         assert!(phys < IDENTITY_MAPPING_END);

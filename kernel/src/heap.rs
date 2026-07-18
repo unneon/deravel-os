@@ -1,10 +1,11 @@
 use crate::buddy::BuddyMemoryAllocator;
-use crate::page::physical_to_identity_mapped;
+use crate::page::phys_to_idmp;
 use crate::sync::Mutex;
-use crate::util::fmt_memory_size;
+use crate::util::fmt_memory;
 use alloc::alloc::Global;
 use alloc::vec::Vec;
 use core::alloc::{AllocError, Allocator, GlobalAlloc, Layout};
+use core::iter::once;
 use core::ops::Range;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicUsize, Ordering};
@@ -31,8 +32,6 @@ singleton_allocator!(BuddyHeap, BUDDY);
 pub struct Heap;
 
 unsafe extern "C" {
-    static image_start: u8;
-    static image_end: u8;
     static mut heap_start: u8;
     static mut heap_end: u8;
 }
@@ -59,84 +58,56 @@ unsafe impl GlobalAlloc for Heap {
 }
 
 pub fn initialize_heap(dt: &Fdt, dt_ptr: *const u8) {
-    let mut available = collect_memory(dt);
-    reserve_ranges_from_dt(dt, &mut available);
-    reserve_dt_memory(dt, dt_ptr, &mut available);
-    reserve_kernel_range(&mut available);
-    let Some(largest_available) = available
-        .iter()
-        .max_by_key(|range| unsafe { range.end.byte_offset_from_unsigned(range.start) })
-    else {
-        return;
-    };
-    for a in &available {
-        let start = a.start as usize;
-        let end = a.end as usize;
-        let size = fmt_memory_size(end - start);
-        if a != largest_available {
-            info!("ignoring RAM {start:#x}..{end:#x} ({size})");
-        } else {
-            info!("using RAM {start:#x}..{end:#x} ({size})");
-        }
+    let available = collect_available(dt);
+    assert_eq!(available.len(), 1);
+    let available = available[0].clone();
+    info!("found RAM {}", fmt_memory(&available));
+
+    let mut buddy = unsafe { BuddyMemoryAllocator::new(phys_to_idmp(available), Global) };
+    for reserved in collect_reserved(dt, dt_ptr) {
+        buddy.reserve_range(phys_to_idmp(reserved));
     }
-    *BUDDY.lock() = Some(unsafe {
-        BuddyMemoryAllocator::new(
-            core::ptr::slice_from_raw_parts_mut(
-                physical_to_identity_mapped(largest_available.start as *mut u8),
-                largest_available.end as usize - largest_available.start as usize,
-            ),
-            Global,
-        )
-    });
+    *BUDDY.lock() = Some(buddy);
 }
 
-fn collect_memory(dt: &Fdt) -> Vec<Range<*const u8>> {
+fn collect_available(dt: &Fdt) -> Vec<Range<*mut u8>> {
     dt.memory()
         .regions()
         .map(|reg| {
-            let start = reg.starting_address;
+            let start = reg.starting_address as *mut u8;
             let end = start.wrapping_byte_add(reg.size.unwrap());
             start..end
         })
         .collect()
 }
 
-fn reserve_ranges_from_dt(dt: &Fdt, available: &mut Vec<Range<*const u8>>) {
-    for reserved in dt.find_node("/reserved-memory").unwrap().children() {
-        for reg in reserved.reg().into_iter().flatten() {
-            let start = reg.starting_address;
-            let end = start.wrapping_byte_add(reg.size.unwrap());
-            reserve_range(start..end, available);
-        }
-    }
+fn collect_reserved(dt: &Fdt, dt_ptr: *const u8) -> impl Iterator<Item = Range<*const u8>> {
+    reserved_ranges_from_dt(dt)
+        .chain(once(reserved_kernel_range()))
+        .chain(once(reserved_dt_memory(dt, dt_ptr)))
 }
 
-fn reserve_dt_memory(dt: &Fdt, dt_ptr: *const u8, available: &mut Vec<Range<*const u8>>) {
-    reserve_range(dt_ptr..dt_ptr.wrapping_byte_add(dt.total_size()), available)
-}
-
-fn reserve_kernel_range(available: &mut Vec<Range<*const u8>>) {
-    let start = &raw const image_start;
-    let end = &raw const image_end;
-    reserve_range(start..end, available);
-}
-
-fn reserve_range(reserved: Range<*const u8>, available: &mut Vec<Range<*const u8>>) {
-    *available = available
-        .iter()
-        .flat_map(|available| {
-            [
-                available.start..available.end.min(reserved.start),
-                available.start.max(reserved.end)..available.end,
-            ]
+fn reserved_ranges_from_dt(dt: &Fdt) -> impl Iterator<Item = Range<*const u8>> {
+    dt.find_node("/reserved-memory")
+        .unwrap()
+        .children()
+        .flat_map(|reserved| {
+            reserved.reg().into_iter().flatten().map(|reg| {
+                let start = reg.starting_address;
+                let end = start.wrapping_byte_add(reg.size.unwrap());
+                start..end
+            })
         })
-        .filter(|available| available.end > available.start)
-        .collect();
 }
 
-pub fn log_heap_statistics() {
-    info!(
-        "allocated {} pages in total",
-        ALLOCATED_SO_FAR.load(Ordering::Relaxed)
-    );
+fn reserved_kernel_range() -> Range<*const u8> {
+    unsafe extern "C" {
+        static image_start: u8;
+        static image_end: u8;
+    }
+    &raw const image_start..&raw const image_end
+}
+
+fn reserved_dt_memory(dt: &Fdt, dt_ptr: *const u8) -> Range<*const u8> {
+    dt_ptr..dt_ptr.wrapping_byte_add(dt.total_size())
 }
