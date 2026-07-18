@@ -82,7 +82,7 @@ macro kill {
     }
 }
 
-fn main(_hart_id: u64, device_tree_ptr: *const u8) -> ! {
+fn main(_hart_id: u64, dt_ptr: *const u8) -> ! {
     clear_bss();
 
     initialize_log();
@@ -90,13 +90,13 @@ fn main(_hart_id: u64, device_tree_ptr: *const u8) -> ! {
     initialize_hart_stack();
     initialize_trap_handler();
     initialize_memory_mapping();
-    let device_tree = unsafe { Fdt::from_ptr(phys_to_idmp(device_tree_ptr)) }.unwrap();
-    initialize_timebase_frequency(&device_tree);
+    let dt = unsafe { Fdt::from_ptr(phys_to_idmp(dt_ptr)) }.unwrap();
+    initialize_timebase_frequency(&dt);
     log_sbi_metadata();
-    initialize_heap(&device_tree, device_tree_ptr);
+    initialize_heap(&dt, dt_ptr);
     let (virtio_blk, virtio_net, virtio_gpu, virtio_keyboard, virtio_mouse) =
-        initialize_all_pci(&device_tree);
-    initialize_plic(&device_tree);
+        initialize_all_pci(&dt);
+    initialize_plic(&dt);
     enable_interrupts();
 
     let fs_tar = reserve_process::<TarFs>(elf!("CARGO_BIN_FILE_DERAVEL_FILESYSTEM_TAR"));

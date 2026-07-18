@@ -27,9 +27,9 @@ const MAX_SOURCES: usize = 1024;
 
 static PLIC: AtomicPtr<Plic> = AtomicPtr::null();
 
-pub fn initialize_plic(device_tree: &Fdt) {
-    let mut plic = find_plic(device_tree).unwrap();
-    let supported_external = supported_external_interrupts(device_tree).unwrap();
+pub fn initialize_plic(dt: &Fdt) {
+    let mut plic = find_plic(dt).unwrap();
+    let supported_external = supported_external_interrupts(dt).unwrap();
     for e in 1..=supported_external.min(MAX_SOURCES - 1) {
         plic.priority().index(e).write(1);
     }
@@ -47,12 +47,8 @@ pub fn plic_complete(irq: u32) {
     get_plic().contexts().index(1).claim_complete().write(irq);
 }
 
-fn find_plic(device_tree: &Fdt) -> Option<Volatile<'static, Plic>> {
-    let address = device_tree
-        .find_node("/soc/plic")?
-        .reg()?
-        .next()?
-        .starting_address;
+fn find_plic(dt: &Fdt) -> Option<Volatile<'static, Plic>> {
+    let address = dt.find_node("/soc/plic")?.reg()?.next()?.starting_address;
     PLIC.store(address as *mut Plic, Ordering::Relaxed);
     let address = phys_to_idmp(address as *mut Plic);
     Some(unsafe { Volatile::new(address) })
@@ -65,9 +61,8 @@ fn get_plic() -> Volatile<'static, Plic> {
     unsafe { Volatile::new(address) }
 }
 
-fn supported_external_interrupts(device_tree: &Fdt) -> Option<usize> {
-    device_tree
-        .find_node("/soc/plic")?
+fn supported_external_interrupts(dt: &Fdt) -> Option<usize> {
+    dt.find_node("/soc/plic")?
         .property("riscv,ndev")?
         .as_usize()
 }

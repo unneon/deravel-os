@@ -36,7 +36,7 @@ struct PciRanges {
 }
 
 pub fn initialize_all_pci(
-    device_tree: &Fdt,
+    dt: &Fdt,
 ) -> (
     &'static VirtioBlk,
     &'static VirtioNet,
@@ -44,9 +44,9 @@ pub fn initialize_all_pci(
     &'static VirtioInput,
     &'static VirtioInput,
 ) {
-    let soc = device_tree.find_node("/soc").unwrap();
-    let pci = device_tree.find_node("/soc/pci").unwrap();
-    let plic = device_tree.find_node("/soc/plic").unwrap();
+    let soc = dt.find_node("/soc").unwrap();
+    let pci = dt.find_node("/soc/pci").unwrap();
+    let plic = dt.find_node("/soc/plic").unwrap();
     let pci_ranges = find_pci_ranges(&soc, &pci);
     let mut io = BumpAllocator::new(0..pci_ranges.io.length);
     let mut mem32 = BumpAllocator::new(0..pci_ranges.mem32.length);
