@@ -1,11 +1,12 @@
 use crate::sync::Mutex;
 use alloc::boxed::Box;
 use core::alloc::{AllocError, Allocator, Layout};
-use core::ops::Range;
+use core::ops::{DerefMut, Range};
 use core::ptr::NonNull;
 
 pub struct BuddyAllocator<A: Allocator> {
     root: Node<A>,
+    root_node_size: usize,
     range: Range<usize>,
     alloc: A,
 }
@@ -23,17 +24,14 @@ impl<A: Allocator + Copy> BuddyAllocator<A> {
         let node_size = size.next_power_of_two();
         BuddyAllocator {
             root: Node::new(size, node_size, alloc),
+            root_node_size: node_size,
             range,
             alloc,
         }
     }
 
     pub fn alloc(&mut self, req_size: usize) -> Result<usize, AllocError> {
-        let unoffset_ptr = self.root.alloc(
-            req_size,
-            (self.range.end - self.range.start).next_power_of_two(),
-            self.alloc,
-        )?;
+        let unoffset_ptr = self.root.alloc(req_size, self.root_node_size, self.alloc)?;
         let ptr = self.range.start + unoffset_ptr;
         assert!(ptr >= self.range.start);
         assert!(ptr + req_size <= self.range.end);
@@ -41,11 +39,8 @@ impl<A: Allocator + Copy> BuddyAllocator<A> {
     }
 
     pub fn dealloc(&mut self, ptr: usize, size: usize) {
-        self.root.dealloc(
-            ptr - self.range.start,
-            size,
-            (self.range.end - self.range.start).next_power_of_two(),
-        );
+        self.root
+            .dealloc(ptr - self.range.start, size, self.root_node_size);
     }
 }
 
@@ -70,11 +65,11 @@ impl<A: Allocator + Copy> Node<A> {
                 children: None,
             }
         } else {
-            debug_assert!(size < node_size);
-            let left_size = node_size / 2;
-            let right_size = size.saturating_sub(left_size);
-            Node {
-                max_available: left_size,
+            assert!(size < node_size);
+            let left_size = (node_size / 2).min(size);
+            let right_size = size.saturating_sub(node_size / 2);
+            let mut node = Node {
+                max_available: 0,
                 children: Some(Box::new_in(
                     (
                         Node::new(left_size, node_size / 2, alloc),
@@ -82,7 +77,9 @@ impl<A: Allocator + Copy> Node<A> {
                     ),
                     alloc,
                 )),
-            }
+            };
+            node.update(node_size);
+            node
         }
     }
 
@@ -96,40 +93,27 @@ impl<A: Allocator + Copy> Node<A> {
             return Err(AllocError);
         }
         if req_size > node_size / 2 {
-            debug_assert_eq!(self.max_available, node_size);
+            assert_eq!(self.max_available, node_size);
             self.max_available = 0;
             return Ok(0);
         }
-        let (left, right) = match &mut self.children {
-            Some(children) => &mut **children,
-            None => self.children.insert(Box::new_in(
-                (
-                    Node {
-                        max_available: node_size / 2,
-                        children: None,
-                    },
-                    Node {
-                        max_available: node_size / 2,
-                        children: None,
-                    },
-                ),
-                alloc,
-            )),
-        };
+        let (left, right) = get_children(&mut self.children, node_size, alloc);
         let ptr = if (left.max_available >= req_size && left.max_available <= right.max_available)
             || right.max_available < req_size
         {
+            assert!(left.max_available >= req_size);
             left.alloc(req_size, node_size / 2, alloc)?
         } else {
+            assert!(right.max_available >= req_size);
             right.alloc(req_size, node_size / 2, alloc)? + node_size / 2
         };
-        self.max_available = left.max_available.max(right.max_available);
+        self.update(node_size);
         Ok(ptr)
     }
 
     pub fn dealloc(&mut self, ptr: usize, req_size: usize, node_size: usize) {
-        if ptr == 0 && req_size == node_size {
-            debug_assert_eq!(self.max_available, 0);
+        if ptr == 0 && req_size >= node_size / 2 {
+            assert_eq!(self.max_available, 0);
             self.max_available = node_size;
             return;
         }
@@ -139,7 +123,17 @@ impl<A: Allocator + Copy> Node<A> {
         } else {
             right.dealloc(ptr - node_size / 2, req_size, node_size / 2);
         }
-        self.max_available = left.max_available.max(right.max_available);
+        self.update(node_size);
+    }
+
+    fn update(&mut self, node_size: usize) {
+        if let Some((left, right)) = self.children.as_deref_mut() {
+            if left.max_available == node_size / 2 && right.max_available == node_size / 2 {
+                self.max_available = node_size;
+            } else {
+                self.max_available = left.max_available.max(right.max_available);
+            }
+        }
     }
 }
 
@@ -156,5 +150,28 @@ unsafe impl<A: Allocator + Copy> Allocator for Mutex<Option<BuddyMemoryAllocator
         let mut self_ = self.lock();
         let buddy = &mut self_.as_mut().unwrap().0;
         buddy.dealloc(ptr.as_ptr() as usize, layout.size().max(layout.align()));
+    }
+}
+
+fn get_children<A: Allocator>(
+    children: &mut Option<Box<(Node<A>, Node<A>), A>>,
+    node_size: usize,
+    alloc: A,
+) -> &mut (Node<A>, Node<A>) {
+    match children {
+        Some(children) => children.deref_mut(),
+        None => children.insert(Box::new_in(
+            (
+                Node {
+                    max_available: node_size / 2,
+                    children: None,
+                },
+                Node {
+                    max_available: node_size / 2,
+                    children: None,
+                },
+            ),
+            alloc,
+        )),
     }
 }
