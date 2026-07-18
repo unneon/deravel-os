@@ -54,6 +54,8 @@ impl<A: Allocator + Copy> BuddyAllocator<A> {
     }
 
     pub fn reserve_range(&mut self, range: Range<usize>) {
+        debug_assert!(range.start >= self.range.start);
+        debug_assert!(range.end <= self.range.end);
         let range = range.start - self.range.start..range.end - self.range.start;
         self.root
             .reserve_range(range, self.root_node_size, self.alloc);
@@ -69,6 +71,16 @@ impl<A: Allocator + Copy> BuddyMemoryAllocator<A> {
     pub fn reserve_range(&mut self, range: Range<*const u8>) {
         let range = range.start as usize..range.end as usize;
         self.0.reserve_range(range.clone());
+    }
+
+    pub fn allocate_mut(&mut self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        let address = self.0.alloc(layout)?;
+        let ptr = core::ptr::slice_from_raw_parts_mut(address as *mut u8, layout.size());
+        Ok(NonNull::new(ptr).unwrap())
+    }
+
+    pub unsafe fn deallocate_mut(&mut self, ptr: NonNull<u8>, layout: Layout) {
+        self.0.dealloc(ptr.as_ptr() as usize, layout);
     }
 }
 
@@ -183,17 +195,11 @@ impl<A: Allocator + Copy> Node<A> {
 
 unsafe impl<A: Allocator + Copy> Allocator for Mutex<Option<BuddyMemoryAllocator<A>>> {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        let mut self_ = self.lock();
-        let buddy = &mut self_.as_mut().unwrap().0;
-        let address = buddy.alloc(layout)?;
-        let ptr = core::ptr::slice_from_raw_parts_mut(address as *mut u8, layout.size());
-        Ok(NonNull::new(ptr).unwrap())
+        self.lock().as_mut().unwrap().allocate_mut(layout)
     }
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
-        let mut self_ = self.lock();
-        let buddy = &mut self_.as_mut().unwrap().0;
-        buddy.dealloc(ptr.as_ptr() as usize, layout);
+        unsafe { self.lock().as_mut().unwrap().deallocate_mut(ptr, layout) }
     }
 }
 

@@ -1,8 +1,8 @@
 use crate::buddy::BuddyMemoryAllocator;
 use crate::bump::BumpMemoryAllocator;
-use crate::page::phys_to_virt;
+use crate::page::phys_to_drmp;
 use crate::sync::Mutex;
-use crate::util::fmt_memory;
+use crate::util::fmt::memory::fmt_memory;
 use alloc::vec::Vec;
 use core::alloc::{AllocError, Allocator, GlobalAlloc, Layout};
 use core::iter::once;
@@ -39,10 +39,14 @@ static EARLY_BUMP: Mutex<Option<BumpMemoryAllocator>> = Mutex::new(None);
 
 unsafe impl GlobalAlloc for GlobalAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        EarlyBumpHeap
-            .allocate(layout)
-            .map(|p| p.as_mut_ptr())
-            .unwrap_or_default()
+        let ptr = if let Some(mut buddy) = BUDDY.try_lock()
+            && let Some(buddy) = buddy.as_mut()
+        {
+            buddy.allocate_mut(layout)
+        } else {
+            EarlyBumpHeap.allocate(layout)
+        };
+        ptr.map(|p| p.as_mut_ptr()).unwrap_or_default()
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
@@ -65,9 +69,9 @@ pub fn initialize_heap(dt: &Fdt, dt_ptr: *const u8) {
     let available = available[0].clone();
     info!("found RAM {}", fmt_memory(&available));
 
-    let mut buddy = unsafe { BuddyMemoryAllocator::new(phys_to_virt(available), EarlyBumpHeap) };
+    let mut buddy = unsafe { BuddyMemoryAllocator::new(phys_to_drmp(available), EarlyBumpHeap) };
     for reserved in collect_reserved(dt, dt_ptr) {
-        buddy.reserve_range(phys_to_virt(reserved));
+        buddy.reserve_range(phys_to_drmp(reserved));
     }
     *BUDDY.lock() = Some(buddy);
 }

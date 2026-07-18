@@ -14,7 +14,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use alloc::{format, vec};
 use deravel_kernel_api::*;
-use log::error;
+use log::*;
 
 struct File {
     name: String,

@@ -23,6 +23,11 @@ const DIRECT_MAPPING_SIZE: usize = DIRECT_MAPPING_END - DIRECT_MAPPING_START;
 const MAX_PHYSICAL_ADDR: usize = DIRECT_MAPPING_SIZE;
 const MAX_VIRTUAL_ADDR: usize = LEVEL_2_PAGE_SIZE * (PAGE_SIZE / size_of::<usize>());
 
+unsafe extern "C" {
+    static image_start: u8;
+    static image_end: u8;
+}
+
 static mut KERNEL_PAGE_TABLE: TopPageTable = PageTable::new();
 
 pub fn initialize_memory_mapping() {
@@ -69,6 +74,7 @@ fn map_kernel_image_section(table: &mut TopPageTable, range: Range<*const u8>, f
     map_pages(table, start, start, flags, size);
 }
 
+#[track_caller]
 pub fn map_pages(
     table: &mut TopPageTable,
     virtual_start: usize,
@@ -78,6 +84,7 @@ pub fn map_pages(
 ) {
     assert!(virtual_start.is_multiple_of(PAGE_SIZE));
     assert!(physical_start.is_multiple_of(PAGE_SIZE));
+    assert!(physical_start < MAX_PHYSICAL_ADDR);
     assert!(size.is_multiple_of(PAGE_SIZE));
     let virtual_end = virtual_start + size;
     let (prefix, l2p_aligned, suffix) = align_by(virtual_start..virtual_end, LEVEL_2_PAGE_SIZE);
@@ -111,15 +118,23 @@ fn align_by(range: Range<usize>, align: usize) -> (Range<usize>, Range<usize>, R
 pub fn phys_to_virt<T: Address>(phys: T) -> T {
     phys.deep_map_addr(|phys| {
         assert!(phys < MAX_PHYSICAL_ADDR);
+        // TODO: What about the exact end address in ranges? Also kind of, every pointer is a range.
+        if phys >= &raw const image_start as usize && phys <= &raw const image_end as usize {
+            phys
+        } else {
+            sign_extend(phys + DIRECT_MAPPING_START)
+        }
+    })
+}
+
+pub fn phys_to_drmp<T: Address>(phys: T) -> T {
+    phys.deep_map_addr(|phys| {
+        assert!(phys < MAX_PHYSICAL_ADDR);
         sign_extend(phys + DIRECT_MAPPING_START)
     })
 }
 
 pub fn virt_to_phys<T: Address>(virt: T) -> T {
-    unsafe extern "C" {
-        static image_start: u8;
-        static image_end: u8;
-    }
     virt.deep_map_addr(|virt| {
         let virt = sign_unextend(virt);
         match virt {
@@ -145,6 +160,6 @@ fn sign_unextend(addr: usize) -> usize {
 pub fn satp(table: *mut TopPageTable) -> Satp {
     let mut satp = Satp::from_bits(0);
     satp.set_mode(Mode::Sv39);
-    satp.set_ppn(table as usize / PAGE_SIZE);
+    satp.set_ppn(virt_to_phys(table) as usize / PAGE_SIZE);
     satp
 }

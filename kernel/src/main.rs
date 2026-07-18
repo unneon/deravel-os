@@ -379,7 +379,7 @@ impl SyscallHandler for () {
                 map_pages(
                     unsafe { &mut *proc.page_table },
                     virtual_addr,
-                    ring_buffer as *const _ as *const u8 as usize,
+                    virt_to_phys(ring_buffer as *const _ as *const u8) as usize,
                     PageFlags::readwrite().user(),
                     PAGE_SIZE,
                 );

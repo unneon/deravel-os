@@ -86,7 +86,7 @@ impl Isr {
 impl NotifySlot {
     unsafe fn select(&self, common: &mut Volatile<VirtioCommonConfig>) -> Volatile<'static, u16> {
         let offset = common.queue_notify_off().read() as usize * self.off_multiplier as usize;
-        unsafe { Volatile::new(phys_to_virt(self.base.byte_add(offset))) }
+        unsafe { Volatile::new(self.base.byte_add(offset)) }
     }
 }
 
@@ -140,29 +140,23 @@ fn extract_capabilities<T, Access>(
     let mut device = None;
     for cap in config.walk_capabilities() {
         if let Some(cap) = unsafe { cap.get_vendor::<VirtioPciCapability>() } {
-            let address = bars[cap.bar as usize].soc_offset + cap.offset as usize;
+            let address = phys_to_virt(bars[cap.bar as usize].soc_offset + cap.offset as usize);
             if cap.cfg_type == VIRTIO_PCI_CAP_COMMON_CFG {
                 assert!(common.is_none());
-                let address = phys_to_virt(address as *mut VirtioCommonConfig);
-                common = Some(unsafe { Volatile::new(address) });
+                common = Some(unsafe { Volatile::new(address as *mut VirtioCommonConfig) });
             } else if cap.cfg_type == VIRTIO_PCI_CAP_NOTIFY_CFG {
                 assert!(notify.is_none());
-                let cap = unsafe {
-                    &*(cap as *const VirtioPciCapability as *const VirtioPciNotifyCapability)
-                };
+                let cap = unsafe { &*(cap as *const _ as *const VirtioPciNotifyCapability) };
                 notify = Some(NotifySlot {
                     base: address as *mut u16,
                     off_multiplier: cap.notify_off_multiplier,
                 });
             } else if cap.cfg_type == VIRTIO_PCI_CAP_ISR_CFG {
-                let address = phys_to_virt(address as *mut u8);
-                isr = Some(Isr {
-                    ptr: unsafe { Volatile::<_, Readonly>::new(address) },
-                });
+                let ptr = unsafe { Volatile::<_, Readonly>::new(address as *mut u8) };
+                isr = Some(Isr { ptr });
             } else if cap.cfg_type == VIRTIO_PCI_CAP_DEVICE_CFG {
                 assert!(device.is_none());
-                let address = phys_to_virt(address as *mut T);
-                device = Some(unsafe { Volatile::new(address) });
+                device = Some(unsafe { Volatile::new(address as *mut T) });
             }
         }
     }

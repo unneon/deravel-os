@@ -8,11 +8,23 @@ pub trait Address {
     fn deep_map_addr(self, f: impl FnMut(usize) -> usize) -> Self;
 }
 
-impl<T> Address for *const T {
+impl Address for usize {
+    type Raw = usize;
+
+    fn raw_addr(&self) -> Self::Raw {
+        *self
+    }
+
+    fn deep_map_addr(self, mut f: impl FnMut(usize) -> usize) -> Self {
+        f(self)
+    }
+}
+
+impl<T: ?Sized> Address for *const T {
     type Raw = usize;
 
     fn raw_addr(&self) -> usize {
-        *self as usize
+        self.to_raw_parts().0 as usize
     }
 
     fn deep_map_addr(self, f: impl FnMut(usize) -> usize) -> Self {
@@ -20,11 +32,11 @@ impl<T> Address for *const T {
     }
 }
 
-impl<T> Address for *mut T {
+impl<T: ?Sized> Address for *mut T {
     type Raw = usize;
 
     fn raw_addr(&self) -> usize {
-        *self as usize
+        self.to_raw_parts().0 as usize
     }
 
     fn deep_map_addr(self, f: impl FnMut(usize) -> usize) -> Self {

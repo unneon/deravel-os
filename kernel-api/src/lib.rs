@@ -22,6 +22,7 @@ use core::alloc::{GlobalAlloc, Layout};
 use core::fmt::Write;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use log::*;
+use serde::Deserialize;
 
 #[macro_export]
 macro_rules! app {
@@ -49,6 +50,11 @@ pub macro println {
     },
 }
 
+struct FakeProcess;
+
+#[derive(Debug, Deserialize)]
+struct FakeProcessArgs;
+
 pub struct Stdio;
 
 struct PageAllocator;
@@ -63,6 +69,17 @@ unsafe extern "C" {
 static PAGE_ALLOCATOR: PageAllocator = PageAllocator;
 
 static STDIO: AtomicUsize = AtomicUsize::new(0);
+
+impl ProcessTag for FakeProcess {
+    type Args = FakeProcessArgs;
+    type Export = ();
+    type Spawner = ();
+    const NAME: &'static str = "";
+}
+
+impl ProcessArgs for FakeProcessArgs {
+    fn for_all(&self, _: impl FnMut(RawCapability)) {}
+}
 
 impl Write for Stdio {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
@@ -123,7 +140,11 @@ pub fn alloc_shared(size: usize) -> (*mut [u8], Capability<SharedMemory>) {
 }
 
 pub fn current_pid() -> ProcessId {
-    unsafe { (INPUTS_ADDRESS as *const CommonProcessInputs).read().id }
+    unsafe {
+        (INPUTS_ADDRESS as *const ProcessInputs<FakeProcess>)
+            .read()
+            .id
+    }
 }
 
 pub fn exit() -> ! {
@@ -150,7 +171,7 @@ pub fn set_stdio(cap: Capability<Console>) {
 pub fn system_time() -> f64 {
     riscv::register::time::read() as f64
         / unsafe {
-            (INPUTS_ADDRESS as *const CommonProcessInputs)
+            (INPUTS_ADDRESS as *const ProcessInputs<FakeProcess>)
                 .read()
                 .riscv_timebase_frequency
                 .unwrap() as f64

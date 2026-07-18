@@ -1,4 +1,4 @@
-use crate::page::{PageFlags, TopPageTable, map_pages};
+use crate::page::{PageFlags, TopPageTable, map_pages, virt_to_phys};
 use alloc::vec;
 use alloc::vec::Vec;
 use deravel_types::PAGE_SIZE;
@@ -53,7 +53,7 @@ pub fn load_elf(elf_bytes: &[u8], page_table: &mut TopPageTable) -> usize {
             map_pages(
                 page_table,
                 segment.p_vaddr as usize,
-                pages.as_ptr() as usize,
+                virt_to_phys(pages.as_ptr()) as usize,
                 flags,
                 size,
             );

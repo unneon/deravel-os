@@ -1,5 +1,5 @@
-use crate::page::PageFlags;
 use crate::page::entry::{PageTableEntry, PageTableEntryUnpacked};
+use crate::page::{MAX_PHYSICAL_ADDR, PageFlags, phys_to_virt, virt_to_phys};
 use alloc::boxed::Box;
 use deravel_types::PAGE_SIZE;
 
@@ -22,10 +22,12 @@ impl<const LEVEL: usize> PageTable<LEVEL> {
         match self.0[vpn_segment].unpack() {
             PageTableEntryUnpacked::Invalid => {
                 let indirect = Box::leak(Box::new(PageTable::new()));
-                self.0[vpn_segment] = PageTableEntry::indirect(indirect as *mut _);
+                self.0[vpn_segment] = PageTableEntry::indirect(virt_to_phys(indirect as *mut _));
                 indirect
             }
-            PageTableEntryUnpacked::Indirect { phys_ptr } => unsafe { &mut *phys_ptr },
+            PageTableEntryUnpacked::Indirect { phys_ptr } => unsafe {
+                &mut *phys_to_virt(phys_ptr)
+            },
             PageTableEntryUnpacked::Leaf { .. } => unreachable!(),
         }
     }
@@ -35,6 +37,7 @@ impl TopPageTable {
     pub fn map_page(&mut self, virtual_addr: usize, physical_addr: usize, flags: PageFlags) {
         assert!(virtual_addr.is_multiple_of(PAGE_SIZE));
         assert!(physical_addr.is_multiple_of(PAGE_SIZE));
+        assert!(physical_addr < MAX_PHYSICAL_ADDR);
 
         let vpn2 = (virtual_addr >> 30) & ((1 << 9) - 1);
         let table1 = unsafe { self.get_or_create_indirect(vpn2) };

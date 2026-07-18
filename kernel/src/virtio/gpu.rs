@@ -136,7 +136,7 @@ impl VirtioGpu {
             nr_entries: 1,
         };
         let mem_entry = MemEntry {
-            addr: self.cursor_image.as_ptr() as u64,
+            addr: virt_to_phys(self.cursor_image.as_ptr()) as u64,
             length: 64 * 64 * 4,
             padding: 0,
         };

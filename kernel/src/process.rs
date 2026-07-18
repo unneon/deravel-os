@@ -9,6 +9,7 @@ use crate::hart::HartContext;
 use crate::heap::BuddyHeap;
 use crate::page::{
     PageFlags, PageTable, TopPageTable, map_direct_mapping, map_kernel_image, map_pages,
+    virt_to_phys,
 };
 use crate::sbi;
 use crate::sbi::{ResetReason, ResetType};
@@ -81,10 +82,8 @@ impl<T: ProcessTag> ProcessReservation<T> {
             T::NAME,
             self.elf,
             ProcessInputs {
-                common: CommonProcessInputs {
-                    id: self.id,
-                    riscv_timebase_frequency: timebase_frequency().map(NonZeroUsize::get),
-                },
+                id: self.id,
+                riscv_timebase_frequency: timebase_frequency().map(NonZeroUsize::get),
                 args,
             },
         )
@@ -95,10 +94,8 @@ impl<T: ProcessTag> ProcessReservation<T> {
             T::NAME,
             self.elf,
             ProcessInputs {
-                common: CommonProcessInputs {
-                    id: self.id,
-                    riscv_timebase_frequency: timebase_frequency().map(NonZeroUsize::get),
-                },
+                id: self.id,
+                riscv_timebase_frequency: timebase_frequency().map(NonZeroUsize::get),
                 args,
             },
         )
@@ -130,7 +127,7 @@ pub fn reserve_process<T: ProcessTag>(elf: &'static [u8]) -> ProcessReservation<
 }
 
 pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: ProcessInputs<T>) {
-    let pid = inputs.common.id;
+    let pid = inputs.id;
     let mut page_table = Box::new(PageTable::new());
     map_direct_mapping(&mut page_table);
     map_kernel_image(&mut page_table);
@@ -188,7 +185,7 @@ fn map_inputs_memory<T: ProcessTag>(pages: &mut TopPageTable, inputs: ProcessInp
     map_pages(
         pages,
         INPUTS_ADDRESS,
-        page as *mut _ as usize,
+        virt_to_phys(page as *mut _) as usize,
         PageFlags::readonly().user(),
         PAGE_SIZE,
     );

@@ -28,7 +28,7 @@ fn main() {
     for interface in &drvli.interfaces {
         let name_snake = &interface.name;
         let name_camel = camel_case(name_snake);
-        writeln!(&mut output, "#[derive(Clone, Copy)]").unwrap();
+        writeln!(&mut output, "#[derive(Clone, Copy, Debug)]").unwrap();
         writeln!(&mut output, "pub struct {name_camel};").unwrap();
         writeln!(&mut output, "impl Interface for {name_camel} {{").unwrap();
         writeln!(

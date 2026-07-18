@@ -21,16 +21,12 @@ pub use drvli::*;
 pub use process_id::ProcessId;
 pub use ring_buffer::{RingBuffer, UntypedRingBuffer};
 
-#[repr(C)]
+#[derive(Debug)]
+#[repr(C, align(4096))]
 pub struct ProcessInputs<T: ProcessTag> {
-    pub common: CommonProcessInputs,
-    pub args: T::Args,
-}
-
-#[repr(C)]
-pub struct CommonProcessInputs {
     pub id: ProcessId,
     pub riscv_timebase_frequency: Option<usize>,
+    pub args: T::Args,
 }
 
 pub struct SharedMemory;

@@ -1,3 +1,4 @@
+use crate::page::virt_to_phys;
 use crate::util::volatile::Volatile;
 use crate::virtio::{NotifySlot, VirtioCommonConfig};
 use alloc::alloc::{alloc_zeroed, handle_alloc_error};
@@ -87,13 +88,15 @@ impl<const INDEX: u16> Queue<INDEX> {
         let descriptors = vec![Descriptor::default(); size];
         let available = AvailableRing::new(size);
         let used = UsedRing::new(size);
-        common.queue_desc().write(descriptors.as_ptr() as u64);
+        common
+            .queue_desc()
+            .write(virt_to_phys(descriptors.as_ptr()) as u64);
         common
             .queue_driver()
-            .write(&*available as *const _ as *const u8 as u64);
+            .write(virt_to_phys(&*available as *const _ as *const u8) as u64);
         common
             .queue_device()
-            .write(&*used as *const _ as *const u8 as u64);
+            .write(virt_to_phys(&*used as *const _ as *const u8) as u64);
 
         common.queue_enable().write(1);
 
@@ -109,7 +112,7 @@ impl<const INDEX: u16> Queue<INDEX> {
     // TODO: Does not capture lifetime.
     pub fn descriptor_readonly<T>(&mut self, index: u16, data: &T, next: Option<u16>) {
         let descriptor = &mut self.descriptors[index as usize];
-        descriptor.address = data as *const T as u64;
+        descriptor.address = virt_to_phys(data as *const T) as u64;
         descriptor.length = size_of::<T>() as u32;
         descriptor.flags = if next.is_some() { VIRTQ_DESC_F_NEXT } else { 0 };
         descriptor.next = next.unwrap_or(0);
@@ -118,7 +121,7 @@ impl<const INDEX: u16> Queue<INDEX> {
     // TODO: Pretty sure doing it this way is UB.
     pub fn descriptor_writeonly<T>(&mut self, index: u16, data: &mut T, next: Option<u16>) {
         let descriptor = &mut self.descriptors[index as usize];
-        descriptor.address = data as *mut T as u64;
+        descriptor.address = virt_to_phys(data as *mut T) as u64;
         descriptor.length = size_of::<T>() as u32;
         descriptor.flags = VIRTQ_DESC_F_WRITE | if next.is_some() { VIRTQ_DESC_F_NEXT } else { 0 };
         descriptor.next = next.unwrap_or(0);
