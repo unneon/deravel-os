@@ -1,10 +1,11 @@
 use crate::sync::Mutex;
+use alloc::alloc::Global;
 use alloc::boxed::Box;
 use core::alloc::{AllocError, Allocator, Layout};
 use core::ops::{DerefMut, Range};
 use core::ptr::NonNull;
 
-pub struct BuddyAllocator<A: Allocator> {
+pub struct BuddyAllocator<A: Allocator = Global> {
     root: Node<A>,
     root_node_size: usize,
     range: Range<usize>,
@@ -18,8 +19,14 @@ struct Node<A: Allocator> {
     children: Option<Box<(Node<A>, Node<A>), A>>,
 }
 
+impl BuddyAllocator {
+    pub fn new(range: Range<usize>) -> BuddyAllocator {
+        BuddyAllocator::new_in(range, Global)
+    }
+}
+
 impl<A: Allocator + Copy> BuddyAllocator<A> {
-    pub fn new(range: Range<usize>, alloc: A) -> BuddyAllocator<A> {
+    pub fn new_in(range: Range<usize>, alloc: A) -> BuddyAllocator<A> {
         let size = range.end - range.start;
         let node_size = size.next_power_of_two();
         BuddyAllocator {
@@ -30,7 +37,8 @@ impl<A: Allocator + Copy> BuddyAllocator<A> {
         }
     }
 
-    pub fn alloc(&mut self, req_size: usize) -> Result<usize, AllocError> {
+    pub fn alloc(&mut self, layout: Layout) -> Result<usize, AllocError> {
+        let req_size = layout.size().max(layout.align());
         let unoffset_ptr = self.root.alloc(req_size, self.root_node_size, self.alloc)?;
         let ptr = self.range.start + unoffset_ptr;
         assert!(ptr >= self.range.start);
@@ -53,7 +61,7 @@ impl<A: Allocator + Copy> BuddyAllocator<A> {
 impl<A: Allocator + Copy> BuddyMemoryAllocator<A> {
     pub unsafe fn new(range: Range<*mut u8>, alloc: A) -> BuddyMemoryAllocator<A> {
         let range = range.start as usize..range.end as usize;
-        BuddyMemoryAllocator(BuddyAllocator::new(range, alloc))
+        BuddyMemoryAllocator(BuddyAllocator::new_in(range, alloc))
     }
 
     pub fn reserve_range(&mut self, range: Range<*const u8>) {
@@ -175,7 +183,7 @@ unsafe impl<A: Allocator + Copy> Allocator for Mutex<Option<BuddyMemoryAllocator
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         let mut self_ = self.lock();
         let buddy = &mut self_.as_mut().unwrap().0;
-        let address = buddy.alloc(layout.size().max(layout.align()))?;
+        let address = buddy.alloc(layout)?;
         let ptr = core::ptr::slice_from_raw_parts_mut(address as *mut u8, layout.size());
         Ok(NonNull::new(ptr).unwrap())
     }

@@ -63,6 +63,7 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::alloc::Layout;
 use core::mem::replace;
 use core::panic::PanicInfo;
 use deravel_types::*;
@@ -337,7 +338,8 @@ impl SyscallHandler for () {
                         kill!(hart, proc, "stream length does not match memory size")
                     }
 
-                    let virtual_addr = proc.virtual_memory.allocate(length, PAGE_SIZE);
+                    let layout = Layout::from_size_align(length, PAGE_SIZE).unwrap();
+                    let virtual_addr = proc.virtual_memory.alloc(layout).unwrap();
                     map_pages(
                         unsafe { &mut *proc.page_table },
                         virtual_addr,
@@ -371,8 +373,10 @@ impl SyscallHandler for () {
                 let handler = capability::get_handler(cap.local_index());
                 let ring_buffer = handler.map_stream(stream);
                 let ring_buffer_size = size_of_val(ring_buffer);
+                let ring_buffer_layout =
+                    Layout::from_size_align(ring_buffer_size, PAGE_SIZE).unwrap();
 
-                let virtual_addr = proc.virtual_memory.allocate(ring_buffer_size, PAGE_SIZE);
+                let virtual_addr = proc.virtual_memory.alloc(ring_buffer_layout).unwrap();
                 map_pages(
                     unsafe { &mut *proc.page_table },
                     virtual_addr,
@@ -387,9 +391,10 @@ impl SyscallHandler for () {
 
     fn alloc(_: usize, _: &mut RiscvRegisters, hart: &mut HartContext, size: usize) -> *mut u8 {
         let padded_size = size.next_multiple_of(PAGE_SIZE);
+        let layout = Layout::from_size_align(padded_size, PAGE_SIZE).unwrap();
         let memory = Vec::leak(vec![0u8; padded_size]);
         let mut proc = hart.current_process();
-        let virtual_addr = proc.virtual_memory.allocate(padded_size, PAGE_SIZE);
+        let virtual_addr = proc.virtual_memory.alloc(layout).unwrap();
         map_pages(
             unsafe { &mut *proc.page_table },
             virtual_addr,
@@ -407,9 +412,10 @@ impl SyscallHandler for () {
         size: usize,
     ) -> (*mut u8, Capability<SharedMemory>) {
         let padded_size = size.next_multiple_of(PAGE_SIZE);
+        let layout = Layout::from_size_align(padded_size, PAGE_SIZE).unwrap();
         let memory = Vec::leak(vec![0u8; padded_size]);
         let mut proc = hart.current_process();
-        let virtual_addr = proc.virtual_memory.allocate(padded_size, PAGE_SIZE);
+        let virtual_addr = proc.virtual_memory.alloc(layout).unwrap();
         map_pages(
             unsafe { &mut *proc.page_table },
             virtual_addr,
@@ -445,8 +451,9 @@ impl SyscallHandler for () {
         let handler = capability::get_handler(cap.local_index());
         let (physical_address, length) = handler.shared_memory();
         let padded_length = length.next_multiple_of(PAGE_SIZE);
+        let layout = Layout::from_size_align(padded_length, PAGE_SIZE).unwrap();
 
-        let virtual_addr = proc.virtual_memory.allocate(padded_length, PAGE_SIZE);
+        let virtual_addr = proc.virtual_memory.alloc(layout).unwrap();
         map_pages(
             unsafe { &mut *proc.page_table },
             virtual_addr,

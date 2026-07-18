@@ -1,5 +1,5 @@
 use crate::arch::{RiscvRegisters, switch_to_userspace_full};
-use crate::bump::BumpAllocator;
+use crate::buddy::BuddyAllocator;
 use crate::capability::{
     capability_page, capability_pages_physical_address, kernel_capability_page,
 };
@@ -38,7 +38,7 @@ pub struct Process {
     pub registers: RiscvRegisters,
     pub pc: usize,
     pub page_table: *mut TopPageTable,
-    pub virtual_memory: BumpAllocator,
+    pub virtual_memory: BuddyAllocator,
     pub messages: VecDeque<Message, BuddyHeap>,
     pub currently_serving: Option<ProcessId>,
 }
@@ -117,7 +117,7 @@ pub fn reserve_process<T: ProcessTag>(elf: &'static [u8]) -> ProcessReservation<
         registers: RiscvRegisters::default(),
         pc: 0,
         page_table: core::ptr::null_mut(),
-        virtual_memory: BumpAllocator::new(0..0),
+        virtual_memory: BuddyAllocator::new(0..0),
         messages: VecDeque::new_in(BuddyHeap),
         currently_serving: None,
     });
@@ -145,7 +145,7 @@ pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: Pro
         registers: RiscvRegisters::default(),
         pc: entry_point,
         page_table: Box::leak(page_table),
-        virtual_memory: BumpAllocator::new(0x4000000..0x5000000),
+        virtual_memory: BuddyAllocator::new(0x4000000..0x5000000),
         messages: VecDeque::new_in(BuddyHeap),
         currently_serving: None,
     });
