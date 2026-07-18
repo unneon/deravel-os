@@ -153,6 +153,7 @@ pub fn system_time() -> f64 {
             (INPUTS_ADDRESS as *const CommonProcessInputs)
                 .read()
                 .riscv_timebase_frequency
+                .unwrap() as f64
         }
 }
 

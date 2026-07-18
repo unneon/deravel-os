@@ -1,14 +1,19 @@
-use crate::sync::Mutex;
+use core::num::NonZeroUsize;
+use core::sync::atomic::{AtomicUsize, Ordering};
 use fdt::Fdt;
+use log::warn;
 
-static TIMEBASE_FREQUENCY: Mutex<f64> = Mutex::new(f64::NAN);
+static TIMEBASE_FREQUENCY: AtomicUsize = AtomicUsize::new(0);
 
-pub fn timebase_frequency() -> f64 {
-    *TIMEBASE_FREQUENCY.lock()
+pub fn timebase_frequency() -> Option<NonZeroUsize> {
+    NonZeroUsize::new(TIMEBASE_FREQUENCY.load(Ordering::Relaxed))
 }
 
 pub fn initialize_timebase_frequency(device_tree: &Fdt) {
-    *TIMEBASE_FREQUENCY.lock() = find_timebase_frequency(device_tree).unwrap() as f64;
+    let Some(timebase_frequency) = find_timebase_frequency(device_tree) else {
+        return warn!("CPU timebase frequency missing");
+    };
+    TIMEBASE_FREQUENCY.store(timebase_frequency, Ordering::Relaxed);
 }
 
 fn find_timebase_frequency(device_tree: &Fdt) -> Option<usize> {

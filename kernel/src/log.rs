@@ -6,17 +6,18 @@ use log::{Level, LevelFilter, Metadata, Record};
 
 struct Logger {
     start_time: u64,
-    timebase_frequency: f64,
+}
+
+enum Time {
+    Float(f64),
+    Int(u64),
 }
 
 struct PrettyLogLevel(Level);
 
 struct PrettyModulePath<'a>(Option<&'a str>);
 
-static mut LOGGER: Logger = Logger {
-    start_time: 0,
-    timebase_frequency: 0.,
-};
+static mut LOGGER: Logger = Logger { start_time: 0 };
 
 impl log::Log for Logger {
     fn enabled(&self, metadata: &Metadata) -> bool {
@@ -30,25 +31,37 @@ impl log::Log for Logger {
                 Level::Warn => "\x1B[33m",
                 _ => "",
             };
-            let time = (riscv::register::time::read64() - self.start_time) as f64
-                / self.timebase_frequency;
+            let time = riscv::register::time::read64() - self.start_time;
+            let time = match timebase_frequency() {
+                Some(timebase_frequency) => {
+                    Time::Float(time as f64 / timebase_frequency.get() as f64)
+                }
+                None => Time::Int(time),
+            };
             let level = PrettyLogLevel(record.level());
             let message = record.args();
             if record.module_path().is_some() {
                 let module = PrettyModulePath(record.module_path());
-                sbi::console_writeln!(
-                    "{early_color}[{time:>13.7}] {level} {module}{message}\x1B[0m"
-                );
+                sbi::console_writeln!("{early_color}{time} {level} {module}{message}\x1B[0m");
             } else {
                 let process_name = record.target();
                 sbi::console_writeln!(
-                    "[\x1B[36m{time:>13.7}] {level}\x1B[36m \x1B[1m{process_name}:\x1B[0;36m {message}\x1B[0m"
+                    "\x1B[36m{time} {level}\x1B[36m \x1B[1m{process_name}:\x1B[0;36m {message}\x1B[0m"
                 );
             }
         }
     }
 
     fn flush(&self) {}
+}
+
+impl core::fmt::Display for Time {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Time::Float(time) => write!(f, "[{time:>13.7}]"),
+            Time::Int(time) => write!(f, "[{time:>13}]"),
+        }
+    }
 }
 
 impl core::fmt::Display for PrettyLogLevel {
@@ -88,7 +101,6 @@ pub fn initialize_log() {
     // add some typestate tokens that can ensure each subsystem gets initialized only once.
     let logger = unsafe { &mut *&raw mut LOGGER };
     logger.start_time = riscv::register::time::read64();
-    logger.timebase_frequency = timebase_frequency();
     log::set_logger(logger).unwrap();
     log::set_max_level(LevelFilter::Debug);
 }

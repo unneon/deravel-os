@@ -16,6 +16,7 @@ use crate::sync::{Mutex, MutexGuard};
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
+use core::num::NonZeroUsize;
 use core::sync::atomic::Ordering;
 use deravel_types::*;
 use log::*;
@@ -82,7 +83,7 @@ impl<T: ProcessTag> ProcessReservation<T> {
             ProcessInputs {
                 common: CommonProcessInputs {
                     id: self.id,
-                    riscv_timebase_frequency: timebase_frequency(),
+                    riscv_timebase_frequency: timebase_frequency().map(NonZeroUsize::get),
                 },
                 args,
             },
@@ -96,7 +97,7 @@ impl<T: ProcessTag> ProcessReservation<T> {
             ProcessInputs {
                 common: CommonProcessInputs {
                     id: self.id,
-                    riscv_timebase_frequency: timebase_frequency(),
+                    riscv_timebase_frequency: timebase_frequency().map(NonZeroUsize::get),
                 },
                 args,
             },
