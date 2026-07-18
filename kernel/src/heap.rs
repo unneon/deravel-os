@@ -3,7 +3,6 @@ use crate::bump::BumpMemoryAllocator;
 use crate::page::phys_to_virt;
 use crate::sync::Mutex;
 use crate::util::fmt_memory;
-use alloc::alloc::Global;
 use alloc::vec::Vec;
 use core::alloc::{AllocError, Allocator, GlobalAlloc, Layout};
 use core::iter::once;
@@ -13,6 +12,7 @@ use fdt::Fdt;
 use log::*;
 
 macro singleton_allocator($name:ident, $instance:path) {
+    #[derive(Clone, Copy)]
     pub struct $name;
 
     unsafe impl Allocator for $name {
@@ -34,7 +34,7 @@ pub struct GlobalAllocator;
 #[global_allocator]
 static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator;
 
-static BUDDY: Mutex<Option<BuddyMemoryAllocator<Global>>> = Mutex::new(None);
+static BUDDY: Mutex<Option<BuddyMemoryAllocator<EarlyBumpHeap>>> = Mutex::new(None);
 static EARLY_BUMP: Mutex<Option<BumpMemoryAllocator>> = Mutex::new(None);
 
 unsafe impl GlobalAlloc for GlobalAllocator {
@@ -65,7 +65,7 @@ pub fn initialize_heap(dt: &Fdt, dt_ptr: *const u8) {
     let available = available[0].clone();
     info!("found RAM {}", fmt_memory(&available));
 
-    let mut buddy = unsafe { BuddyMemoryAllocator::new(phys_to_virt(available), Global) };
+    let mut buddy = unsafe { BuddyMemoryAllocator::new(phys_to_virt(available), EarlyBumpHeap) };
     for reserved in collect_reserved(dt, dt_ptr) {
         buddy.reserve_range(phys_to_virt(reserved));
     }
