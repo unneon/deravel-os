@@ -76,7 +76,6 @@ impl VirtioGpu {
         let height = r.height;
         gpu.width = width;
         gpu.height = height;
-        gpu.framebuffer = Vec::new_in(BuddyHeap);
         gpu.framebuffer
             .resize(width as usize * height as usize * 4, 0);
         info!("detected a {width}x{height} display");

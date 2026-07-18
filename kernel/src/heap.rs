@@ -58,9 +58,10 @@ unsafe impl GlobalAlloc for Heap {
     unsafe fn dealloc(&self, _: *mut u8, _: Layout) {}
 }
 
-pub fn initialize_heap(dt: &Fdt) {
+pub fn initialize_heap(dt: &Fdt, dt_ptr: *const u8) {
     let mut available = collect_memory(dt);
     reserve_ranges_from_dt(dt, &mut available);
+    reserve_dt_memory(dt, dt_ptr, &mut available);
     reserve_kernel_range(&mut available);
     let Some(largest_available) = available
         .iter()
@@ -108,6 +109,10 @@ fn reserve_ranges_from_dt(dt: &Fdt, available: &mut Vec<Range<*const u8>>) {
             reserve_range(start..end, available);
         }
     }
+}
+
+fn reserve_dt_memory(dt: &Fdt, dt_ptr: *const u8, available: &mut Vec<Range<*const u8>>) {
+    reserve_range(dt_ptr..dt_ptr.wrapping_byte_add(dt.total_size()), available)
 }
 
 fn reserve_kernel_range(available: &mut Vec<Range<*const u8>>) {

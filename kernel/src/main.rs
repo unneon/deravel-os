@@ -94,7 +94,7 @@ fn main(_hart_id: u64, device_tree_ptr: *const u8) -> ! {
     log_sbi_metadata();
     let device_tree =
         unsafe { Fdt::from_ptr(physical_to_identity_mapped(device_tree_ptr as *mut u8)) }.unwrap();
-    initialize_heap(&device_tree);
+    initialize_heap(&device_tree, device_tree_ptr);
     let (virtio_blk, virtio_net, virtio_gpu, virtio_keyboard, virtio_mouse) =
         initialize_all_pci(&device_tree);
     initialize_plic(&device_tree);
