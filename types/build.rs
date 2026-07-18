@@ -39,7 +39,7 @@ fn main() {
         writeln!(&mut output, "}}").unwrap();
         if let InterfaceDetails::App { args, implements } = &interface.details {
             writeln!(&mut output, "#[repr(C)]").unwrap();
-            writeln!(&mut output, "#[derive(Debug, Deserialize)]").unwrap();
+            writeln!(&mut output, "#[derive(Debug, Deserialize, Serialize)]").unwrap();
             writeln!(&mut output, "pub struct {name_camel}Args {{").unwrap();
             for (arg_name, arg_type) in args {
                 let arg_type = arg_type.rust(Member);

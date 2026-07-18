@@ -15,7 +15,7 @@ pub trait Handler<T, O: Copy> {
         args: &[u8],
         object: O,
         sender: ProcessId,
-    ) -> Vec<u8>;
+    ) -> ([u8; 4096], usize);
 }
 
 pub trait Observer<T, O: Copy> {
@@ -29,7 +29,7 @@ pub trait RawHandler<S: ?Sized> {
         method: usize,
         args: &[u8],
         sender: ProcessId,
-    ) -> (Vec<u8>, Vec<HandlerEntry<S>>);
+    ) -> (([u8; 4096], usize), Vec<HandlerEntry<S>>);
 }
 
 pub trait RawObserver<S: ?Sized> {
@@ -67,7 +67,7 @@ impl<S: ?Sized + Handler<T, O>, T, O: Copy> RawHandler<S> for TypedHandler<T, O>
         method: usize,
         args: &[u8],
         sender: ProcessId,
-    ) -> (Vec<u8>, Vec<HandlerEntry<S>>) {
+    ) -> (([u8; 4096], usize), Vec<HandlerEntry<S>>) {
         let mut new_handlers = Vec::new();
         let mut ctx = Ctx {
             sender,
@@ -185,7 +185,7 @@ impl<S> Dispatch<S> {
                 break;
             };
             let result = self.run_call(cap, method, &buf[..args_len], sender);
-            unsafe { syscall::ipc_reply(result.as_ptr(), result.len()) }
+            unsafe { syscall::ipc_reply(result.0.as_ptr(), result.1) }
         }
     }
 
@@ -195,7 +195,7 @@ impl<S> Dispatch<S> {
         method: usize,
         args: &[u8],
         sender: ProcessId,
-    ) -> Vec<u8> {
+    ) -> ([u8; 4096], usize) {
         let Some(handler) = self.handlers[cap.local_index()].as_mut() else {
             panic!(
                 "dispatch on unhandled {cap:?}, method {method} {} from {sender:?}",

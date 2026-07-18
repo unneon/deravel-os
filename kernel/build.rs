@@ -86,7 +86,7 @@ fn generate_handler_impl(interface: &Interface, out: &mut String) {
             let arg_type = arg_type.rust(NormalRet);
             write!(out, "{arg_type},").unwrap();
         }
-        writeln!(out, ") = serde_json::from_slice(_args).unwrap();").unwrap();
+        writeln!(out, ") = postcard::from_bytes(_args).unwrap();").unwrap();
         write!(
             out,
             "                let _result = self.{method_name}(_sender, "
@@ -98,7 +98,10 @@ fn generate_handler_impl(interface: &Interface, out: &mut String) {
         }
         writeln!(out, ");").unwrap();
         if method.return_type != Some(Type::Never) {
-            writeln!(out, "                serde_json::to_vec(&_result).unwrap()").unwrap();
+            writeln!(out, "                let mut buf = vec![0; 4096];").unwrap();
+            writeln!(out, "                let buf_len = postcard::to_slice(&_result, &mut buf).unwrap().len();").unwrap();
+            writeln!(out, "                buf.resize(buf_len, 0);").unwrap();
+            writeln!(out, "                buf").unwrap();
         }
         writeln!(out, "            }}").unwrap();
     }

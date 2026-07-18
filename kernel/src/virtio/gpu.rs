@@ -201,25 +201,30 @@ impl DisplayServer for Mutex<VirtioGpu> {
         command::<ResponseNodata, _>(&mut self_.controlq, 1).unwrap();
     }
 
-    fn set_cursor_image(&self, _: ProcessId, image: &[u8]) {
-        assert_eq!(image.len(), 64 * 64 * 4);
+    fn cursor_image_buffer(&self, sender: ProcessId) -> Capability<SharedMemory> {
         let mut self_ = self.lock();
-        self_.cursor_image.copy_from_slice(image);
+        grant_kernel_capability(
+            sender,
+            Box::leak(Box::new(crate::shared_memory::SharedMemory {
+                physical_address: virt_to_phys(self_.cursor_image.as_mut_ptr()) as usize,
+                size: 64 * 64 * 4,
+            })),
+        )
+    }
 
-        let r = Rect {
-            x: 0,
-            y: 0,
-            width: 64,
-            height: 64,
-        };
-
-        // TODO: There should be a GPU fence here once I do GL acceleration.
+    fn cursor_image_modified(&self, _: ProcessId) {
+        let mut self_ = self.lock();
         let req = TransferToHost2D {
             hdr: CtrlHdr {
                 flags: FLAG_FENCE,
                 ..CtrlType::CmdTransferToHost2D.header()
             },
-            r,
+            r: Rect {
+                x: 0,
+                y: 0,
+                width: 64,
+                height: 64,
+            },
             offset: 0,
             resource_id: 2,
             padding: 0,

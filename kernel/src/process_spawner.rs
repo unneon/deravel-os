@@ -1,5 +1,6 @@
 use crate::capability::{Handler, capability_page};
 use crate::process::{get_process, reserve_process};
+use alloc::vec;
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 use core::sync::atomic::Ordering;
@@ -30,7 +31,7 @@ impl<T: ProcessTag> Handler<T::Spawner> for ProcessSpawnerService<T> {
             CapabilityCertificateValue::granted(sender),
             Ordering::Relaxed,
         );
-        let args: <T as ProcessTag>::Args = serde_json::from_slice(args).unwrap();
+        let args: <T as ProcessTag>::Args = postcard::from_bytes(args).unwrap();
         args.for_all(|cap| {
             assert_eq!(cap.certifier(), Actor::from(sender), "process {}[{sender:?}] tried to pass capability {cap:?} that was granted by {:?}, not itself",
                 get_process(sender).lock_if_some().unwrap().name,
@@ -56,7 +57,10 @@ impl<T: ProcessTag> Handler<T::Spawner> for ProcessSpawnerService<T> {
             }
         });
         reserve.spawn_with_ready_caps(args);
-        serde_json::to_vec(&export).unwrap()
+        let mut buf = vec![0; 4096];
+        let buf_len = postcard::to_slice(&export, &mut buf).unwrap().len();
+        buf.resize(buf_len, 0);
+        buf
     }
 
     fn map_stream(&self, _: usize) -> &'static UntypedRingBuffer {

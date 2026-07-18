@@ -302,7 +302,7 @@ impl SyscallHandler for () {
             if from != Actor::Userspace(proc.id) {
                 kill!(hart, proc, "replied to process waiting for someone else");
             }
-            let Ok(stream) = serde_json::from_slice(&result.copy_to_kernel()) else {
+            let Ok(stream) = postcard::from_bytes(&result.copy_to_kernel()) else {
                 kill!(hart, proc, "invalid stream map reply")
             };
             caller.state = ProcessState::ReadyStreamMap { stream };

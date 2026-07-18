@@ -48,16 +48,17 @@ fn generate_client_impl(interface: &Interface, out: &mut String) {
             write!(out, " -> {return_type}").unwrap();
         }
         writeln!(out, " {{").unwrap();
-        writeln!(out, "        let data = serde_json::to_vec(&(").unwrap();
+        writeln!(out, "        let mut data_buf = [0u8; 4096];").unwrap();
+        write!(out, "        let data_len = postcard::to_slice(&(").unwrap();
         for (arg_name, _) in &method.args {
-            writeln!(out, "            {arg_name},",).unwrap();
+            write!(out, "{arg_name}, ",).unwrap();
         }
-        writeln!(out, "        )).unwrap();").unwrap();
+        writeln!(out, "), &mut data_buf).unwrap().len();").unwrap();
         writeln!(out, "        let mut buf = [0u8; 4096];").unwrap();
-        writeln!( out, "        let result_len = unsafe {{ syscall::ipc_call(self.as_raw(), {method_id}, data.as_ptr(), data.len(), buf.as_mut_ptr(), buf.len()) }};").unwrap();
+        writeln!( out, "        let result_len = unsafe {{ syscall::ipc_call(self.as_raw(), {method_id}, data_buf.as_ptr(), data_len, buf.as_mut_ptr(), buf.len()) }};").unwrap();
         writeln!(
             out,
-            "        serde_json::from_slice(&buf[..result_len]).unwrap()"
+            "        postcard::from_bytes(&buf[..result_len]).unwrap()"
         )
         .unwrap();
         writeln!(out, "    }}").unwrap();
@@ -157,7 +158,7 @@ fn generate_server_handler_impl(interface: &Interface, out: &mut String) {
     .unwrap();
     writeln!(
         out,
-        "    fn call_method(&mut self, _ctx: &mut Ctx<Self>, method: usize, _args: &[u8], _object: O, _sender: ProcessId) -> Vec<u8> {{"
+        "    fn call_method(&mut self, _ctx: &mut Ctx<Self>, method: usize, _args: &[u8], _object: O, _sender: ProcessId) -> ([u8; 4096], usize) {{"
     )
     .unwrap();
     writeln!(out, "        match method {{").unwrap();
@@ -173,7 +174,7 @@ fn generate_server_handler_impl(interface: &Interface, out: &mut String) {
             let arg_type = arg_type.rust(NormalRet);
             write!(out, "{arg_type},").unwrap();
         }
-        writeln!(out, ") = serde_json::from_slice(_args).unwrap();").unwrap();
+        writeln!(out, ") = postcard::from_bytes(_args).unwrap();").unwrap();
         write!(
             out,
             "                let result = self.{method_name}(_ctx, _object, "
@@ -184,11 +185,9 @@ fn generate_server_handler_impl(interface: &Interface, out: &mut String) {
             write!(out, "{borrow}{arg_name},").unwrap();
         }
         writeln!(out, ");").unwrap();
-        writeln!(
-            out,
-            "                (serde_json::to_vec(&result).unwrap())"
-        )
-        .unwrap();
+        writeln!(out, "                let mut result_buf = [0u8; 4096];").unwrap();
+        writeln!(out, "                let result_len = postcard::to_slice(&result, &mut result_buf).unwrap().len();").unwrap();
+        writeln!(out, "                (result_buf, result_len)").unwrap();
         writeln!(out, "            }}").unwrap();
     }
     for (stream_index, stream) in interface.streams.iter().enumerate() {
@@ -200,7 +199,9 @@ fn generate_server_handler_impl(interface: &Interface, out: &mut String) {
             "                let result = self.{stream_name}(_object);"
         )
         .unwrap();
-        writeln!(out, "                serde_json::to_vec(&result).unwrap()").unwrap();
+        writeln!(out, "                let mut result_buf = [0u8; 4096];").unwrap();
+        writeln!(out, "                let result_len = postcard::to_slice(&result, &mut result_buf).unwrap().len();").unwrap();
+        writeln!(out, "                (result_buf, result_len)").unwrap();
         writeln!(out, "            }}").unwrap();
     }
     writeln!(
@@ -337,16 +338,21 @@ fn generate_spawner_impl(interface: &Interface, out: &mut String) {
         write!(out, " -> Capability<{name_camel}>").unwrap();
     }
     writeln!(out, " {{").unwrap();
-    writeln!(out, "        let data = serde_json::to_vec(&(").unwrap();
+    writeln!(out, "        let mut data_buf = [0u8; 4096];").unwrap();
+    writeln!(
+        out,
+        "        let data_len = postcard::to_slice(&{name_camel}Args {{"
+    )
+    .unwrap();
     for (arg_name, _) in args {
         writeln!(out, "            {arg_name},",).unwrap();
     }
-    writeln!(out, "        )).unwrap();").unwrap();
+    writeln!(out, "        }}, &mut data_buf).unwrap().len();").unwrap();
     writeln!(out, "        let mut buf = [0u8; 4096];").unwrap();
-    writeln!( out, "        let result_len = unsafe {{ syscall::ipc_call(self.as_raw(), 0, data.as_ptr(), data.len(), buf.as_mut_ptr(), buf.len()) }};").unwrap();
+    writeln!(out, "        let result_len = unsafe {{ syscall::ipc_call(self.as_raw(), 0, data_buf.as_ptr(), data_len, buf.as_mut_ptr(), buf.len()) }};").unwrap();
     writeln!(
         out,
-        "        serde_json::from_slice(&buf[..result_len]).unwrap()"
+        "        postcard::from_bytes(&buf[..result_len]).unwrap()"
     )
     .unwrap();
     writeln!(out, "    }}").unwrap();
