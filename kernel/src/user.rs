@@ -17,9 +17,11 @@ pub struct UserPtrInvalid;
 
 pub struct UserSliceTooSmall;
 
+#[allow(clippy::enum_variant_names)]
 pub enum UserSyscallError {
     InvalidCapability(InvalidCapabilityError),
-    PointerInvalid(UserPtrInvalid),
+    InvalidPointer(UserPtrInvalid),
+    InvalidSyscallNumber,
 }
 
 impl<T: SafeUserType> UserPtr<[T]> {
@@ -68,7 +70,7 @@ impl From<InvalidCapabilityError> for UserSyscallError {
 
 impl From<UserPtrInvalid> for UserSyscallError {
     fn from(err: UserPtrInvalid) -> UserSyscallError {
-        UserSyscallError::PointerInvalid(err)
+        UserSyscallError::InvalidPointer(err)
     }
 }
 
@@ -88,7 +90,8 @@ impl core::fmt::Display for UserSyscallError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             UserSyscallError::InvalidCapability(err) => err.fmt(f),
-            UserSyscallError::PointerInvalid(err) => err.fmt(f),
+            UserSyscallError::InvalidPointer(err) => err.fmt(f),
+            UserSyscallError::InvalidSyscallNumber => f.write_str("invalid syscall number"),
         }
     }
 }

@@ -223,7 +223,7 @@ fn generate_syscall_dispatch(drvli: &Drvli, out: &mut String) {
     }
     writeln!(
         out,
-        "        _ => core::panic!(\"invalid syscall number {{}}\", registers.a6),"
+        "        _ => return Err(UserSyscallError::InvalidSyscallNumber),"
     )
     .unwrap();
     writeln!(out, "    }}").unwrap();
