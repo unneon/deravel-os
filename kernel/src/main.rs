@@ -86,14 +86,13 @@ fn main(_hart_id: u64, device_tree_ptr: *const u8) -> ! {
     clear_bss();
 
     initialize_log();
-    let device_tree = unsafe { Fdt::from_ptr(device_tree_ptr) }.unwrap();
-    initialize_timebase_frequency(&device_tree);
     initialize_early_heap();
     initialize_hart_stack();
     initialize_trap_handler();
     initialize_memory_mapping();
-    log_sbi_metadata();
     let device_tree = unsafe { Fdt::from_ptr(phys_to_idmp(device_tree_ptr)) }.unwrap();
+    initialize_timebase_frequency(&device_tree);
+    log_sbi_metadata();
     initialize_heap(&device_tree, device_tree_ptr);
     let (virtio_blk, virtio_net, virtio_gpu, virtio_keyboard, virtio_mouse) =
         initialize_all_pci(&device_tree);
