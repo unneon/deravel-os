@@ -47,9 +47,10 @@ impl<A: Allocator + Copy> BuddyAllocator<A> {
         Ok(ptr)
     }
 
-    pub fn dealloc(&mut self, ptr: usize, size: usize) {
+    pub fn dealloc(&mut self, ptr: usize, layout: Layout) {
+        let req_size = layout.size().max(layout.align());
         self.root
-            .dealloc(ptr - self.range.start, size, self.root_node_size);
+            .dealloc(ptr - self.range.start, req_size, self.root_node_size);
     }
 
     pub fn reserve_range(&mut self, range: Range<usize>) {
@@ -131,7 +132,7 @@ impl<A: Allocator + Copy> Node<A> {
     }
 
     pub fn dealloc(&mut self, ptr: usize, req_size: usize, node_size: usize) {
-        if ptr == 0 && req_size >= node_size / 2 {
+        if ptr == 0 && req_size > node_size / 2 {
             assert_eq!(self.max_available, 0);
             self.max_available = node_size;
             return;
@@ -192,7 +193,7 @@ unsafe impl<A: Allocator + Copy> Allocator for Mutex<Option<BuddyMemoryAllocator
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
         let mut self_ = self.lock();
         let buddy = &mut self_.as_mut().unwrap().0;
-        buddy.dealloc(ptr.as_ptr() as usize, layout.size().max(layout.align()));
+        buddy.dealloc(ptr.as_ptr() as usize, layout);
     }
 }
 
