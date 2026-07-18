@@ -113,6 +113,15 @@ pub fn physical_to_identity_mapped<T>(physical: *mut T) -> *mut T {
     })
 }
 
+pub fn idmp_to_phys<T>(phys: *mut T) -> *mut T {
+    phys.map_addr(|phys| {
+        let phys = phys & (VIRTUAL_ADDRESS_SPACE_SIZE - 1);
+        assert!(phys >= IDENTITY_MAPPING_START);
+        assert!(phys < IDENTITY_MAPPING_END);
+        phys - IDENTITY_MAPPING_START
+    })
+}
+
 pub fn satp(table: *mut TopPageTable) -> Satp {
     let mut satp = Satp::from_bits(0);
     satp.set_mode(Mode::Sv39);

@@ -2,7 +2,9 @@ mod types;
 
 use crate::capability::grant_kernel_capability;
 use crate::drvli::DisplayServer;
+use crate::heap::BuddyHeap;
 use crate::interrupt::InterruptHandler;
+use crate::page::idmp_to_phys;
 use crate::sync::Mutex;
 use crate::util::volatile::volatile_struct;
 use crate::virtio::gpu::types::*;
@@ -36,7 +38,7 @@ pub struct VirtioGpu {
     cursorq: Queue<1>,
     width: u32,
     height: u32,
-    framebuffer: Vec<u8>,
+    framebuffer: Vec<u8, BuddyHeap>,
     cursor_image: Vec<u8>,
     cursor_updated: bool,
 }
@@ -57,7 +59,7 @@ impl VirtioGpu {
             cursorq,
             width: 0,
             height: 0,
-            framebuffer: Vec::new(),
+            framebuffer: Vec::new_in(BuddyHeap),
             cursor_image: vec![0; 64 * 64 * 4],
             cursor_updated: true,
         };
@@ -74,7 +76,9 @@ impl VirtioGpu {
         let height = r.height;
         gpu.width = width;
         gpu.height = height;
-        gpu.framebuffer = vec![0u8; width as usize * height as usize * 4];
+        gpu.framebuffer = Vec::new_in(BuddyHeap);
+        gpu.framebuffer
+            .resize(width as usize * height as usize * 4, 0);
         info!("detected a {width}x{height} display");
 
         let req = ResourceCreate2D {
@@ -93,7 +97,7 @@ impl VirtioGpu {
             nr_entries: 1,
         };
         let mem_entry = MemEntry {
-            addr: gpu.framebuffer.as_ptr() as u64,
+            addr: idmp_to_phys(gpu.framebuffer.as_mut_ptr()) as u64,
             length: gpu.framebuffer.len() as u32,
             padding: 0,
         };
@@ -159,11 +163,11 @@ impl DisplayServer for Mutex<VirtioGpu> {
     }
 
     fn framebuffer(&self, sender: ProcessId) -> Capability<SharedMemory> {
-        let self_ = self.lock();
+        let mut self_ = self.lock();
         grant_kernel_capability(
             sender,
             Box::leak(Box::new(crate::shared_memory::SharedMemory {
-                physical_address: self_.framebuffer.as_ptr() as usize,
+                physical_address: idmp_to_phys(self_.framebuffer.as_mut_ptr()) as usize,
                 size: (self_.width * self_.height * 4) as usize,
             })),
         )
