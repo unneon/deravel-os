@@ -8,7 +8,7 @@ use crate::elf::load_elf;
 use crate::hart::HartContext;
 use crate::heap::BuddyHeap;
 use crate::page::{
-    PageFlags, PageTable, TopPageTable, map_identity_mapping, map_kernel_image, map_pages,
+    PageFlags, PageTable, TopPageTable, map_direct_mapping, map_kernel_image, map_pages,
 };
 use crate::sbi;
 use crate::sbi::{ResetReason, ResetType};
@@ -132,7 +132,7 @@ pub fn reserve_process<T: ProcessTag>(elf: &'static [u8]) -> ProcessReservation<
 pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: ProcessInputs<T>) {
     let pid = inputs.common.id;
     let mut page_table = Box::new(PageTable::new());
-    map_identity_mapping(&mut page_table);
+    map_direct_mapping(&mut page_table);
     map_kernel_image(&mut page_table);
     let entry_point = load_elf(elf, &mut page_table);
     map_capability_memory(&mut page_table, pid);

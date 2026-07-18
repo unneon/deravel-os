@@ -4,7 +4,7 @@ use crate::capability::grant_kernel_capability;
 use crate::drvli::DisplayServer;
 use crate::heap::BuddyHeap;
 use crate::interrupt::InterruptHandler;
-use crate::page::idmp_to_phys;
+use crate::page::virt_to_phys;
 use crate::sync::Mutex;
 use crate::util::volatile::volatile_struct;
 use crate::virtio::gpu::types::*;
@@ -96,7 +96,7 @@ impl VirtioGpu {
             nr_entries: 1,
         };
         let mem_entry = MemEntry {
-            addr: idmp_to_phys(gpu.framebuffer.as_mut_ptr()) as u64,
+            addr: virt_to_phys(gpu.framebuffer.as_mut_ptr()) as u64,
             length: gpu.framebuffer.len() as u32,
             padding: 0,
         };
@@ -166,7 +166,7 @@ impl DisplayServer for Mutex<VirtioGpu> {
         grant_kernel_capability(
             sender,
             Box::leak(Box::new(crate::shared_memory::SharedMemory {
-                physical_address: idmp_to_phys(self_.framebuffer.as_mut_ptr()) as usize,
+                physical_address: virt_to_phys(self_.framebuffer.as_mut_ptr()) as usize,
                 size: (self_.width * self_.height * 4) as usize,
             })),
         )

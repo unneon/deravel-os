@@ -1,6 +1,7 @@
 mod ffi;
 
 use crate::drvli::{ConsoleServer, ShutdownServer};
+use crate::page::virt_to_phys;
 #[cfg(doc)]
 use Error::*;
 use deravel_types::ProcessId;
@@ -202,7 +203,7 @@ pub fn set_timer(stime_value: u64) {
 /// | [`Denied`] | Writes to the debug console is not allowed. |
 /// | [`Failed`] | Failed to write due to I/O errors. |
 pub fn debug_console_write(bytes: &[u8]) -> Result<usize, Error> {
-    ffi::sbi_debug_console_write(bytes.len(), bytes.as_ptr() as usize, 0)
+    ffi::sbi_debug_console_write(bytes.len(), virt_to_phys(bytes.as_ptr()) as usize, 0)
 }
 
 /// Read bytes from the debug console into an output memory.
@@ -219,7 +220,7 @@ pub fn debug_console_write(bytes: &[u8]) -> Result<usize, Error> {
 /// | [`Failed`] | Failed to read due to I/O errors. |
 #[allow(dead_code)]
 pub fn debug_console_read(bytes: &mut [u8]) -> Result<usize, Error> {
-    ffi::sbi_debug_console_read(bytes.len(), bytes.as_ptr() as usize, 0)
+    ffi::sbi_debug_console_read(bytes.len(), virt_to_phys(bytes.as_ptr()) as usize, 0)
 }
 
 /// Write a single byte to the debug console.

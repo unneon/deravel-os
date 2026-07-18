@@ -1,4 +1,4 @@
-use crate::page::phys_to_idmp;
+use crate::page::phys_to_virt;
 use crate::util::volatile::{Volatile, volatile_struct};
 use core::sync::atomic::{AtomicPtr, Ordering};
 use fdt::Fdt;
@@ -50,14 +50,14 @@ pub fn plic_complete(irq: u32) {
 fn find_plic(dt: &Fdt) -> Option<Volatile<'static, Plic>> {
     let address = dt.find_node("/soc/plic")?.reg()?.next()?.starting_address;
     PLIC.store(address as *mut Plic, Ordering::Relaxed);
-    let address = phys_to_idmp(address as *mut Plic);
+    let address = phys_to_virt(address as *mut Plic);
     Some(unsafe { Volatile::new(address) })
 }
 
 fn get_plic() -> Volatile<'static, Plic> {
     let address = PLIC.load(Ordering::Relaxed);
     assert!(!address.is_null());
-    let address = phys_to_idmp(address);
+    let address = phys_to_virt(address);
     unsafe { Volatile::new(address) }
 }
 

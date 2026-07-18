@@ -49,7 +49,7 @@ use crate::hart::{HartContext, HartStack};
 use crate::heap::{BuddyHeap, initialize_early_heap, initialize_heap};
 use crate::interrupt::INTERRUPTS;
 use crate::log::{initialize_log, log_userspace};
-use crate::page::{PageFlags, idmp_to_phys, initialize_memory_mapping, map_pages, phys_to_idmp};
+use crate::page::{PageFlags, initialize_memory_mapping, map_pages, phys_to_virt, virt_to_phys};
 use crate::pci::initialize_all_pci;
 use crate::plic::{initialize_plic, plic_claim, plic_complete};
 use crate::process::{
@@ -90,7 +90,7 @@ fn main(_hart_id: u64, dt_ptr: *const u8) -> ! {
     initialize_hart_stack();
     initialize_trap_handler();
     initialize_memory_mapping();
-    let dt = unsafe { Fdt::from_ptr(phys_to_idmp(dt_ptr)) }.unwrap();
+    let dt = unsafe { Fdt::from_ptr(phys_to_virt(dt_ptr)) }.unwrap();
     initialize_timebase_frequency(&dt);
     log_sbi_metadata();
     initialize_heap(&dt, dt_ptr);
@@ -394,7 +394,7 @@ impl SyscallHandler for () {
         let mut proc = hart.current_process();
         let virtual_addr = proc.virtual_memory.alloc(layout).unwrap();
         let physical_addr =
-            idmp_to_phys(BuddyHeap.allocate(layout).unwrap().as_ptr().as_mut_ptr()) as usize;
+            virt_to_phys(BuddyHeap.allocate(layout).unwrap().as_ptr().as_mut_ptr()) as usize;
         map_pages(
             unsafe { &mut *proc.page_table },
             virtual_addr,
@@ -416,7 +416,7 @@ impl SyscallHandler for () {
         let mut proc = hart.current_process();
         let virtual_addr = proc.virtual_memory.alloc(layout).unwrap();
         let physical_addr =
-            idmp_to_phys(BuddyHeap.allocate(layout).unwrap().as_ptr().as_mut_ptr()) as usize;
+            virt_to_phys(BuddyHeap.allocate(layout).unwrap().as_ptr().as_mut_ptr()) as usize;
         map_pages(
             unsafe { &mut *proc.page_table },
             virtual_addr,

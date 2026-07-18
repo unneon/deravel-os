@@ -1,6 +1,6 @@
 use crate::buddy::BuddyMemoryAllocator;
 use crate::bump::BumpMemoryAllocator;
-use crate::page::phys_to_idmp;
+use crate::page::phys_to_virt;
 use crate::sync::Mutex;
 use crate::util::fmt_memory;
 use alloc::alloc::Global;
@@ -65,9 +65,9 @@ pub fn initialize_heap(dt: &Fdt, dt_ptr: *const u8) {
     let available = available[0].clone();
     info!("found RAM {}", fmt_memory(&available));
 
-    let mut buddy = unsafe { BuddyMemoryAllocator::new(phys_to_idmp(available), Global) };
+    let mut buddy = unsafe { BuddyMemoryAllocator::new(phys_to_virt(available), Global) };
     for reserved in collect_reserved(dt, dt_ptr) {
-        buddy.reserve_range(phys_to_idmp(reserved));
+        buddy.reserve_range(phys_to_virt(reserved));
     }
     *BUDDY.lock() = Some(buddy);
 }

@@ -16,17 +16,18 @@ pub struct Page(pub [u8; 4096]);
 #[repr(C, align(4096))]
 pub struct PageAligned<T>(pub T);
 
-const IDENTITY_MAPPING_START: usize = VIRTUAL_ADDRESS_SPACE_SIZE / 2;
-const IDENTITY_MAPPING_END: usize = VIRTUAL_ADDRESS_SPACE_SIZE;
-const IDENTITY_MAPPING_SIZE: usize = IDENTITY_MAPPING_END - IDENTITY_MAPPING_START;
+const DIRECT_MAPPING_START: usize = MAX_VIRTUAL_ADDR / 2;
+const DIRECT_MAPPING_END: usize = MAX_VIRTUAL_ADDR;
+const DIRECT_MAPPING_SIZE: usize = DIRECT_MAPPING_END - DIRECT_MAPPING_START;
 
-const VIRTUAL_ADDRESS_SPACE_SIZE: usize = LEVEL_2_PAGE_SIZE * (PAGE_SIZE / size_of::<usize>());
+const MAX_PHYSICAL_ADDR: usize = DIRECT_MAPPING_SIZE;
+const MAX_VIRTUAL_ADDR: usize = LEVEL_2_PAGE_SIZE * (PAGE_SIZE / size_of::<usize>());
 
 static mut KERNEL_PAGE_TABLE: TopPageTable = PageTable::new();
 
 pub fn initialize_memory_mapping() {
     let table = unsafe { &mut *&raw mut KERNEL_PAGE_TABLE };
-    map_identity_mapping(table);
+    map_direct_mapping(table);
     map_kernel_image(table);
 
     // No need for SFENCE.VMA when changing from Bare mode (RISC-V Privileged 12.2.1).
@@ -35,7 +36,7 @@ pub fn initialize_memory_mapping() {
     unsafe { riscv::register::satp::write(satp(table)) }
 }
 
-pub fn map_identity_mapping(table: &mut TopPageTable) {
+pub fn map_direct_mapping(table: &mut TopPageTable) {
     let pages_per_level = table.0.len();
     let total_pages = pages_per_level.pow(3);
     let total_identity_mapped = total_pages / 2;
@@ -107,20 +108,38 @@ fn align_by(range: Range<usize>, align: usize) -> (Range<usize>, Range<usize>, R
     (unaligned_prefix, aligned, unaligned_suffix)
 }
 
-pub fn phys_to_idmp<T: Address>(phys: T) -> T {
-    phys.deep_map_addr(|physical| {
-        assert!(physical < IDENTITY_MAPPING_SIZE);
-        (!(VIRTUAL_ADDRESS_SPACE_SIZE - 1)) | (physical + IDENTITY_MAPPING_START)
+pub fn phys_to_virt<T: Address>(phys: T) -> T {
+    phys.deep_map_addr(|phys| {
+        assert!(phys < MAX_PHYSICAL_ADDR);
+        sign_extend(phys + DIRECT_MAPPING_START)
     })
 }
 
-pub fn idmp_to_phys<T: Address>(phys: T) -> T {
-    phys.deep_map_addr(|phys| {
-        let phys = phys & (VIRTUAL_ADDRESS_SPACE_SIZE - 1);
-        assert!(phys >= IDENTITY_MAPPING_START);
-        assert!(phys < IDENTITY_MAPPING_END);
-        phys - IDENTITY_MAPPING_START
+pub fn virt_to_phys<T: Address>(virt: T) -> T {
+    unsafe extern "C" {
+        static image_start: u8;
+        static image_end: u8;
+    }
+    virt.deep_map_addr(|virt| {
+        let virt = sign_unextend(virt);
+        match virt {
+            DIRECT_MAPPING_START..DIRECT_MAPPING_END => virt - DIRECT_MAPPING_START,
+            _ if virt >= &raw const image_start as usize
+                && virt < &raw const image_end as usize =>
+            {
+                virt
+            }
+            _ => panic!("{virt:#x} can't be translated to a physical address"),
+        }
     })
+}
+
+fn sign_extend(addr: usize) -> usize {
+    (!(((addr & (MAX_VIRTUAL_ADDR >> 1)) << 1) - 1)) | addr
+}
+
+fn sign_unextend(addr: usize) -> usize {
+    addr & (MAX_VIRTUAL_ADDR - 1)
 }
 
 pub fn satp(table: *mut TopPageTable) -> Satp {
