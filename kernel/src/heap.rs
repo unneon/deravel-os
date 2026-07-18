@@ -34,11 +34,12 @@ pub struct GlobalAllocator;
 #[global_allocator]
 static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator;
 
-static BUDDY: Mutex<Option<BuddyMemoryAllocator<EarlyBumpHeap>>> = Mutex::new(None);
-static EARLY_BUMP: Mutex<Option<BumpMemoryAllocator>> = Mutex::new(None);
+pub static BUDDY: Mutex<Option<BuddyMemoryAllocator<EarlyBumpHeap>>> = Mutex::new(None);
+pub static EARLY_BUMP: Mutex<Option<BumpMemoryAllocator>> = Mutex::new(None);
 
 unsafe impl GlobalAlloc for GlobalAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        // TODO: Get rid of this hack.
         let ptr = if let Some(mut buddy) = BUDDY.try_lock()
             && let Some(buddy) = buddy.as_mut()
         {
@@ -56,11 +57,12 @@ unsafe impl GlobalAlloc for GlobalAllocator {
 
 pub fn initialize_early_heap() {
     unsafe extern "C" {
-        static mut heap_start: u8;
-        static mut heap_end: u8;
+        static mut early_heap_start: u8;
+        static mut early_heap_end: u8;
     }
-    *EARLY_BUMP.lock() =
-        Some(unsafe { BumpMemoryAllocator::new(&raw mut heap_start..&raw mut heap_end) });
+    *EARLY_BUMP.lock() = Some(unsafe {
+        BumpMemoryAllocator::new(&raw mut early_heap_start..&raw mut early_heap_end)
+    });
 }
 
 pub fn initialize_heap(dt: &Fdt, dt_ptr: *const u8) {

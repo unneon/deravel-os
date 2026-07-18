@@ -35,9 +35,9 @@ SECTIONS {
     stack_top = .;
 
     . = ALIGN(4096);
-    heap_start = .;
-    . += 64 * 1024 * 1024;
-    heap_end = .;
+    early_heap_start = .;
+    . += 4 * 1024 * 1024;
+    early_heap_end = .;
 
     readwrite_end = .;
     image_end = .;

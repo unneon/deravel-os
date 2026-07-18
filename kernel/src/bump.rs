@@ -6,13 +6,17 @@ use core::ptr::NonNull;
 
 pub struct BumpAllocator {
     range: Range<usize>,
+    initial_range: Range<usize>,
 }
 
 pub struct BumpMemoryAllocator(BumpAllocator);
 
 impl BumpAllocator {
     pub const fn new(range: Range<usize>) -> BumpAllocator {
-        BumpAllocator { range }
+        BumpAllocator {
+            initial_range: range.start..range.end,
+            range,
+        }
     }
 
     pub fn alloc(&mut self, layout: Layout) -> Result<usize, AllocError> {
@@ -28,9 +32,11 @@ impl BumpAllocator {
 
 impl BumpMemoryAllocator {
     pub unsafe fn new(range: Range<*mut u8>) -> BumpMemoryAllocator {
-        BumpMemoryAllocator(BumpAllocator {
-            range: range.raw_addr(),
-        })
+        BumpMemoryAllocator(BumpAllocator::new(range.raw_addr()))
+    }
+
+    pub fn allocated_range(&self) -> Range<*const u8> {
+        self.0.initial_range.start as *const u8..self.0.range.start as *const u8
     }
 }
 

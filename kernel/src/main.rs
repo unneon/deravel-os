@@ -43,10 +43,10 @@ mod virtio;
 use crate::arch::{RiscvRegisters, initialize_trap_handler, switch_to_userspace_registers_only};
 use crate::capability::{grant_kernel_capability, reserve_kernel_capability};
 use crate::device_tree::initialize_timebase_frequency;
-use crate::drvli::{SyscallHandler, dispatch_syscall};
+use crate::drvli::{ShutdownServer, SyscallHandler, dispatch_syscall};
 use crate::elf::elf;
 use crate::hart::{HartContext, HartStack};
-use crate::heap::{BuddyHeap, initialize_early_heap, initialize_heap};
+use crate::heap::{BuddyHeap, EARLY_BUMP, initialize_early_heap, initialize_heap};
 use crate::interrupt::INTERRUPTS;
 use crate::log::{initialize_log, log_userspace};
 use crate::page::{PageFlags, initialize_memory_mapping, map_pages, phys_to_virt, virt_to_phys};
@@ -56,8 +56,9 @@ use crate::process::{
     Message, ProcessState, get_process, reserve_process, schedule_and_switch_to_userspace,
 };
 use crate::process_spawner::ProcessSpawnerService;
-use crate::sbi::{ResetReason, ResetType, SbiShutdown, log_sbi_metadata};
+use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use crate::user::UserPtr;
+use crate::util::fmt::memory::fmt_memory;
 use ::log::*;
 use alloc::boxed::Box;
 use alloc::string::String;
@@ -79,6 +80,14 @@ macro kill {
     },
     ($hart:ident, $($tt:tt)*) => {
         kill!($hart, $hart.current_process(), $($tt)*)
+    }
+}
+
+struct KernelShutdown;
+
+impl ShutdownServer for KernelShutdown {
+    fn shutdown(&self, _: ProcessId) -> ! {
+        shutdown()
     }
 }
 
@@ -108,7 +117,7 @@ fn main(_hart_id: u64, dt_ptr: *const u8) -> ! {
         mouse: reserve_kernel_capability(virtio_mouse),
         fs: fs_tar.export,
         net: reserve_kernel_capability(virtio_net),
-        shutdown: reserve_kernel_capability(&SbiShutdown),
+        shutdown: reserve_kernel_capability(&KernelShutdown),
         terminal: reserve_kernel_capability(Box::leak(Box::new(
             ProcessSpawnerService::<Terminal>::new(elf!("CARGO_BIN_FILE_DERAVEL_APPS_terminal")),
         ))),
@@ -494,6 +503,12 @@ impl SyscallHandler for () {
         };
         log_userspace(level, &hart.current_process(), &text);
     }
+}
+
+fn shutdown() -> ! {
+    let early_heap_usage = &EARLY_BUMP.lock().as_mut().unwrap().allocated_range();
+    info!("early heap usage was {}", fmt_memory(early_heap_usage));
+    sbi::system_reset(ResetType::Shutdown, ResetReason::NoReason).unwrap()
 }
 
 #[panic_handler]

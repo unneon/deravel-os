@@ -11,8 +11,7 @@ use crate::page::{
     PageFlags, PageTable, TopPageTable, map_direct_mapping, map_kernel_image, map_pages,
     virt_to_phys,
 };
-use crate::sbi;
-use crate::sbi::{ResetReason, ResetType};
+use crate::shutdown;
 use crate::sync::{Mutex, MutexGuard};
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
@@ -203,7 +202,7 @@ fn find_free_process_slot() -> Option<(ProcessId, MutexGuard<'static, Option<Pro
 
 pub fn schedule_and_switch_to_userspace(hart: &mut HartContext) -> ! {
     let Some(next) = find_runnable_process(hart) else {
-        sbi::system_reset(ResetType::Shutdown, ResetReason::NoReason).unwrap()
+        shutdown()
     };
     hart.set_current_pid(next.id);
 
