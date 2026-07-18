@@ -142,7 +142,7 @@ pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: Pro
         registers: RiscvRegisters::default(),
         pc: entry_point,
         page_table: Box::leak(page_table),
-        virtual_memory: BuddyAllocator::new(0x4000000..0x5000000),
+        virtual_memory: BuddyAllocator::new(0x4000000..0x80000000),
         messages: VecDeque::new_in(BuddyHeap),
         currently_serving: None,
     });
@@ -180,6 +180,7 @@ fn map_capability_memory(pages: &mut TopPageTable, pid: ProcessId) {
 }
 
 fn map_inputs_memory<T: ProcessTag>(pages: &mut TopPageTable, inputs: ProcessInputs<T>) {
+    assert!(size_of::<ProcessInputs<T>>() <= PAGE_SIZE);
     let page = Box::leak(Box::new(inputs));
     map_pages(
         pages,
