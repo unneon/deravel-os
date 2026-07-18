@@ -15,6 +15,12 @@ pub struct Page(pub [u8; 4096]);
 #[repr(C, align(4096))]
 pub struct PageAligned<T>(pub T);
 
+const IDENTITY_MAPPING_START: usize = VIRTUAL_ADDRESS_SPACE_SIZE / 2;
+const IDENTITY_MAPPING_END: usize = VIRTUAL_ADDRESS_SPACE_SIZE;
+const IDENTITY_MAPPING_SIZE: usize = IDENTITY_MAPPING_END - IDENTITY_MAPPING_START;
+
+const VIRTUAL_ADDRESS_SPACE_SIZE: usize = LEVEL_2_PAGE_SIZE * (PAGE_SIZE / size_of::<usize>());
+
 static mut KERNEL_PAGE_TABLE: TopPageTable = PageTable::new();
 
 pub fn initialize_memory_mapping() {
@@ -102,10 +108,8 @@ fn align_by(range: Range<usize>, align: usize) -> (Range<usize>, Range<usize>, R
 
 pub fn physical_to_identity_mapped<T>(physical: *mut T) -> *mut T {
     physical.map_addr(|physical| {
-        let identity_mapped_bytes = LEVEL_2_PAGE_SIZE * (PAGE_SIZE / size_of::<usize>()) / 2;
-        assert_eq!(identity_mapped_bytes.count_ones(), 1);
-        assert!(physical < identity_mapped_bytes);
-        (!(identity_mapped_bytes - 1)) | physical
+        assert!(physical < IDENTITY_MAPPING_SIZE);
+        (!(VIRTUAL_ADDRESS_SPACE_SIZE - 1)) | (physical + IDENTITY_MAPPING_START)
     })
 }
 

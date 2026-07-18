@@ -1,12 +1,16 @@
+use crate::sync::Mutex;
 use alloc::boxed::Box;
-use core::alloc::Allocator;
+use core::alloc::{AllocError, Allocator, Layout};
 use core::ops::Range;
+use core::ptr::NonNull;
 
 pub struct BuddyAllocator<A: Allocator> {
     root: Node<A>,
     range: Range<usize>,
     alloc: A,
 }
+
+pub struct BuddyMemoryAllocator<A: Allocator>(BuddyAllocator<A>);
 
 struct Node<A: Allocator> {
     max_available: usize,
@@ -15,20 +19,25 @@ struct Node<A: Allocator> {
 
 impl<A: Allocator + Copy> BuddyAllocator<A> {
     pub fn new(range: Range<usize>, alloc: A) -> BuddyAllocator<A> {
+        let size = range.end - range.start;
+        let node_size = size.next_power_of_two();
         BuddyAllocator {
-            root: Node::new(range.end - range.start, alloc),
+            root: Node::new(size, node_size, alloc),
             range,
             alloc,
         }
     }
 
-    pub fn alloc(&mut self, req_size: usize) -> Result<usize, ()> {
-        Ok(self.range.start
-            + self.root.alloc(
-                req_size,
-                (self.range.end - self.range.start).next_power_of_two(),
-                self.alloc,
-            )?)
+    pub fn alloc(&mut self, req_size: usize) -> Result<usize, AllocError> {
+        let unoffset_ptr = self.root.alloc(
+            req_size,
+            (self.range.end - self.range.start).next_power_of_two(),
+            self.alloc,
+        )?;
+        let ptr = self.range.start + unoffset_ptr;
+        assert!(ptr >= self.range.start);
+        assert!(ptr + req_size <= self.range.end);
+        Ok(ptr)
     }
 
     pub fn dealloc(&mut self, ptr: usize, size: usize) {
@@ -40,29 +49,51 @@ impl<A: Allocator + Copy> BuddyAllocator<A> {
     }
 }
 
+impl<A: Allocator + Copy> BuddyMemoryAllocator<A> {
+    pub unsafe fn new<T>(range: *mut [T], alloc: A) -> BuddyMemoryAllocator<A> {
+        let start = range.as_mut_ptr() as usize;
+        let size = range.len() * size_of::<T>();
+        BuddyMemoryAllocator(BuddyAllocator::new(start..start + size, alloc))
+    }
+}
+
 impl<A: Allocator + Copy> Node<A> {
-    pub fn new(size: usize, alloc: A) -> Node<A> {
-        if size.is_power_of_two() {
+    pub fn new(size: usize, node_size: usize, alloc: A) -> Node<A> {
+        if size == 0 {
             Node {
-                max_available: size,
+                max_available: 0,
+                children: None,
+            }
+        } else if size == node_size {
+            Node {
+                max_available: node_size,
                 children: None,
             }
         } else {
-            let left_size = size.isolate_highest_one();
-            let right_size = size - left_size;
+            debug_assert!(size < node_size);
+            let left_size = node_size / 2;
+            let right_size = size.saturating_sub(left_size);
             Node {
                 max_available: left_size,
                 children: Some(Box::new_in(
-                    (Node::new(left_size, alloc), Node::new(right_size, alloc)),
+                    (
+                        Node::new(left_size, node_size / 2, alloc),
+                        Node::new(right_size, node_size / 2, alloc),
+                    ),
                     alloc,
                 )),
             }
         }
     }
 
-    pub fn alloc(&mut self, req_size: usize, node_size: usize, alloc: A) -> Result<usize, ()> {
+    pub fn alloc(
+        &mut self,
+        req_size: usize,
+        node_size: usize,
+        alloc: A,
+    ) -> Result<usize, AllocError> {
         if req_size > self.max_available {
-            return Err(());
+            return Err(AllocError);
         }
         if req_size > node_size / 2 {
             debug_assert_eq!(self.max_available, node_size);
@@ -109,5 +140,21 @@ impl<A: Allocator + Copy> Node<A> {
             right.dealloc(ptr - node_size / 2, req_size, node_size / 2);
         }
         self.max_available = left.max_available.max(right.max_available);
+    }
+}
+
+unsafe impl<A: Allocator + Copy> Allocator for Mutex<Option<BuddyMemoryAllocator<A>>> {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        let mut self_ = self.lock();
+        let buddy = &mut self_.as_mut().unwrap().0;
+        let address = buddy.alloc(layout.size().max(layout.align()))?;
+        let ptr = core::ptr::slice_from_raw_parts_mut(address as *mut u8, layout.size());
+        Ok(NonNull::new(ptr).unwrap())
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        let mut self_ = self.lock();
+        let buddy = &mut self_.as_mut().unwrap().0;
+        buddy.dealloc(ptr.as_ptr() as usize, layout.size().max(layout.align()));
     }
 }

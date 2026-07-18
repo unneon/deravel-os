@@ -6,7 +6,7 @@ use crate::capability::{
 use crate::device_tree::timebase_frequency;
 use crate::elf::load_elf;
 use crate::hart::HartContext;
-use crate::heap::log_heap_statistics;
+use crate::heap::{BuddyHeap, log_heap_statistics};
 use crate::page::{
     PageFlags, PageTable, TopPageTable, map_identity_mapping, map_kernel_image, map_pages,
 };
@@ -39,7 +39,7 @@ pub struct Process {
     pub pc: usize,
     pub page_table: *mut TopPageTable,
     pub virtual_memory: BumpAllocator,
-    pub messages: VecDeque<Message>,
+    pub messages: VecDeque<Message, BuddyHeap>,
     pub currently_serving: Option<ProcessId>,
 }
 unsafe impl Send for Process {}
@@ -118,7 +118,7 @@ pub fn reserve_process<T: ProcessTag>(elf: &'static [u8]) -> ProcessReservation<
         pc: 0,
         page_table: core::ptr::null_mut(),
         virtual_memory: BumpAllocator::new(0..0),
-        messages: VecDeque::new(),
+        messages: VecDeque::new_in(BuddyHeap),
         currently_serving: None,
     });
     ProcessReservation {
@@ -146,7 +146,7 @@ pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: Pro
         pc: entry_point,
         page_table: Box::leak(page_table),
         virtual_memory: BumpAllocator::new(0x4000000..0x5000000),
-        messages: VecDeque::new(),
+        messages: VecDeque::new_in(BuddyHeap),
         currently_serving: None,
     });
 }
