@@ -45,6 +45,7 @@ pub fn initialize_all_pci(
 ) {
     let soc = device_tree.find_node("/soc").unwrap();
     let pci = device_tree.find_node("/soc/pci").unwrap();
+    let plic = device_tree.find_node("/soc/plic").unwrap();
     let pci_ranges = find_pci_ranges(&soc, &pci);
     let mut io = BumpAllocator::new(0..pci_ranges.io.length);
     let mut mem32 = BumpAllocator::new(0..pci_ranges.mem32.length);
@@ -68,7 +69,7 @@ pub fn initialize_all_pci(
             let bars = allocate_all_bars(config, &pci_ranges, &mut io, &mut mem32, &mut mem64);
             config.command.write_bitor(0b111);
             let virtio_net = virtio::initialize_net(config, &bars);
-            let plic = pci_interrupt_to_plic(device_tree, config_index, config);
+            let plic = pci_interrupt_to_plic(&pci, &plic, config_index, config);
             register_interrupt(plic, virtio_net);
             virtio_net_slot = Some(virtio_net);
         } else if config.vendor_id == 0x1AF4 && config.device_id == 0x1042 {
@@ -76,7 +77,7 @@ pub fn initialize_all_pci(
             let bars = allocate_all_bars(config, &pci_ranges, &mut io, &mut mem32, &mut mem64);
             config.command.write_bitor(0b111);
             let virtio_blk = virtio::initialize_blk(config, &bars);
-            let plic = pci_interrupt_to_plic(device_tree, config_index, config);
+            let plic = pci_interrupt_to_plic(&pci, &plic, config_index, config);
             register_interrupt(plic, virtio_blk);
             virtio_blk_slot = Some(virtio_blk);
         } else if config.vendor_id == 0x1AF4 && config.device_id == 0x1050 {
@@ -84,7 +85,7 @@ pub fn initialize_all_pci(
             let bars = allocate_all_bars(config, &pci_ranges, &mut io, &mut mem32, &mut mem64);
             config.command.write_bitor(0b111);
             let virtio_gpu = virtio::initialize_gpu(config, &bars);
-            let plic = pci_interrupt_to_plic(device_tree, config_index, config);
+            let plic = pci_interrupt_to_plic(&pci, &plic, config_index, config);
             register_interrupt(plic, virtio_gpu);
             virtio_gpu_slot = Some(virtio_gpu);
         } else if config.vendor_id == 0x1AF4 && config.device_id == 0x1052 {
@@ -92,7 +93,7 @@ pub fn initialize_all_pci(
             let bars = allocate_all_bars(config, &pci_ranges, &mut io, &mut mem32, &mut mem64);
             config.command.write_bitor(0b111);
             let virtio_input = virtio::initialize_input(config, &bars);
-            let plic = pci_interrupt_to_plic(device_tree, config_index, config);
+            let plic = pci_interrupt_to_plic(&pci, &plic, config_index, config);
             register_interrupt(plic, virtio_input);
             if virtio_input.is_keyboard() {
                 virtio_keyboard_slot = Some(virtio_input);
@@ -226,13 +227,11 @@ fn find_pci_ranges(soc: &FdtNode, pci: &FdtNode) -> PciRanges {
 }
 
 fn pci_interrupt_to_plic(
-    device_tree: &Fdt,
+    pci: &FdtNode,
+    plic: &FdtNode,
     config_index: usize,
     config: &GeneralDeviceConfig,
 ) -> u32 {
-    let pci = device_tree.find_node("/soc/pci").unwrap();
-    let plic = device_tree.find_node("/soc/plic").unwrap();
-
     assert_eq!(pci.cell_sizes().address_cells, 3);
     assert_eq!(pci.interrupt_cells().unwrap(), 1);
     assert_eq!(plic.cell_sizes().address_cells, 0);
