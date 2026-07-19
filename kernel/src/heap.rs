@@ -51,7 +51,17 @@ unsafe impl GlobalAlloc for GlobalAllocator {
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        unsafe { EarlyBumpHeap.deallocate(NonNull::new(ptr).unwrap(), layout) }
+        if EARLY_BUMP
+            .lock()
+            .as_mut()
+            .unwrap()
+            .total_range()
+            .contains(&(ptr as *const u8))
+        {
+            unsafe { EarlyBumpHeap.deallocate(NonNull::new(ptr).unwrap(), layout) }
+        } else {
+            unsafe { BuddyHeap.deallocate(NonNull::new(ptr).unwrap(), layout) }
+        }
     }
 }
 

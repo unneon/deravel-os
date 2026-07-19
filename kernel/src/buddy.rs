@@ -186,6 +186,7 @@ impl<A: Allocator + Copy> Node<A> {
         if let Some((left, right)) = self.children.as_deref_mut() {
             if left.max_available == node_size / 2 && right.max_available == node_size / 2 {
                 self.max_available = node_size;
+                self.children = None;
             } else {
                 self.max_available = left.max_available.max(right.max_available);
             }

@@ -38,6 +38,10 @@ impl BumpMemoryAllocator {
     pub fn allocated_range(&self) -> Range<*const u8> {
         self.0.initial_range.start as *const u8..self.0.range.start as *const u8
     }
+
+    pub fn total_range(&self) -> Range<*const u8> {
+        self.0.initial_range.start as *const u8..self.0.initial_range.start as *const u8
+    }
 }
 
 unsafe impl Allocator for Mutex<Option<BumpMemoryAllocator>> {
