@@ -1,3 +1,4 @@
+use crate::heap::HeapStats;
 use crate::sync::Mutex;
 use alloc::alloc::Global;
 use alloc::boxed::Box;
@@ -16,6 +17,7 @@ pub struct BuddyMemoryAllocator<A: Allocator>(BuddyAllocator<A>);
 
 struct Node<A: Allocator> {
     max_available: usize,
+    allocated: usize,
     children: Option<Box<(Node<A>, Node<A>), A>>,
 }
 
@@ -60,6 +62,10 @@ impl<A: Allocator + Copy> BuddyAllocator<A> {
         self.root
             .reserve_range(range, self.root_node_size, self.alloc);
     }
+
+    pub fn stats(&self) -> HeapStats {
+        self.root.stats()
+    }
 }
 
 impl<A: Allocator + Copy> BuddyMemoryAllocator<A> {
@@ -82,6 +88,10 @@ impl<A: Allocator + Copy> BuddyMemoryAllocator<A> {
     pub unsafe fn deallocate_mut(&mut self, ptr: NonNull<u8>, layout: Layout) {
         self.0.dealloc(ptr.as_ptr() as usize, layout);
     }
+
+    pub fn stats(&self) -> HeapStats {
+        self.0.stats()
+    }
 }
 
 impl<A: Allocator + Copy> Node<A> {
@@ -89,11 +99,13 @@ impl<A: Allocator + Copy> Node<A> {
         if size == 0 {
             Node {
                 max_available: 0,
+                allocated: 0,
                 children: None,
             }
         } else if size == node_size {
             Node {
                 max_available: node_size,
+                allocated: 0,
                 children: None,
             }
         } else {
@@ -102,6 +114,7 @@ impl<A: Allocator + Copy> Node<A> {
             let right_size = size.saturating_sub(node_size / 2);
             let mut node = Node {
                 max_available: 0,
+                allocated: 0,
                 children: Some(Box::new_in(
                     (
                         Node::new(left_size, node_size / 2, alloc),
@@ -127,6 +140,7 @@ impl<A: Allocator + Copy> Node<A> {
         if req_size > node_size / 2 {
             assert_eq!(self.max_available, node_size);
             self.max_available = 0;
+            self.allocated = req_size;
             return Ok(0);
         }
         let (left, right) = get_children(&mut self.children, node_size, alloc);
@@ -147,6 +161,7 @@ impl<A: Allocator + Copy> Node<A> {
         if ptr == 0 && req_size > node_size / 2 {
             assert_eq!(self.max_available, 0);
             self.max_available = node_size;
+            self.allocated = 0;
             return;
         }
         let (left, right) = self.children.as_deref_mut().unwrap();
@@ -192,6 +207,27 @@ impl<A: Allocator + Copy> Node<A> {
             }
         }
     }
+
+    pub fn stats(&self) -> HeapStats {
+        if self.allocated != 0 {
+            HeapStats {
+                alloc: self.allocated,
+                free: 0,
+            }
+        } else if let Some(children) = self.children.as_ref() {
+            let left = children.0.stats();
+            let right = children.1.stats();
+            HeapStats {
+                alloc: left.alloc + right.alloc,
+                free: left.free + right.free,
+            }
+        } else {
+            HeapStats {
+                alloc: 0,
+                free: self.max_available,
+            }
+        }
+    }
 }
 
 unsafe impl<A: Allocator + Copy> Allocator for Mutex<Option<BuddyMemoryAllocator<A>>> {
@@ -215,10 +251,12 @@ fn get_children<A: Allocator>(
             (
                 Node {
                     max_available: node_size / 2,
+                    allocated: 0,
                     children: None,
                 },
                 Node {
                     max_available: node_size / 2,
+                    allocated: 0,
                     children: None,
                 },
             ),

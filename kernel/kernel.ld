@@ -36,7 +36,7 @@ SECTIONS {
 
     . = ALIGN(4096);
     early_heap_start = .;
-    . += 4 * 1024 * 1024;
+    . += 1 * 1024 * 1024;
     early_heap_end = .;
 
     readwrite_end = .;

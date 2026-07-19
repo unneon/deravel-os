@@ -146,6 +146,8 @@ fn reserved_dt_memory(dt: &Fdt, dt_ptr: *const u8) -> Range<*const u8> {
 }
 
 pub fn log_heap_usage() {
-    let early_heap_usage = &EARLY_BUMP.lock().as_mut().unwrap().stats();
+    let buddy_usage = &BUDDY.lock().as_ref().unwrap().stats();
+    info!("buddy had {buddy_usage}");
+    let early_heap_usage = &EARLY_BUMP.lock().as_ref().unwrap().stats();
     info!("early bump had {early_heap_usage}");
 }
