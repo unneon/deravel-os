@@ -67,7 +67,7 @@ unsafe impl GlobalAlloc for GlobalAllocator {
         {
             unsafe { EarlyBumpHeap.deallocate(NonNull::new(ptr).unwrap(), layout) }
         } else {
-            // unsafe { BuddyHeap.deallocate(NonNull::new(ptr).unwrap(), layout) }
+            unsafe { BuddyHeap.deallocate(NonNull::new(ptr).unwrap(), layout) }
         }
     }
 }

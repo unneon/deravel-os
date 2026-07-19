@@ -1,4 +1,5 @@
 use crate::page::{Page, PageTable};
+use core::fmt::Write;
 use deravel_types::PAGE_SIZE;
 
 // Does not include the V flag, as this one impacts the meaning of other bits.
@@ -93,5 +94,29 @@ impl<const LEVEL: usize> PageTableEntry<LEVEL> {
 
     pub fn is_valid(&self) -> bool {
         self.0 & PAGE_V != 0
+    }
+}
+
+impl core::fmt::Debug for PageFlags {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        if self.0 == 0 {
+            return f.write_str("0");
+        }
+        if self.0 & PAGE_V != 0 {
+            f.write_char('V')?;
+        }
+        if self.0 & PAGE_R != 0 {
+            f.write_char('R')?;
+        }
+        if self.0 & PAGE_W != 0 {
+            f.write_char('W')?;
+        }
+        if self.0 & PAGE_X != 0 {
+            f.write_char('X')?;
+        }
+        if self.0 & PAGE_U != 0 {
+            f.write_char('U')?;
+        }
+        Ok(())
     }
 }

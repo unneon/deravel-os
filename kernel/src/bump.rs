@@ -41,7 +41,7 @@ impl BumpMemoryAllocator {
     }
 
     pub fn initial_range(&self) -> Range<*const u8> {
-        self.0.initial_range.start as *const u8..self.0.initial_range.start as *const u8
+        self.0.initial_range.start as *const u8..self.0.initial_range.end as *const u8
     }
 
     pub fn stats(&self) -> HeapStats {
