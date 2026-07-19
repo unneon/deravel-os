@@ -49,7 +49,7 @@ pub struct RiscvRegisters {
 #[unsafe(link_section = ".text.boot")]
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
-unsafe extern "C" fn boot() -> ! {
+unsafe extern "C" fn _start() -> ! {
     naked_asm!(
         "la sp, {stack_top}",
         "j {main}",

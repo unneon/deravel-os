@@ -31,7 +31,9 @@ macro_rules! app {
         type Args = <$name as ProcessTag>::Args;
 
         #[unsafe(no_mangle)]
-        extern "C" fn __deravel_main() -> ! {
+        extern "C" fn _start() -> ! {
+            log::set_logger(&$crate::KernelLogger).unwrap();
+            log::set_max_level(log::LevelFilter::Trace);
             $main(unsafe {
                 (memory::USER_INPUTS.start as *const ProcessInputs<$name>)
                     .read()
@@ -64,7 +66,8 @@ pub struct Stdio;
 
 struct PageAllocator;
 
-struct KernelLogger;
+#[doc(hidden)]
+pub struct KernelLogger;
 
 #[global_allocator]
 static PAGE_ALLOCATOR: PageAllocator = PageAllocator;
@@ -122,17 +125,6 @@ impl log::Log for KernelLogger {
     fn flush(&self) {}
 }
 
-#[unsafe(link_section = ".text.entry")]
-#[unsafe(naked)]
-#[unsafe(no_mangle)]
-unsafe extern "C" fn __deravel_entry() -> ! {
-    core::arch::naked_asm!(
-        "call {initialize_log}",
-        "j __deravel_main",
-        initialize_log = sym initialize_log,
-    )
-}
-
 pub fn alloc_shared(size: usize) -> (*mut [u8], Capability<SharedMemory>) {
     // TODO: This API should warn size gets rounded up to page size?
     let (ptr, cap) = unsafe { syscall::alloc_shared(size) };
@@ -180,11 +172,6 @@ fn stdio() -> Capability<Console> {
     let stdio = STDIO.load(Ordering::SeqCst) as *const CapabilityCertificate;
     assert!(!stdio.is_null(), "standard input/output not set");
     unsafe { Capability::new(RawCapability::try_from(stdio).unwrap()) }
-}
-
-fn initialize_log() {
-    log::set_logger(&KernelLogger).unwrap();
-    log::set_max_level(LevelFilter::Trace);
 }
 
 #[panic_handler]

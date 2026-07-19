@@ -1,5 +1,3 @@
-ENTRY(boot)
-
 SECTIONS {
     . = 0x80200000;
     image_start = .;
