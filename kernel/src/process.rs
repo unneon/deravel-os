@@ -7,6 +7,7 @@ use crate::device_tree::timebase_frequency;
 use crate::elf::load_elf;
 use crate::hart::HartContext;
 use crate::heap::BuddyHeap;
+use crate::heap::granularity::PageGranular;
 use crate::page::{
     Page, PageFlags, PageTable, TopPageTable, map_direct_mapping, map_kernel_image, map_pages,
     virt_to_phys,
@@ -19,7 +20,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::num::NonZeroUsize;
 use core::sync::atomic::Ordering;
-use deravel_types::memory::USER_STACK;
+use deravel_types::memory::{USER_INPUTS, USER_STACK};
 use deravel_types::*;
 use log::*;
 
@@ -203,15 +204,12 @@ fn map_capability_memory(table: &mut TopPageTable, pid: ProcessId) {
 }
 
 fn map_inputs_memory<T: ProcessTag>(table: &mut TopPageTable, inputs: ProcessInputs<T>) {
-    assert!(size_of::<ProcessInputs<T>>() <= PAGE_SIZE);
-    let page = Box::leak(Box::new(inputs));
-    map_pages(
-        table,
-        INPUTS_ADDRESS,
-        virt_to_phys(page as *mut _) as usize,
-        PageFlags::readonly().user(),
-        PAGE_SIZE,
-    );
+    let size = USER_INPUTS.end - USER_INPUTS.start;
+    assert!(size_of::<ProcessInputs<T>>() <= size);
+    let page = Box::leak(Box::new_in(inputs, PageGranular::new()));
+    let virt = USER_INPUTS.start;
+    let phys = virt_to_phys(page as *mut _) as usize;
+    map_pages(table, virt, phys, PageFlags::readonly().user(), size);
 }
 
 fn map_user_stack(table: &mut TopPageTable) {

@@ -21,6 +21,7 @@ use alloc::string::String;
 use core::alloc::{GlobalAlloc, Layout};
 use core::fmt::Write;
 use core::sync::atomic::{AtomicUsize, Ordering};
+use deravel_types::memory::USER_INPUTS;
 use log::*;
 use serde::Deserialize;
 
@@ -31,7 +32,11 @@ macro_rules! app {
 
         #[unsafe(no_mangle)]
         extern "C" fn __deravel_main() -> ! {
-            $main(unsafe { (INPUTS_ADDRESS as *const ProcessInputs<$name>).read().args });
+            $main(unsafe {
+                (memory::USER_INPUTS.start as *const ProcessInputs<$name>)
+                    .read()
+                    .args
+            });
             deravel_kernel_api::exit()
         }
     };
@@ -129,16 +134,13 @@ unsafe extern "C" fn __deravel_entry() -> ! {
 }
 
 pub fn alloc_shared(size: usize) -> (*mut [u8], Capability<SharedMemory>) {
+    // TODO: This API should warn size gets rounded up to page size?
     let (ptr, cap) = unsafe { syscall::alloc_shared(size) };
     (core::ptr::slice_from_raw_parts_mut(ptr, size), cap)
 }
 
 pub fn current_pid() -> ProcessId {
-    unsafe {
-        (INPUTS_ADDRESS as *const ProcessInputs<FakeProcess>)
-            .read()
-            .id
-    }
+    common_inputs().id
 }
 
 pub fn exit() -> ! {
@@ -163,17 +165,15 @@ pub fn set_stdio(cap: Capability<Console>) {
 }
 
 pub fn system_time() -> f64 {
-    riscv::register::time::read() as f64
-        / unsafe {
-            (INPUTS_ADDRESS as *const ProcessInputs<FakeProcess>)
-                .read()
-                .riscv_timebase_frequency
-                .unwrap() as f64
-        }
+    riscv::register::time::read() as f64 / common_inputs().riscv_timebase_frequency.unwrap() as f64
 }
 
 pub fn yield_() {
     unsafe { syscall::yield_() }
+}
+
+fn common_inputs() -> &'static ProcessInputs<FakeProcess> {
+    unsafe { &*(USER_INPUTS.start as *const ProcessInputs<FakeProcess>) }
 }
 
 fn stdio() -> Capability<Console> {

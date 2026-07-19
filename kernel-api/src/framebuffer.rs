@@ -1,5 +1,5 @@
 use crate::{alloc_shared, map_shared};
-use deravel_types::{Capability, SharedMemory};
+use deravel_types::{Capability, PAGE_SIZE, SharedMemory};
 
 pub struct Framebuffer {
     ptr: &'static mut [u32],
@@ -16,7 +16,7 @@ impl Framebuffer {
 
     pub fn map(width: usize, height: usize, cap: Capability<SharedMemory>) -> Framebuffer {
         let ptr = map_shared(cap);
-        assert_eq!(ptr.len(), 4 * width * height);
+        assert_eq!(ptr.len(), (4 * width * height).next_multiple_of(PAGE_SIZE));
         let ptr =
             unsafe { core::slice::from_raw_parts_mut(ptr.as_mut_ptr() as *mut u32, ptr.len() / 4) };
         Framebuffer { ptr, width }

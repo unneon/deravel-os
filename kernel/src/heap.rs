@@ -1,3 +1,5 @@
+pub mod granularity;
+
 use crate::buddy::BuddyMemoryAllocator;
 use crate::bump::BumpMemoryAllocator;
 use crate::page::phys_to_drmp;

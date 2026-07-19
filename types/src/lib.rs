@@ -32,8 +32,6 @@ pub struct ProcessInputs<T: ProcessTag> {
 
 pub struct SharedMemory;
 
-pub const INPUTS_ADDRESS: usize = 0x3000000;
-
 pub const MAX_PROCESSES: usize = 8;
 
 pub const LEVEL_0_PAGE_SIZE: usize = PAGE_SIZE;

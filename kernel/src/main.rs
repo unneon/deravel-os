@@ -46,7 +46,8 @@ use crate::device_tree::initialize_timebase_frequency;
 use crate::drvli::{ShutdownServer, SyscallHandler, dispatch_syscall};
 use crate::elf::elf;
 use crate::hart::{HartContext, HartStack};
-use crate::heap::{BuddyHeap, initialize_early_heap, initialize_heap, log_heap_usage};
+use crate::heap::granularity::PageGranular;
+use crate::heap::{initialize_early_heap, initialize_heap, log_heap_usage};
 use crate::interrupt::INTERRUPTS;
 use crate::log::{initialize_log, log_userspace};
 use crate::page::{PageFlags, initialize_memory_mapping, map_pages, phys_to_virt, virt_to_phys};
@@ -62,7 +63,7 @@ use ::log::*;
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
-use core::alloc::{Allocator, Layout};
+use core::alloc::Layout;
 use core::mem::replace;
 use core::panic::PanicInfo;
 use deravel_types::memory::USER_STACK_GUARD;
@@ -388,20 +389,14 @@ impl SyscallHandler for () {
     }
 
     fn alloc(_: usize, _: &mut RiscvRegisters, hart: &mut HartContext, size: usize) -> *mut u8 {
-        let padded_size = size.next_multiple_of(PAGE_SIZE);
-        let layout = Layout::from_size_align(padded_size, PAGE_SIZE).unwrap();
+        let size = size.next_multiple_of(PAGE_SIZE);
+        let layout = Layout::from_size_align(size, PAGE_SIZE).unwrap();
         let mut proc = hart.current_process();
-        let virtual_addr = proc.virtual_memory.alloc(layout).unwrap();
-        let physical_addr =
-            virt_to_phys(BuddyHeap.allocate(layout).unwrap().as_ptr().as_mut_ptr()) as usize;
-        map_pages(
-            unsafe { &mut *proc.page_table },
-            virtual_addr,
-            physical_addr,
-            PageFlags::readwrite().user(),
-            padded_size,
-        );
-        virtual_addr as *mut u8
+        let table = unsafe { &mut *proc.page_table };
+        let virt = proc.virtual_memory.alloc(layout).unwrap();
+        let phys = virt_to_phys(Vec::leak(alloc_pages(size)).as_ptr()) as usize;
+        map_pages(table, virt, phys, PageFlags::readwrite().user(), size);
+        virt as *mut u8
     }
 
     fn alloc_shared(
@@ -410,27 +405,21 @@ impl SyscallHandler for () {
         hart: &mut HartContext,
         size: usize,
     ) -> (*mut u8, Capability<SharedMemory>) {
-        let padded_size = size.next_multiple_of(PAGE_SIZE);
-        let layout = Layout::from_size_align(padded_size, PAGE_SIZE).unwrap();
+        let size = size.next_multiple_of(PAGE_SIZE);
+        let layout = Layout::from_size_align(size, PAGE_SIZE).unwrap();
         let mut proc = hart.current_process();
-        let virtual_addr = proc.virtual_memory.alloc(layout).unwrap();
-        let physical_addr =
-            virt_to_phys(BuddyHeap.allocate(layout).unwrap().as_ptr().as_mut_ptr()) as usize;
-        map_pages(
-            unsafe { &mut *proc.page_table },
-            virtual_addr,
-            physical_addr,
-            PageFlags::readwrite().user(),
-            padded_size,
-        );
+        let table = unsafe { &mut *proc.page_table };
+        let virt = proc.virtual_memory.alloc(layout).unwrap();
+        let phys = virt_to_phys(Vec::leak(alloc_pages(size)).as_ptr()) as usize;
+        map_pages(table, virt, phys, PageFlags::readwrite().user(), size);
         let cap = grant_kernel_capability(
             hart.current_pid(),
             Box::leak(Box::new(shared_memory::SharedMemory {
-                physical_address: physical_addr,
+                physical_address: phys,
                 size,
             })),
         );
-        (virtual_addr as *mut u8, cap)
+        (virt as *mut u8, cap)
     }
 
     fn map_shared(
@@ -493,6 +482,12 @@ impl SyscallHandler for () {
         };
         log_userspace(level, &hart.current_process(), &text);
     }
+}
+
+fn alloc_pages(size: usize) -> Vec<u8, PageGranular> {
+    let mut pages = Vec::new_in(PageGranular::new());
+    pages.resize(size, 0);
+    pages
 }
 
 fn shutdown() -> ! {
