@@ -61,10 +61,6 @@ struct PageAllocator;
 
 struct KernelLogger;
 
-unsafe extern "C" {
-    static mut __deravel_stack_top: u8;
-}
-
 #[global_allocator]
 static PAGE_ALLOCATOR: PageAllocator = PageAllocator;
 
@@ -126,10 +122,8 @@ impl log::Log for KernelLogger {
 #[unsafe(no_mangle)]
 unsafe extern "C" fn __deravel_entry() -> ! {
     core::arch::naked_asm!(
-        "la sp, {stack_top}",
         "call {initialize_log}",
         "j __deravel_main",
-        stack_top = sym __deravel_stack_top,
         initialize_log = sym initialize_log,
     )
 }

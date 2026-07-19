@@ -53,7 +53,7 @@ use crate::page::{PageFlags, initialize_memory_mapping, map_pages, phys_to_virt,
 use crate::pci::initialize_all_pci;
 use crate::plic::{initialize_plic, plic_claim, plic_complete};
 use crate::process::{
-    Message, ProcessState, get_process, reserve_process, schedule_and_switch_to_userspace,
+    Message, ProcessState, get_process, kill, reserve_process, schedule_and_switch_to_userspace,
 };
 use crate::process_spawner::ProcessSpawnerService;
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
@@ -65,22 +65,11 @@ use alloc::vec::Vec;
 use core::alloc::{Allocator, Layout};
 use core::mem::replace;
 use core::panic::PanicInfo;
+use deravel_types::memory::USER_STACK_GUARD;
 use deravel_types::*;
 use fdt::Fdt;
 use riscv::interrupt::Trap;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
-
-macro kill {
-    ($hart:ident, $proc:expr, $($tt:tt)*) => {
-        {
-            crate::process::kill_process($proc, format_args!($($tt)*));
-            schedule_and_switch_to_userspace($hart)
-        }
-    },
-    ($hart:ident, $($tt:tt)*) => {
-        kill!($hart, $hart.current_process(), $($tt)*)
-    }
-}
 
 struct KernelShutdown;
 
@@ -180,6 +169,8 @@ fn handle_trap(registers: &mut RiscvRegisters, hart: &mut HartContext) -> ! {
         }
         plic_complete(irq);
         switch_to_userspace_registers_only(registers)
+    } else if USER_STACK_GUARD.contains(&stval) {
+        kill!(hart, "stack overflow")
     } else {
         panic!("unexpected trap scause={scause:?} stval={stval:#x} user_pc={user_pc:#x}");
     }

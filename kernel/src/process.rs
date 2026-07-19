@@ -8,18 +8,37 @@ use crate::elf::load_elf;
 use crate::hart::HartContext;
 use crate::heap::BuddyHeap;
 use crate::page::{
-    PageFlags, PageTable, TopPageTable, map_direct_mapping, map_kernel_image, map_pages,
+    Page, PageFlags, PageTable, TopPageTable, map_direct_mapping, map_kernel_image, map_pages,
     virt_to_phys,
 };
 use crate::shutdown;
 use crate::sync::{Mutex, MutexGuard};
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
+use alloc::vec;
 use alloc::vec::Vec;
 use core::num::NonZeroUsize;
 use core::sync::atomic::Ordering;
+use deravel_types::memory::USER_STACK;
 use deravel_types::*;
 use log::*;
+
+pub macro kill {
+    ($hart:ident, $proc:expr, $($tt:tt)*) => {
+        {
+            let mut proc = $proc;
+            let pid = proc.id;
+            let name = proc.name;
+            error!("killed {name}{pid:?}, {}", format_args!($($tt)*));
+            proc.state = ProcessState::Finished;
+            drop(proc);
+            crate::schedule_and_switch_to_userspace($hart)
+        }
+    },
+    ($hart:ident, $($tt:tt)*) => {
+        kill!($hart, $hart.current_process(), $($tt)*)
+    }
+}
 
 pub enum ProcessState {
     Runnable,
@@ -133,13 +152,17 @@ pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: Pro
     let entry_point = load_elf(elf, &mut page_table);
     map_capability_memory(&mut page_table, pid);
     map_inputs_memory(&mut page_table, inputs);
+    map_user_stack(&mut page_table);
 
     let mut proc = get_process(pid).lock();
     *proc = Some(Process {
         id: pid,
         name,
         state: ProcessState::Runnable,
-        registers: RiscvRegisters::default(),
+        registers: RiscvRegisters {
+            sp: USER_STACK.end,
+            ..RiscvRegisters::default()
+        },
         pc: entry_point,
         page_table: Box::leak(page_table),
         virtual_memory: BuddyAllocator::new(0x4000000..0x80000000),
@@ -148,7 +171,7 @@ pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: Pro
     });
 }
 
-fn map_capability_memory(pages: &mut TopPageTable, pid: ProcessId) {
+fn map_capability_memory(table: &mut TopPageTable, pid: ProcessId) {
     let pre_v = CAPABILITIES_START;
     let pre_p = capability_pages_physical_address();
     let own_v = pre_v + pid.as_u16() as usize * PAGE_SIZE;
@@ -157,21 +180,21 @@ fn map_capability_memory(pages: &mut TopPageTable, pid: ProcessId) {
     let suf_p = own_p + PAGE_SIZE;
     let suf_l = PROCESS_COUNT - pid.as_u16() as usize - 1;
     map_pages(
-        pages,
+        table,
         pre_v,
         pre_p,
         PageFlags::readonly().user(),
         (pid.as_u16() as usize) * PAGE_SIZE,
     );
     map_pages(
-        pages,
+        table,
         own_v,
         own_p,
         PageFlags::readwrite().user(),
         PAGE_SIZE,
     );
     map_pages(
-        pages,
+        table,
         suf_v,
         suf_p,
         PageFlags::readonly().user(),
@@ -179,16 +202,24 @@ fn map_capability_memory(pages: &mut TopPageTable, pid: ProcessId) {
     );
 }
 
-fn map_inputs_memory<T: ProcessTag>(pages: &mut TopPageTable, inputs: ProcessInputs<T>) {
+fn map_inputs_memory<T: ProcessTag>(table: &mut TopPageTable, inputs: ProcessInputs<T>) {
     assert!(size_of::<ProcessInputs<T>>() <= PAGE_SIZE);
     let page = Box::leak(Box::new(inputs));
     map_pages(
-        pages,
+        table,
         INPUTS_ADDRESS,
         virt_to_phys(page as *mut _) as usize,
         PageFlags::readonly().user(),
         PAGE_SIZE,
     );
+}
+
+fn map_user_stack(table: &mut TopPageTable) {
+    let stack_size = USER_STACK.end - USER_STACK.start;
+    let pages = Vec::leak(vec![Page::zeroed(); stack_size / PAGE_SIZE]);
+    let phys = virt_to_phys(pages.as_ptr()) as usize;
+    let virt = USER_STACK.start;
+    map_pages(table, virt, phys, PageFlags::readwrite().user(), stack_size);
 }
 
 fn find_free_process_slot() -> Option<(ProcessId, MutexGuard<'static, Option<Process>>)> {
@@ -248,11 +279,4 @@ pub fn inspect_can_progress(proc: &mut Process) {
             );
         }
     }
-}
-
-pub fn kill_process(mut proc: MutexGuard<'_, Process>, cause: impl core::fmt::Display) {
-    let pid = proc.id;
-    let name = proc.name;
-    error!("killed {name}{pid:?}, {cause}");
-    proc.state = ProcessState::Finished;
 }

@@ -11,6 +11,7 @@ mod align;
 mod capability;
 mod drvli;
 pub mod input;
+pub mod memory;
 mod process_id;
 mod ring_buffer;
 

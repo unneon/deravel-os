@@ -19,10 +19,6 @@ SECTIONS {
     .bss : ALIGN(4096) {
         *(.bss .bss.* .sbss .sbss.*);
 
-        . = ALIGN(16);
-        . += 512 * 1024;
-        __deravel_stack_top = .;
-
         ASSERT(. <= 0x2000000, "user application too large");
     }
 }
