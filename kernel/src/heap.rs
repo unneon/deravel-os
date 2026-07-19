@@ -2,7 +2,7 @@ use crate::buddy::BuddyMemoryAllocator;
 use crate::bump::BumpMemoryAllocator;
 use crate::page::phys_to_drmp;
 use crate::sync::Mutex;
-use crate::util::fmt::memory::fmt_memory;
+use crate::util::fmt::memory::{fmt_memory, fmt_memory_size};
 use alloc::vec::Vec;
 use core::alloc::{AllocError, Allocator, GlobalAlloc, Layout};
 use core::iter::once;
@@ -31,11 +31,18 @@ singleton_allocator!(EarlyBumpHeap, EARLY_BUMP);
 
 pub struct GlobalAllocator;
 
+pub struct HeapStats {
+    // Does not include internal fragmentation.
+    pub alloc: usize,
+    // Does include internal fragmentation.
+    pub free: usize,
+}
+
 #[global_allocator]
 static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator;
 
 pub static BUDDY: Mutex<Option<BuddyMemoryAllocator<EarlyBumpHeap>>> = Mutex::new(None);
-pub static EARLY_BUMP: Mutex<Option<BumpMemoryAllocator>> = Mutex::new(None);
+static EARLY_BUMP: Mutex<Option<BumpMemoryAllocator>> = Mutex::new(None);
 
 unsafe impl GlobalAlloc for GlobalAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
@@ -55,13 +62,21 @@ unsafe impl GlobalAlloc for GlobalAllocator {
             .lock()
             .as_mut()
             .unwrap()
-            .total_range()
+            .initial_range()
             .contains(&(ptr as *const u8))
         {
             unsafe { EarlyBumpHeap.deallocate(NonNull::new(ptr).unwrap(), layout) }
         } else {
-            unsafe { BuddyHeap.deallocate(NonNull::new(ptr).unwrap(), layout) }
+            // unsafe { BuddyHeap.deallocate(NonNull::new(ptr).unwrap(), layout) }
         }
+    }
+}
+
+impl core::fmt::Display for HeapStats {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let a = fmt_memory_size(self.alloc);
+        let fr = fmt_memory_size(self.free);
+        write!(f, "{a} allocated, {fr} free ")
     }
 }
 
@@ -128,4 +143,9 @@ fn reserved_kernel_range() -> Range<*const u8> {
 
 fn reserved_dt_memory(dt: &Fdt, dt_ptr: *const u8) -> Range<*const u8> {
     dt_ptr..dt_ptr.wrapping_byte_add(dt.total_size())
+}
+
+pub fn log_heap_usage() {
+    let early_heap_usage = &EARLY_BUMP.lock().as_mut().unwrap().stats();
+    info!("early bump had {early_heap_usage}");
 }

@@ -46,7 +46,7 @@ use crate::device_tree::initialize_timebase_frequency;
 use crate::drvli::{ShutdownServer, SyscallHandler, dispatch_syscall};
 use crate::elf::elf;
 use crate::hart::{HartContext, HartStack};
-use crate::heap::{BuddyHeap, EARLY_BUMP, initialize_early_heap, initialize_heap};
+use crate::heap::{BuddyHeap, initialize_early_heap, initialize_heap, log_heap_usage};
 use crate::interrupt::INTERRUPTS;
 use crate::log::{initialize_log, log_userspace};
 use crate::page::{PageFlags, initialize_memory_mapping, map_pages, phys_to_virt, virt_to_phys};
@@ -58,7 +58,6 @@ use crate::process::{
 use crate::process_spawner::ProcessSpawnerService;
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use crate::user::UserPtr;
-use crate::util::fmt::memory::fmt_memory;
 use ::log::*;
 use alloc::boxed::Box;
 use alloc::string::String;
@@ -506,8 +505,7 @@ impl SyscallHandler for () {
 }
 
 fn shutdown() -> ! {
-    let early_heap_usage = &EARLY_BUMP.lock().as_mut().unwrap().allocated_range();
-    info!("early heap usage was {}", fmt_memory(early_heap_usage));
+    log_heap_usage();
     sbi::system_reset(ResetType::Shutdown, ResetReason::NoReason).unwrap()
 }
 
