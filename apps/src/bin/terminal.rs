@@ -132,7 +132,7 @@ fn find_glyph(c: u8) -> Option<&'static Glyph> {
     FONT.glyphs.iter().find(|character| character.ascii == c)
 }
 
-fn main(args: Args) {
+fn main(args: TerminalArgs) {
     let window = args.windowing.create_window();
     let width = window.width();
     let height = window.height();
@@ -152,4 +152,4 @@ fn main(args: Args) {
     Dispatch::new(renderer).run();
 }
 
-app! { main Terminal }
+app! { main }

@@ -198,7 +198,7 @@ impl Observer<InputEvent, MouseTag> for Server {
     }
 }
 
-fn main(args: Args) {
+fn main(args: WindowingArgs) {
     let width = args.display.width() as usize;
     let height = args.display.height() as usize;
     info!("found a {width}x{height} display");
@@ -249,4 +249,4 @@ fn from_abs(value: u32, info: &InputAbsinfo, res: usize) -> usize {
     (((value - info.min) as u64 * res as u64) / (info.max - info.min) as u64) as usize
 }
 
-app! { main Windowing }
+app! { main }

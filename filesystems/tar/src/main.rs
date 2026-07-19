@@ -97,7 +97,7 @@ impl FilesystemServer<usize> for Server {
     }
 }
 
-fn main(args: Args) {
+fn main(args: TarFsArgs) {
     let files = deserialize_archive(args.drive);
     let server = Server {
         drive: args.drive,
@@ -116,4 +116,4 @@ fn concat_path<'a>(prefix: &'a str, suffix: &'a str) -> Cow<'a, str> {
     }
 }
 
-app! { main TarFs }
+app! { main }

@@ -9,6 +9,8 @@ pub trait Interface {
 }
 
 pub trait ProcessArgs: Debug + for<'a> Deserialize<'a> {
+    type Process: ProcessTag<Args = Self>;
+
     fn for_all(&self, f: impl FnMut(RawCapability));
 }
 

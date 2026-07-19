@@ -47,6 +47,7 @@ fn main() {
             }
             writeln!(&mut output, "}}").unwrap();
             writeln!(&mut output, "impl ProcessArgs for {name_camel}Args {{").unwrap();
+            writeln!(&mut output, "    type Process = {name_camel};").unwrap();
             writeln!(
                 &mut output,
                 "    fn for_all(&self, mut _f: impl FnMut(RawCapability)) {{"

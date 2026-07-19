@@ -25,23 +25,11 @@ use deravel_types::memory::USER_INPUTS;
 use log::*;
 use serde::Deserialize;
 
-#[macro_export]
-macro_rules! app {
-    ($main:ident $name:ident) => {
-        type Args = <$name as ProcessTag>::Args;
-
-        #[unsafe(no_mangle)]
-        extern "C" fn _start() -> ! {
-            log::set_logger(&$crate::KernelLogger).unwrap();
-            log::set_max_level(log::LevelFilter::Trace);
-            $main(unsafe {
-                (memory::USER_INPUTS.start as *const ProcessInputs<$name>)
-                    .read()
-                    .args
-            });
-            deravel_kernel_api::exit()
-        }
-    };
+pub macro app($main:ident) {
+    #[unsafe(no_mangle)]
+    extern "C" fn _start() -> ! {
+        unsafe { $crate::_start($main) }
+    }
 }
 
 pub macro print($($tt:tt)*) {
@@ -82,6 +70,8 @@ impl ProcessTag for FakeProcess {
 }
 
 impl ProcessArgs for FakeProcessArgs {
+    type Process = FakeProcess;
+
     fn for_all(&self, _: impl FnMut(RawCapability)) {}
 }
 
@@ -104,7 +94,7 @@ unsafe impl GlobalAlloc for PageAllocator {
     unsafe fn dealloc(&self, _: *mut u8, _: Layout) {}
 }
 
-impl log::Log for KernelLogger {
+impl Log for KernelLogger {
     fn enabled(&self, _: &Metadata) -> bool {
         true
     }
@@ -162,6 +152,18 @@ pub fn system_time() -> f64 {
 
 pub fn yield_() {
     unsafe { syscall::yield_() }
+}
+
+#[doc(hidden)]
+pub unsafe fn _start<T: ProcessArgs>(main: impl Fn(T)) -> ! {
+    set_logger(&KernelLogger).unwrap();
+    set_max_level(LevelFilter::Trace);
+    main(unsafe {
+        (USER_INPUTS.start as *const ProcessInputs<T::Process>)
+            .read()
+            .args
+    });
+    exit()
 }
 
 fn common_inputs() -> &'static ProcessInputs<FakeProcess> {

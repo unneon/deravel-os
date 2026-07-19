@@ -3,7 +3,7 @@
 
 use deravel_kernel_api::*;
 
-fn main(args: Args) {
+fn main(args: ShellArgs) {
     set_stdio(args.console);
     let mut buf = [0; 128];
     loop {
@@ -77,4 +77,4 @@ fn getmultiline(buf: &mut [u8]) -> Option<&str> {
     None
 }
 
-app! { main Shell }
+app! { main }
