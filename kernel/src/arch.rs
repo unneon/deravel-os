@@ -1,11 +1,12 @@
-use crate::page::satp;
+use crate::page::{PageFlags, map_pages, satp};
 use crate::process::{Process, ProcessState};
 use crate::stack::UserCtx;
 use crate::sync::MutexGuard;
-use crate::user::UserSliceTooSmall;
-use crate::{handle_kernel_trap, handle_user_trap, main};
+use crate::user::UserSyscallError;
+use crate::{capability, handle_kernel_trap, handle_user_trap, main};
+use core::alloc::Layout;
 use core::arch::{asm, naked_asm};
-use log::warn;
+use deravel_types::PAGE_SIZE;
 use riscv::register::mtvec::TrapMode;
 use riscv::register::stvec::Stvec;
 
@@ -75,7 +76,7 @@ pub fn enable_user_trap_handler() {
     unsafe { riscv::register::stvec::write(Stvec::new(address, TrapMode::Direct)) }
 }
 
-pub fn switch_to_user(mut next: MutexGuard<Process>) -> Result<!, UserSliceTooSmall> {
+pub fn switch_to_user(mut next: MutexGuard<Process>) -> Result<!, UserSyscallError> {
     unsafe { riscv::register::satp::write(satp(next.page_table)) };
 
     // SFENCE.VMA is required after SATP write. (RISC-V Privileged 12.2.1).
@@ -91,7 +92,28 @@ pub fn switch_to_user(mut next: MutexGuard<Process>) -> Result<!, UserSliceTooSm
             next.registers.a0 = reply.len();
             next.state = ProcessState::Runnable;
         }
-        _ => warn!("switching to process with state {:?}", next.state),
+        ProcessState::ReadyStreamMap {
+            ring,
+            declared_size,
+        } => {
+            let ring = *ring;
+            let declared_size = *declared_size;
+            let handler = capability::get_handler(ring.local_index());
+            let (physical_address, length) = handler.shared_memory();
+            let layout = Layout::from_size_align(length, PAGE_SIZE).unwrap();
+            let virtual_addr = next.virtual_memory.alloc(layout).unwrap();
+            map_pages(
+                unsafe { &mut *next.page_table },
+                virtual_addr,
+                physical_address,
+                PageFlags::readwrite().user(),
+                length,
+            );
+            next.registers.a0 = virtual_addr;
+            next.registers.a1 = declared_size;
+            next.state = ProcessState::Runnable;
+        }
+        _ => panic!("can't switch to process with state {:?}", next.state),
     }
 
     unsafe { riscv::register::sepc::write(next.pc) };

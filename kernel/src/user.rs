@@ -23,6 +23,7 @@ pub enum UserSyscallError {
     InvalidCapability(InvalidCapabilityError),
     InvalidPointer(UserPtrInvalid),
     InvalidSyscallNumber,
+    SliceTooSmall(UserSliceTooSmall),
 }
 
 impl<T: SafeUserType> UserPtr<[T]> {
@@ -81,6 +82,12 @@ impl From<UserPtrInvalid> for UserSyscallError {
     }
 }
 
+impl From<UserSliceTooSmall> for UserSyscallError {
+    fn from(err: UserSliceTooSmall) -> Self {
+        UserSyscallError::SliceTooSmall(err)
+    }
+}
+
 impl core::fmt::Display for UserPtrInvalid {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "invalid user pointer")
@@ -99,6 +106,7 @@ impl core::fmt::Display for UserSyscallError {
             UserSyscallError::InvalidCapability(err) => err.fmt(f),
             UserSyscallError::InvalidPointer(err) => err.fmt(f),
             UserSyscallError::InvalidSyscallNumber => f.write_str("invalid syscall number"),
+            UserSyscallError::SliceTooSmall(err) => err.fmt(f),
         }
     }
 }

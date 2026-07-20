@@ -59,7 +59,8 @@ pub enum ProcessState {
         result_buffer: UserPtr<[u8]>,
     },
     ReadyStreamMap {
-        stream: (RawCapability, usize),
+        ring: RawCapability,
+        declared_size: usize,
     },
 }
 

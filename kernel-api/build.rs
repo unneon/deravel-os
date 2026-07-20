@@ -141,7 +141,7 @@ fn generate_server_trait(interface: &Interface, out: &mut String) {
         let stream_name = &stream.name;
         writeln!(
             out,
-            "    fn {stream_name}(&mut self, object: O) -> (Capability<SharedMemory>, usize);"
+            "    fn {stream_name}(&mut self, ctx: &mut Ctx<Self>, object: O) -> (Capability<SharedMemory>, usize);"
         )
         .unwrap();
     }
@@ -196,7 +196,7 @@ fn generate_server_handler_impl(interface: &Interface, out: &mut String) {
         writeln!(out, "            {pseudo_method_index} => {{").unwrap();
         writeln!(
             out,
-            "                let result = self.{stream_name}(_object);"
+            "                let result = self.{stream_name}(_ctx, _object);"
         )
         .unwrap();
         writeln!(out, "                let mut result_buf = [0u8; 4096];").unwrap();

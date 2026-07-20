@@ -287,10 +287,29 @@ impl SyscallHandler for () {
             if from != Actor::Userspace(proc.id) {
                 kill!(user, proc, "replied to process waiting for someone else");
             }
-            let Ok(stream) = postcard::from_bytes(&result.copy_to_kernel()) else {
+            let Ok((stream, declared_size)) =
+                postcard::from_bytes::<(RawCapability, usize)>(&result.copy_to_kernel())
+            else {
                 kill!(user, proc, "invalid stream map reply")
             };
-            caller.state = ProcessState::ReadyStreamMap { stream };
+            let Ok(ring) = stream.validate(caller.id) else {
+                kill!(user, proc, "ring {stream:?} not valid for sender");
+            };
+            if ring.certifier() != Actor::Kernel {
+                kill!(user, proc, "shared memory must be granted by the kernel");
+            }
+            let handler = capability::get_handler(ring.local_index());
+            let (_, length) = handler.shared_memory();
+            if !length.is_multiple_of(PAGE_SIZE) {
+                kill!(user, proc, "stream size must be a multiple of page size")
+            }
+            if length < 2 * CACHE_LINE_SIZE + declared_size {
+                kill!(user, proc, "stream length does not match memory size")
+            }
+            caller.state = ProcessState::ReadyStreamMap {
+                ring,
+                declared_size,
+            };
         } else {
             unimplemented!()
         }
@@ -309,56 +328,21 @@ impl SyscallHandler for () {
         };
         match cap.certifier() {
             Actor::Userspace(original_pid) => {
-                if let ProcessState::ReadyStreamMap {
-                    stream: (ring, declared_size),
-                } = proc.state
-                {
-                    let ring = match ring.validate(original_pid) {
-                        Ok(ring) => ring,
-                        Err(err) => kill!(user, proc, "{err}"),
-                    };
-                    if ring.certifier() != Actor::Kernel {
-                        kill!(user, proc, "non-kernel shared memory capability")
-                    }
+                proc.state = ProcessState::WaitingForStreamMap {
+                    from: original_pid.into(),
+                };
+                proc.pc = user_pc + 4;
+                let mut dest = get_process(original_pid).lock_if_some().unwrap();
+                dest.messages.push_back(Message {
+                    cap,
+                    method: 1000 + stream,
+                    args: Vec::new(),
+                    sender: user.pid(),
+                });
 
-                    let handler = capability::get_handler(ring.local_index());
-                    let (physical_address, length) = handler.shared_memory();
-                    if !length.is_multiple_of(PAGE_SIZE) {
-                        kill!(user, proc, "stream size must be a multiple of page size")
-                    }
-                    if length < 2 * CACHE_LINE_SIZE + declared_size {
-                        kill!(user, proc, "stream length does not match memory size")
-                    }
-
-                    let layout = Layout::from_size_align(length, PAGE_SIZE).unwrap();
-                    let virtual_addr = proc.virtual_memory.alloc(layout).unwrap();
-                    map_pages(
-                        unsafe { &mut *proc.page_table },
-                        virtual_addr,
-                        physical_address,
-                        PageFlags::readwrite().user(),
-                        length,
-                    );
-
-                    proc.state = ProcessState::Runnable;
-                    (virtual_addr as *mut (), declared_size)
-                } else {
-                    proc.state = ProcessState::WaitingForStreamMap {
-                        from: original_pid.into(),
-                    };
-                    proc.pc = user_pc;
-                    let mut dest = get_process(original_pid).lock_if_some().unwrap();
-                    dest.messages.push_back(Message {
-                        cap,
-                        method: 1000 + stream,
-                        args: Vec::new(),
-                        sender: user.pid(),
-                    });
-
-                    drop(proc);
-                    drop(dest);
-                    schedule_and_switch_to_userspace(user);
-                }
+                drop(proc);
+                drop(dest);
+                schedule_and_switch_to_userspace(user);
             }
             Actor::Kernel => {
                 let handler = capability::get_handler(cap.local_index());

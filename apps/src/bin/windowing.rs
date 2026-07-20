@@ -103,11 +103,15 @@ impl WindowServer<usize> for Server {
         self.display.draw();
     }
 
-    fn events(&mut self, window_id: usize) -> (Capability<SharedMemory>, usize) {
+    fn events(
+        &mut self,
+        ctx: &mut Ctx<Self>,
+        window_id: usize,
+    ) -> (Capability<SharedMemory>, usize) {
         let (memory, cap) = alloc_shared(PAGE_SIZE);
         let ring = unsafe { RingBuffer::new_in_single_page(memory) };
         self.windows[window_id].event_ring = Some(ring);
-        (cap, ring.untype().0.data.0.len())
+        (ctx.forward_to_sender(cap), ring.untype().0.data.0.len())
     }
 }
 
