@@ -14,7 +14,7 @@ pub struct HartStack {
     ctx: UserCtx,
 }
 
-const STACK_SIZE: usize = 128 * 1024;
+const STACK_SIZE: usize = 32 * 1024;
 
 impl UserCtx {
     pub fn process(&self) -> MutexGuard<'_, Process> {

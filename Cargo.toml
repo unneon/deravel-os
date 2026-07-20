@@ -9,3 +9,6 @@ members = [
 ]
 default-members = ["kernel"]
 resolver = "3"
+
+[profile.dev]
+opt-level = 1
