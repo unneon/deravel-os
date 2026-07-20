@@ -40,7 +40,7 @@ mod user;
 mod util;
 mod virtio;
 
-use crate::arch::{RiscvRegisters, enable_kernel_trap_handler, switch_to_userspace_registers_only};
+use crate::arch::{RiscvRegisters, enable_kernel_trap_handler, return_to_user};
 use crate::capability::{grant_kernel_capability, reserve_kernel_capability};
 use crate::device_tree::initialize_timebase_frequency;
 use crate::drvli::{ShutdownServer, SyscallHandler, dispatch_syscall};
@@ -165,7 +165,7 @@ fn handle_user_trap(user: &mut UserCtx) -> ! {
         kill!(user, "{err}");
     } else if scause == Ok(Trap::Interrupt(Interrupt::SupervisorTimer)) {
         sbi::set_timer(u64::MAX);
-        switch_to_userspace_registers_only(&registers)
+        return_to_user(&registers)
     } else if scause == Ok(Trap::Interrupt(Interrupt::SupervisorExternal)) {
         let irq = plic_claim();
         for ie in &INTERRUPTS {
@@ -177,7 +177,7 @@ fn handle_user_trap(user: &mut UserCtx) -> ! {
             }
         }
         plic_complete(irq);
-        switch_to_userspace_registers_only(&registers)
+        return_to_user(&registers)
     } else if USER_STACK_GUARD.contains(&stval) {
         kill!(user, "stack overflow")
     } else {

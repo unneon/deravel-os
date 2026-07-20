@@ -28,9 +28,9 @@ SECTIONS {
         bss_end = .;
     }
 
-    . = ALIGN(4);
+    . = ALIGN(16);
     . += 16 * 1024;
-    stack_top = .;
+    early_stack_top = .;
 
     . = ALIGN(4096);
     early_heap_start = .;

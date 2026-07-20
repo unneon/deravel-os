@@ -1,4 +1,4 @@
-use crate::arch::{RiscvRegisters, switch_to_userspace_full};
+use crate::arch::{RiscvRegisters, switch_to_user};
 use crate::buddy::BuddyAllocator;
 use crate::capability::{
     capability_page, capability_pages_physical_address, kernel_capability_page,
@@ -237,7 +237,7 @@ pub fn schedule_and_switch_to_userspace(user: &mut UserCtx) -> ! {
     };
     user.set_process(&mut next);
 
-    switch_to_userspace_full(next);
+    switch_to_user(next);
 }
 
 pub fn find_runnable_process(user: Option<&UserCtx>) -> Option<MutexGuard<'static, Process>> {

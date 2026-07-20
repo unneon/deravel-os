@@ -241,10 +241,6 @@ fn generate_syscall_dispatch(drvli: &Drvli, out: &mut String) {
         "    unsafe {{ riscv::register::sepc::write(user_pc + 4) }}"
     )
     .unwrap();
-    writeln!(
-        out,
-        "    crate::arch::switch_to_userspace_registers_only(registers);"
-    )
-    .unwrap();
+    writeln!(out, "    crate::arch::return_to_user(registers);").unwrap();
     writeln!(out, "}}").unwrap();
 }

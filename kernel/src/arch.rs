@@ -7,10 +7,6 @@ use core::arch::{asm, naked_asm};
 use riscv::register::mtvec::TrapMode;
 use riscv::register::stvec::Stvec;
 
-unsafe extern "C" {
-    static mut stack_top: u8;
-}
-
 #[repr(C)]
 #[derive(Clone, Debug, Default)]
 pub struct RiscvRegisters {
@@ -56,10 +52,13 @@ const _: fn(&mut UserCtx) -> ! = handle_user_trap;
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
 unsafe extern "C" fn _start() -> ! {
+    unsafe extern "C" {
+        static mut early_stack_top: u8;
+    }
     naked_asm!(
-        "la sp, {stack_top}",
+        "la sp, {early_stack_top}",
         "j {main}",
-        stack_top = sym stack_top,
+        early_stack_top = sym early_stack_top,
         main = sym main,
     )
 }
@@ -74,7 +73,7 @@ pub fn enable_user_trap_handler() {
     unsafe { riscv::register::stvec::write(Stvec::new(address, TrapMode::Direct)) }
 }
 
-pub fn switch_to_userspace_full(next: MutexGuard<Process>) -> ! {
+pub fn switch_to_user(next: MutexGuard<Process>) -> ! {
     unsafe { riscv::register::satp::write(satp(next.page_table)) };
 
     // SFENCE.VMA is required after SATP write. (RISC-V Privileged 12.2.1).
@@ -87,11 +86,13 @@ pub fn switch_to_userspace_full(next: MutexGuard<Process>) -> ! {
     unsafe { riscv::register::sstatus::write(status) };
     let registers = &next.registers as *const _;
     drop(next);
-    switch_to_userspace_registers_only(registers)
+
+    return_to_user(registers)
 }
 
-pub fn switch_to_userspace_registers_only(registers: *const RiscvRegisters) -> ! {
+pub fn return_to_user(registers: *const RiscvRegisters) -> ! {
     enable_user_trap_handler();
+
     unsafe {
         asm!(
             "ld ra, 8 * 0(t6)",
