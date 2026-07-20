@@ -4,7 +4,7 @@
 
 use crate::RiscvRegisters;
 use crate::capability::Handler;
-use crate::hart::HartContext;
+use crate::hart::UserCtx;
 use crate::user::{UserPtr, UserSyscallError};
 use alloc::string::String;
 use alloc::vec;

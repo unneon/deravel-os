@@ -40,15 +40,12 @@ mod user;
 mod util;
 mod virtio;
 
-use crate::arch::{
-    RiscvRegisters, enable_kernel_trap_handler, initialize_trap_handler,
-    switch_to_userspace_registers_only,
-};
+use crate::arch::{RiscvRegisters, enable_kernel_trap_handler, switch_to_userspace_registers_only};
 use crate::capability::{grant_kernel_capability, reserve_kernel_capability};
 use crate::device_tree::initialize_timebase_frequency;
 use crate::drvli::{ShutdownServer, SyscallHandler, dispatch_syscall};
 use crate::elf::elf;
-use crate::hart::{HartContext, HartStack};
+use crate::hart::{HartStack, UserCtx};
 use crate::heap::granularity::PageGranular;
 use crate::heap::{initialize_early_heap, initialize_heap, log_heap_usage};
 use crate::interrupt::INTERRUPTS;
@@ -95,7 +92,6 @@ fn main(_hart_id: u64, dt_ptr: *const u8) -> ! {
     log_sbi_metadata();
     initialize_heap(&dt, dt_ptr);
     initialize_hart_stack();
-    initialize_trap_handler();
     let (virtio_blk, virtio_net, virtio_gpu, virtio_keyboard, virtio_mouse) =
         initialize_all_pci(&dt);
     initialize_plic(&dt);
@@ -123,7 +119,7 @@ fn main(_hart_id: u64, dt_ptr: *const u8) -> ! {
     });
 
     // TODO: initialize_hart_stack should take a callback and pass this with the correct lifetime.
-    let hart = unsafe { &mut *(riscv::register::sscratch::read() as *mut HartContext) };
+    let hart = unsafe { &mut *(riscv::register::sscratch::read() as *mut UserCtx) };
     schedule_and_switch_to_userspace(hart);
 }
 
@@ -146,8 +142,6 @@ fn enable_interrupts() {
     sie.set_sext(true);
     sie.set_stimer(true);
     unsafe { riscv::register::sie::write(sie) }
-
-    unsafe { riscv::register::sstatus::set_sie() }
 }
 
 fn handle_kernel_trap(_: &mut RiscvRegisters) -> ! {
@@ -156,18 +150,22 @@ fn handle_kernel_trap(_: &mut RiscvRegisters) -> ! {
         .try_into::<Interrupt, Exception>();
     let stval = riscv::register::stval::read();
     let pc = riscv::register::sepc::read();
+
+    // TODO: Enable handling interrupts in kernel mode again.
+
     panic!("unexpected kernel trap, scause {scause:?} stval {stval:#x} pc {pc:#x}");
 }
 
-fn handle_trap(registers: &mut RiscvRegisters, hart: &mut HartContext) -> ! {
+fn handle_user_trap(registers: &mut RiscvRegisters, user: &mut UserCtx) -> ! {
+    enable_kernel_trap_handler();
     let scause = riscv::register::scause::read()
         .cause()
         .try_into::<Interrupt, Exception>();
     let stval = riscv::register::stval::read();
     let user_pc = riscv::register::sepc::read();
     if scause == Ok(Trap::Exception(Exception::UserEnvCall)) {
-        let Err(err) = dispatch_syscall(user_pc, registers, hart);
-        kill!(hart, "{err}");
+        let Err(err) = dispatch_syscall(user_pc, registers, user);
+        kill!(user, "{err}");
     } else if scause == Ok(Trap::Interrupt(Interrupt::SupervisorTimer)) {
         sbi::set_timer(u64::MAX);
         switch_to_userspace_registers_only(registers)
@@ -184,41 +182,41 @@ fn handle_trap(registers: &mut RiscvRegisters, hart: &mut HartContext) -> ! {
         plic_complete(irq);
         switch_to_userspace_registers_only(registers)
     } else if USER_STACK_GUARD.contains(&stval) {
-        kill!(hart, "stack overflow")
+        kill!(user, "stack overflow")
     } else {
         panic!("unexpected trap scause={scause:?} stval={stval:#x} user_pc={user_pc:#x}");
     }
 }
 
 impl SyscallHandler for () {
-    fn exit(_: usize, _: &mut RiscvRegisters, hart: &mut HartContext) -> ! {
-        hart.current_process().state = ProcessState::Finished;
-        schedule_and_switch_to_userspace(hart);
+    fn exit(_: usize, _: &mut RiscvRegisters, user: &mut UserCtx) -> ! {
+        user.process().state = ProcessState::Finished;
+        schedule_and_switch_to_userspace(user);
     }
 
     fn ipc_call(
         user_pc: usize,
         registers: &mut RiscvRegisters,
-        hart: &mut HartContext,
+        user: &mut UserCtx,
         cap: RawCapability,
         method: usize,
         args_buffer: UserPtr<[u8]>,
         mut result_buffer: UserPtr<[u8]>,
     ) -> usize {
-        let mut proc = hart.current_process();
+        let mut proc = user.process();
         if let ProcessState::ReadyReply { reply } =
             replace(&mut proc.state, ProcessState::Transitional)
         {
             if let Err(err) = result_buffer.write_to_user(&reply) {
                 proc.state = ProcessState::Finished;
-                kill!(hart, proc, "{err}")
+                kill!(user, proc, "{err}")
             };
             proc.state = ProcessState::Runnable;
             reply.len()
         } else {
             let cap = match cap.validate(proc.id) {
                 Ok(cap) => cap,
-                Err(err) => kill!(hart, proc, "{err}"),
+                Err(err) => kill!(user, proc, "{err}"),
             };
 
             proc.state = ProcessState::WaitingForReply {
@@ -232,32 +230,29 @@ impl SyscallHandler for () {
                     let Some(mut dest) = get_process(dest).lock_if_some() else {
                         // This can't actually happen because capability validation will catch this
                         // earlier, but let's check in case the design changes later.
-                        kill!(hart, proc, "ipc send to nonexistent process");
+                        kill!(user, proc, "ipc send to nonexistent process");
                     };
 
                     dest.messages.push_back(Message {
                         cap,
                         method,
                         args: args_buffer.copy_to_kernel(),
-                        sender: hart.current_pid(),
+                        sender: user.pid,
                     });
 
                     drop(proc);
                     drop(dest);
-                    schedule_and_switch_to_userspace(hart);
+                    schedule_and_switch_to_userspace(user);
                 }
                 Actor::Kernel => {
                     drop(proc);
                     let handler = capability::get_handler(cap.local_index());
-                    let result = handler.call_method(
-                        method,
-                        &args_buffer.copy_to_kernel(),
-                        hart.current_pid(),
-                    );
+                    let result =
+                        handler.call_method(method, &args_buffer.copy_to_kernel(), user.pid);
                     if let Err(err) = result_buffer.write_to_user(&result) {
-                        kill!(hart, "{err}")
+                        kill!(user, "{err}")
                     };
-                    hart.current_process().state = ProcessState::Runnable;
+                    user.process().state = ProcessState::Runnable;
                     result.len()
                 }
             }
@@ -267,18 +262,18 @@ impl SyscallHandler for () {
     fn ipc_receive(
         _: usize,
         _: &mut RiscvRegisters,
-        hart: &mut HartContext,
+        user: &mut UserCtx,
         mut args: UserPtr<[u8]>,
     ) -> (Option<RawCapability>, usize, usize, Option<ProcessId>) {
-        let mut proc = hart.current_process();
+        let mut proc = user.process();
         if proc.currently_serving.is_some() {
-            kill!(hart, proc, "ipc receive without replying to previous one")
+            kill!(user, proc, "ipc receive without replying to previous one")
         }
         let Some(message) = proc.messages.pop_front() else {
             return (None, 0, 0, None);
         };
         if let Err(err) = args.write_to_user(&message.args) {
-            kill!(hart, proc, "{err}")
+            kill!(user, proc, "{err}")
         };
         proc.currently_serving = Some(message.sender);
         (
@@ -289,25 +284,25 @@ impl SyscallHandler for () {
         )
     }
 
-    fn ipc_reply(_: usize, _: &mut RiscvRegisters, hart: &mut HartContext, result: UserPtr<[u8]>) {
-        let mut proc = hart.current_process();
+    fn ipc_reply(_: usize, _: &mut RiscvRegisters, user: &mut UserCtx, result: UserPtr<[u8]>) {
+        let mut proc = user.process();
         let Some(caller) = proc.currently_serving.take() else {
-            kill!(hart, proc, "ipc_reply called without matching ipc_serve")
+            kill!(user, proc, "ipc_reply called without matching ipc_serve")
         };
         let mut caller = get_process(caller).lock_if_some().unwrap();
         if let ProcessState::WaitingForReply { from } = caller.state {
             if from != Actor::Userspace(proc.id) {
-                kill!(hart, proc, "replied to process waiting for someone else");
+                kill!(user, proc, "replied to process waiting for someone else");
             }
             caller.state = ProcessState::ReadyReply {
                 reply: result.copy_to_kernel(),
             };
         } else if let ProcessState::WaitingForStreamMap { from } = caller.state {
             if from != Actor::Userspace(proc.id) {
-                kill!(hart, proc, "replied to process waiting for someone else");
+                kill!(user, proc, "replied to process waiting for someone else");
             }
             let Ok(stream) = postcard::from_bytes(&result.copy_to_kernel()) else {
-                kill!(hart, proc, "invalid stream map reply")
+                kill!(user, proc, "invalid stream map reply")
             };
             caller.state = ProcessState::ReadyStreamMap { stream };
         } else {
@@ -318,14 +313,14 @@ impl SyscallHandler for () {
     fn ipc_stream(
         user_pc: usize,
         registers: &mut RiscvRegisters,
-        hart: &mut HartContext,
+        user: &mut UserCtx,
         cap: RawCapability,
         stream: usize,
     ) -> (*mut (), usize) {
-        let mut proc = hart.current_process();
+        let mut proc = user.process();
         let cap = match cap.validate(proc.id) {
             Ok(cap) => cap,
-            Err(err) => kill!(hart, proc, "{err}"),
+            Err(err) => kill!(user, proc, "{err}"),
         };
         match cap.certifier() {
             Actor::Userspace(original_pid) => {
@@ -335,19 +330,19 @@ impl SyscallHandler for () {
                 {
                     let ring = match ring.validate(original_pid) {
                         Ok(ring) => ring,
-                        Err(err) => kill!(hart, proc, "{err}"),
+                        Err(err) => kill!(user, proc, "{err}"),
                     };
                     if ring.certifier() != Actor::Kernel {
-                        kill!(hart, proc, "non-kernel shared memory capability")
+                        kill!(user, proc, "non-kernel shared memory capability")
                     }
 
                     let handler = capability::get_handler(ring.local_index());
                     let (physical_address, length) = handler.shared_memory();
                     if !length.is_multiple_of(PAGE_SIZE) {
-                        kill!(hart, proc, "stream size must be a multiple of page size")
+                        kill!(user, proc, "stream size must be a multiple of page size")
                     }
                     if length < 2 * CACHE_LINE_SIZE + declared_size {
-                        kill!(hart, proc, "stream length does not match memory size")
+                        kill!(user, proc, "stream length does not match memory size")
                     }
 
                     let layout = Layout::from_size_align(length, PAGE_SIZE).unwrap();
@@ -373,12 +368,12 @@ impl SyscallHandler for () {
                         cap,
                         method: 1000 + stream,
                         args: Vec::new(),
-                        sender: hart.current_pid(),
+                        sender: user.pid,
                     });
 
                     drop(proc);
                     drop(dest);
-                    schedule_and_switch_to_userspace(hart);
+                    schedule_and_switch_to_userspace(user);
                 }
             }
             Actor::Kernel => {
@@ -401,10 +396,10 @@ impl SyscallHandler for () {
         }
     }
 
-    fn alloc(_: usize, _: &mut RiscvRegisters, hart: &mut HartContext, size: usize) -> *mut u8 {
+    fn alloc(_: usize, _: &mut RiscvRegisters, user: &mut UserCtx, size: usize) -> *mut u8 {
         let size = size.next_multiple_of(PAGE_SIZE);
         let layout = Layout::from_size_align(size, PAGE_SIZE).unwrap();
-        let mut proc = hart.current_process();
+        let mut proc = user.process();
         let table = unsafe { &mut *proc.page_table };
         let virt = proc.virtual_memory.alloc(layout).unwrap();
         let phys = virt_to_phys(Vec::leak(alloc_pages(size)).as_ptr()) as usize;
@@ -415,18 +410,18 @@ impl SyscallHandler for () {
     fn alloc_shared(
         _: usize,
         _: &mut RiscvRegisters,
-        hart: &mut HartContext,
+        user: &mut UserCtx,
         size: usize,
     ) -> (*mut u8, Capability<SharedMemory>) {
         let size = size.next_multiple_of(PAGE_SIZE);
         let layout = Layout::from_size_align(size, PAGE_SIZE).unwrap();
-        let mut proc = hart.current_process();
+        let mut proc = user.process();
         let table = unsafe { &mut *proc.page_table };
         let virt = proc.virtual_memory.alloc(layout).unwrap();
         let phys = virt_to_phys(Vec::leak(alloc_pages(size)).as_ptr()) as usize;
         map_pages(table, virt, phys, PageFlags::readwrite().user(), size);
         let cap = grant_kernel_capability(
-            hart.current_pid(),
+            user.pid,
             Box::leak(Box::new(shared_memory::SharedMemory {
                 physical_address: phys,
                 size,
@@ -438,16 +433,16 @@ impl SyscallHandler for () {
     fn map_shared(
         _: usize,
         _: &mut RiscvRegisters,
-        hart: &mut HartContext,
+        user: &mut UserCtx,
         cap: Capability<SharedMemory>,
     ) -> (*mut u8, usize) {
-        let mut proc = hart.current_process();
+        let mut proc = user.process();
         let cap = match cap.validate(proc.id) {
             Ok(cap) => cap,
-            Err(err) => kill!(hart, proc, "{err}"),
+            Err(err) => kill!(user, proc, "{err}"),
         };
         if cap.certifier() != Actor::Kernel {
-            kill!(hart, proc, "non-kernel shared memory capability")
+            kill!(user, proc, "non-kernel shared memory capability")
         }
 
         let handler = capability::get_handler(cap.local_index());
@@ -467,23 +462,23 @@ impl SyscallHandler for () {
         (virtual_addr as *mut u8, length)
     }
 
-    fn yield_(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut HartContext) {
-        let mut current_proc = hart.current_process();
+    fn yield_(user_pc: usize, registers: &mut RiscvRegisters, user: &mut UserCtx) {
+        let mut current_proc = user.process();
         current_proc.registers = registers.clone();
         current_proc.pc = user_pc + 4;
         drop(current_proc);
-        schedule_and_switch_to_userspace(hart);
+        schedule_and_switch_to_userspace(user);
     }
 
     fn log(
         _: usize,
         _: &mut RiscvRegisters,
-        hart: &mut HartContext,
+        user: &mut UserCtx,
         message: UserPtr<[u8]>,
         level: u64,
     ) {
         let Ok(text) = String::from_utf8(message.copy_to_kernel()) else {
-            kill!(hart, "invalid utf-8")
+            kill!(user, "invalid utf-8")
         };
         let level = match level {
             0 => Level::Error,
@@ -491,9 +486,9 @@ impl SyscallHandler for () {
             2 => Level::Info,
             3 => Level::Debug,
             4 => Level::Trace,
-            _ => kill!(hart, "invalid log level"),
+            _ => kill!(user, "invalid log level"),
         };
-        log_userspace(level, &hart.current_process(), &text);
+        log_userspace(level, &user.process(), &text);
     }
 }
 

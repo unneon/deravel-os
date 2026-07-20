@@ -1,8 +1,8 @@
-use crate::hart::HartContext;
+use crate::hart::UserCtx;
 use crate::page::satp;
 use crate::process::Process;
 use crate::sync::MutexGuard;
-use crate::{handle_kernel_trap, handle_trap, main};
+use crate::{handle_kernel_trap, handle_user_trap, main};
 use core::arch::{asm, naked_asm};
 use riscv::register::mtvec::TrapMode;
 use riscv::register::stvec::Stvec;
@@ -47,9 +47,10 @@ pub struct RiscvRegisters {
     pub t6: usize,
 }
 
+// These check the type of symbol used in naked assembly blocks for trap entry handlers. I don't
+// think there's a better way to type-check this.
 const _: fn(&mut RiscvRegisters) -> ! = handle_kernel_trap;
-
-const _: fn(&mut RiscvRegisters, &mut HartContext) -> ! = handle_trap;
+const _: fn(&mut RiscvRegisters, &mut UserCtx) -> ! = handle_user_trap;
 
 #[unsafe(link_section = ".text.boot")]
 #[unsafe(naked)]
@@ -68,8 +69,8 @@ pub fn enable_kernel_trap_handler() {
     unsafe { riscv::register::stvec::write(Stvec::new(address, TrapMode::Direct)) }
 }
 
-pub fn initialize_trap_handler() {
-    let address = trap_entry as *const () as usize;
+pub fn enable_user_trap_handler() {
+    let address = user_trap_entry as *const () as usize;
     unsafe { riscv::register::stvec::write(Stvec::new(address, TrapMode::Direct)) }
 }
 
@@ -90,6 +91,7 @@ pub fn switch_to_userspace_full(next: MutexGuard<Process>) -> ! {
 }
 
 pub fn switch_to_userspace_registers_only(registers: *const RiscvRegisters) -> ! {
+    enable_user_trap_handler();
     unsafe {
         asm!(
             "ld ra, 8 * 0(t6)",
@@ -178,8 +180,6 @@ unsafe extern "C" fn supervisor_trap_entry() -> ! {
         "sd t5, 8 * 29(sp)",
         "sd t6, 8 * 30(sp)",
 
-        // This assumes handle_kernel_trap has signature fn(&mut RiscvRegisters) -> !. It would be
-        // nice if it was possible to type-check that.
         "mv a0, sp",
         "j {handle_kernel_trap}",
 
@@ -188,7 +188,7 @@ unsafe extern "C" fn supervisor_trap_entry() -> ! {
 }
 
 #[unsafe(naked)]
-unsafe extern "C" fn trap_entry() -> ! {
+unsafe extern "C" fn user_trap_entry() -> ! {
     naked_asm!(
         ".align 4",
         "csrrw sp, sscratch, sp",
@@ -233,8 +233,8 @@ unsafe extern "C" fn trap_entry() -> ! {
         "mv a0, sp",
         "addi a1, sp, 8 * 32",
         "csrw sscratch, a1",
-        "j {handle_trap}",
+        "j {handle_user_trap}",
 
-        handle_trap = sym handle_trap,
+        handle_user_trap = sym handle_user_trap,
     )
 }

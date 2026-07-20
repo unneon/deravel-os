@@ -5,7 +5,7 @@ use crate::capability::{
 };
 use crate::device_tree::timebase_frequency;
 use crate::elf::load_elf;
-use crate::hart::HartContext;
+use crate::hart::UserCtx;
 use crate::heap::BuddyHeap;
 use crate::heap::granularity::PageGranular;
 use crate::page::{
@@ -25,7 +25,7 @@ use deravel_types::*;
 use log::*;
 
 pub macro kill {
-    ($hart:ident, $proc:expr, $($tt:tt)*) => {
+    ($user:ident, $proc:expr, $($tt:tt)*) => {
         {
             let mut proc = $proc;
             let pid = proc.id;
@@ -33,11 +33,11 @@ pub macro kill {
             error!("killed {name}{pid:?}, {}", format_args!($($tt)*));
             proc.state = ProcessState::Finished;
             drop(proc);
-            crate::schedule_and_switch_to_userspace($hart)
+            crate::schedule_and_switch_to_userspace($user)
         }
     },
-    ($hart:ident, $($tt:tt)*) => {
-        kill!($hart, $hart.current_process(), $($tt)*)
+    ($user:ident, $($tt:tt)*) => {
+        kill!($user, $user.process(), $($tt)*)
     }
 }
 
@@ -230,18 +230,18 @@ fn find_free_process_slot() -> Option<(ProcessId, MutexGuard<'static, Option<Pro
     None
 }
 
-pub fn schedule_and_switch_to_userspace(hart: &mut HartContext) -> ! {
-    let Some(next) = find_runnable_process(hart) else {
+pub fn schedule_and_switch_to_userspace(user: &mut UserCtx) -> ! {
+    let Some(next) = find_runnable_process(Some(user)) else {
         shutdown()
     };
-    hart.set_current_pid(next.id);
+    user.pid = next.id;
 
     switch_to_userspace_full(next);
 }
 
-pub fn find_runnable_process(hart: &HartContext) -> Option<MutexGuard<'static, Process>> {
-    let scan_start = match hart.try_current_pid() {
-        Some(current) => current.as_u16() + 1,
+pub fn find_runnable_process(user: Option<&UserCtx>) -> Option<MutexGuard<'static, Process>> {
+    let scan_start = match user {
+        Some(hart) => hart.pid.as_u16() + 1,
         None => 0,
     };
 

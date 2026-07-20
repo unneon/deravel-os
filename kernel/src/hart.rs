@@ -4,33 +4,21 @@ use alloc::boxed::Box;
 use deravel_types::ProcessId;
 
 #[repr(align(16))]
-pub struct HartContext {
-    current_pid: Option<ProcessId>,
+pub struct UserCtx {
+    pub pid: ProcessId,
 }
 
 #[repr(C, align(4096))]
 pub struct HartStack {
-    data: [u8; STACK_SIZE - size_of::<HartContext>().next_multiple_of(16)],
-    ctx: HartContext,
+    data: [u8; STACK_SIZE - size_of::<UserCtx>().next_multiple_of(16)],
+    ctx: UserCtx,
 }
 
 const STACK_SIZE: usize = 128 * 1024;
 
-impl HartContext {
-    pub fn try_current_pid(&self) -> Option<ProcessId> {
-        self.current_pid
-    }
-
-    pub fn current_pid(&self) -> ProcessId {
-        self.current_pid.unwrap()
-    }
-
-    pub fn current_process(&self) -> MutexGuard<'_, Process> {
-        get_process(self.current_pid()).lock_if_some().unwrap()
-    }
-
-    pub fn set_current_pid(&mut self, pid: ProcessId) {
-        self.current_pid = Some(pid);
+impl UserCtx {
+    pub fn process(&self) -> MutexGuard<'_, Process> {
+        get_process(self.pid).lock_if_some().unwrap()
     }
 }
 
@@ -39,7 +27,7 @@ impl HartStack {
         unsafe { Box::new_zeroed().assume_init() }
     }
 
-    pub fn as_raw_ctx(&mut self) -> *mut HartContext {
+    pub fn as_raw_ctx(&mut self) -> *mut UserCtx {
         &raw mut self.ctx
     }
 }

@@ -135,7 +135,7 @@ fn generate_syscall_trait(drvli: &Drvli, out: &mut String) {
     writeln!(out, "pub trait SyscallHandler {{").unwrap();
     for syscall in &drvli.syscalls {
         let syscall_name = rust_escape_name(syscall.name);
-        write!(out, "    fn {syscall_name}(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut HartContext").unwrap();
+        write!(out, "    fn {syscall_name}(user_pc: usize, registers: &mut RiscvRegisters, user: &mut UserCtx").unwrap();
         for (arg_name, arg_type) in &syscall.args {
             let arg_type = arg_type.rust(SyscallKernelArg);
             write!(out, ", {arg_name}: {arg_type}").unwrap();
@@ -166,7 +166,7 @@ fn generate_syscall_trait(drvli: &Drvli, out: &mut String) {
 }
 
 fn generate_syscall_dispatch(drvli: &Drvli, out: &mut String) {
-    writeln!(out, "pub fn dispatch_syscall(user_pc: usize, registers: &mut RiscvRegisters, hart: &mut HartContext) -> Result<!, UserSyscallError> {{").unwrap();
+    writeln!(out, "pub fn dispatch_syscall(user_pc: usize, registers: &mut RiscvRegisters, user: &mut UserCtx) -> Result<!, UserSyscallError> {{").unwrap();
     writeln!(out, "    #![allow(clippy::diverging_sub_expression)]").unwrap();
     writeln!(out, "    match registers.a6 {{").unwrap();
     for (syscall_number, syscall) in drvli.syscalls.iter().enumerate() {
@@ -174,7 +174,7 @@ fn generate_syscall_dispatch(drvli: &Drvli, out: &mut String) {
         writeln!(out, "        {syscall_number} => {{").unwrap();
         write!(
             out,
-            "            let _result = <() as SyscallHandler>::{syscall_name}(user_pc, registers, hart").unwrap();
+            "            let _result = <() as SyscallHandler>::{syscall_name}(user_pc, registers, user").unwrap();
         let mut used_arg_registers = 0;
         for (arg_name, arg_type) in &syscall.args {
             let value = match arg_type {
