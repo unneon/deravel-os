@@ -1,18 +1,24 @@
 use crate::page::entry::{PageTableEntry, PageTableEntryUnpacked};
-use crate::page::{MAX_PHYSICAL_ADDR, PageFlags, phys_to_virt, virt_to_phys};
+use crate::page::{
+    LEVEL_2_PAGE_SIZE, MAX_PHYSICAL_ADDR, PAGE_TABLE_ENTRY_COUNT, PageFlags, phys_to_virt,
+    virt_to_phys,
+};
 use alloc::boxed::Box;
 use deravel_types::PAGE_SIZE;
 
 #[repr(align(4096))]
-pub struct PageTable<const LEVEL: usize>(
-    pub [PageTableEntry<LEVEL>; PAGE_SIZE / size_of::<usize>()],
-);
+pub struct PageTable<const LEVEL: usize>([PageTableEntry<LEVEL>; PAGE_TABLE_ENTRY_COUNT]);
 
 pub type TopPageTable = PageTable<2>;
 
 impl<const LEVEL: usize> PageTable<LEVEL> {
     pub const fn new() -> PageTable<LEVEL> {
         PageTable([PageTableEntry(0); _])
+    }
+
+    fn map_entry(&mut self, vpn_segment: usize, entry: PageTableEntry<LEVEL>) {
+        assert!(!self.0[vpn_segment].is_valid());
+        self.0[vpn_segment] = entry;
     }
 
     unsafe fn get_or_create_indirect(
@@ -34,10 +40,10 @@ impl<const LEVEL: usize> PageTable<LEVEL> {
 }
 
 impl TopPageTable {
-    pub fn map_page(&mut self, virtual_addr: usize, physical_addr: usize, flags: PageFlags) {
+    pub fn map_page(&mut self, virtual_addr: usize, phys: usize, virt: PageFlags) {
         assert!(virtual_addr.is_multiple_of(PAGE_SIZE));
-        assert!(physical_addr.is_multiple_of(PAGE_SIZE));
-        assert!(physical_addr < MAX_PHYSICAL_ADDR);
+        assert!(phys.is_multiple_of(PAGE_SIZE));
+        assert!(phys < MAX_PHYSICAL_ADDR);
 
         let vpn2 = (virtual_addr >> 30) & ((1 << 9) - 1);
         let table1 = unsafe { self.get_or_create_indirect(vpn2) };
@@ -45,8 +51,16 @@ impl TopPageTable {
         let table0 = unsafe { table1.get_or_create_indirect(vpn1) };
 
         let vpn0 = (virtual_addr >> 12) & ((1 << 9) - 1);
-        assert!(!table0.0[vpn0].is_valid());
-        table0.0[vpn0] = PageTableEntry::leaf(physical_addr, flags);
+        table0.map_entry(vpn0, PageTableEntry::leaf(phys, virt));
+    }
+
+    pub fn map_level_2_page(&mut self, virt: usize, phys: usize, flags: PageFlags) {
+        assert!(virt.is_multiple_of(LEVEL_2_PAGE_SIZE));
+        assert!(phys.is_multiple_of(LEVEL_2_PAGE_SIZE));
+        assert!(phys < MAX_PHYSICAL_ADDR);
+
+        let vpn2 = (virt >> 30) & ((1 << 9) - 1);
+        self.map_entry(vpn2, PageTableEntry::leaf(phys, flags));
     }
 }
 

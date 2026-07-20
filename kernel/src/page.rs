@@ -5,9 +5,8 @@ use core::ops::Range;
 pub use entry::PageFlags;
 pub use table::{PageTable, TopPageTable};
 
-use crate::page::entry::PageTableEntry;
 use crate::util::address::Address;
-use deravel_types::{LEVEL_2_PAGE_SIZE, PAGE_SIZE};
+use deravel_types::PAGE_SIZE;
 use riscv::register::satp::{Mode, Satp};
 
 #[derive(Clone)]
@@ -17,12 +16,18 @@ pub struct Page(pub [u8; 4096]);
 #[repr(C, align(4096))]
 pub struct PageAligned<T>(pub T);
 
+const PAGE_TABLE_ENTRY_COUNT: usize = PAGE_SIZE / size_of::<usize>();
+
+const LEVEL_0_PAGE_SIZE: usize = PAGE_SIZE;
+const LEVEL_1_PAGE_SIZE: usize = PAGE_TABLE_ENTRY_COUNT * LEVEL_0_PAGE_SIZE;
+const LEVEL_2_PAGE_SIZE: usize = PAGE_TABLE_ENTRY_COUNT * LEVEL_1_PAGE_SIZE;
+
 const DIRECT_MAPPING_START: usize = MAX_VIRTUAL_ADDR / 2;
 const DIRECT_MAPPING_END: usize = MAX_VIRTUAL_ADDR;
 const DIRECT_MAPPING_SIZE: usize = DIRECT_MAPPING_END - DIRECT_MAPPING_START;
 
 const MAX_PHYSICAL_ADDR: usize = DIRECT_MAPPING_SIZE;
-const MAX_VIRTUAL_ADDR: usize = LEVEL_2_PAGE_SIZE * (PAGE_SIZE / size_of::<usize>());
+const MAX_VIRTUAL_ADDR: usize = LEVEL_2_PAGE_SIZE * PAGE_TABLE_ENTRY_COUNT;
 
 unsafe extern "C" {
     static image_start: u8;
@@ -49,12 +54,9 @@ pub fn initialize_memory_mapping() {
 }
 
 pub fn map_direct_mapping(table: &mut TopPageTable) {
-    let pages_per_level = table.0.len();
-    let total_pages = pages_per_level.pow(3);
-    let total_identity_mapped = total_pages / 2;
-    let virtual_addr = total_identity_mapped * PAGE_SIZE;
-    let size = total_identity_mapped * PAGE_SIZE;
-    map_pages(table, virtual_addr, 0, PageFlags::readwrite(), size);
+    let virt = DIRECT_MAPPING_START;
+    let size = DIRECT_MAPPING_SIZE;
+    map_pages(table, virt, 0, PageFlags::readwrite(), size);
 }
 
 pub fn map_kernel_image(table: &mut TopPageTable) {
@@ -99,8 +101,7 @@ pub fn map_pages(
         table.map_page(v, physical_start + (v - virtual_start), flags);
     }
     for v in l2p_aligned.step_by(LEVEL_2_PAGE_SIZE) {
-        table.0[v / LEVEL_2_PAGE_SIZE] =
-            PageTableEntry::leaf(physical_start + (v - virtual_start), flags);
+        table.map_level_2_page(v, physical_start + (v - virtual_start), flags);
     }
     for v in suffix.step_by(PAGE_SIZE) {
         table.map_page(v, physical_start + (v - virtual_start), flags);
