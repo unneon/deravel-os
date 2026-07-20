@@ -14,6 +14,7 @@ use crate::page::{
 use crate::shutdown;
 use crate::stack::UserCtx;
 use crate::sync::{Mutex, MutexGuard};
+use crate::user::UserPtr;
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::vec;
@@ -41,15 +42,25 @@ pub macro kill {
     }
 }
 
+#[derive(Debug, Eq, PartialEq)]
 pub enum ProcessState {
     Runnable,
     Finished,
     Reserved,
-    WaitingForReply { from: Actor },
-    WaitingForStreamMap { from: Actor },
-    ReadyReply { reply: Vec<u8> },
-    ReadyStreamMap { stream: (RawCapability, usize) },
-    Transitional,
+    WaitingForReply {
+        from: Actor,
+        result_buffer: UserPtr<[u8]>,
+    },
+    WaitingForStreamMap {
+        from: Actor,
+    },
+    ReadyReply {
+        reply: Vec<u8>,
+        result_buffer: UserPtr<[u8]>,
+    },
+    ReadyStreamMap {
+        stream: (RawCapability, usize),
+    },
 }
 
 pub struct Process {
@@ -236,8 +247,9 @@ pub fn schedule_and_switch_to_userspace(user: &mut UserCtx) -> ! {
         shutdown()
     };
     user.set_process(&mut next);
-
-    switch_to_user(next);
+    let Err(err) = switch_to_user(next);
+    // TODO: Refactor recursion away.
+    kill!(user, "{err}");
 }
 
 pub fn find_runnable_process(user: Option<&UserCtx>) -> Option<MutexGuard<'static, Process>> {
@@ -265,7 +277,7 @@ pub fn find_runnable_process(user: Option<&UserCtx>) -> Option<MutexGuard<'stati
 }
 
 pub fn inspect_can_progress(proc: &mut Process) {
-    if let ProcessState::WaitingForReply { from } | ProcessState::WaitingForStreamMap { from } =
+    if let ProcessState::WaitingForReply { from, .. } | ProcessState::WaitingForStreamMap { from } =
         &proc.state
         && let Actor::Userspace(from) = from
     {

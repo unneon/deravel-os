@@ -64,7 +64,6 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::alloc::Layout;
-use core::mem::replace;
 use core::panic::PanicInfo;
 use deravel_types::memory::USER_STACK_GUARD;
 use deravel_types::*;
@@ -200,56 +199,44 @@ impl SyscallHandler for () {
         mut result_buffer: UserPtr<[u8]>,
     ) -> usize {
         let mut proc = user.process();
-        if let ProcessState::ReadyReply { reply } =
-            replace(&mut proc.state, ProcessState::Transitional)
-        {
-            if let Err(err) = result_buffer.write_to_user(&reply) {
-                proc.state = ProcessState::Finished;
-                kill!(user, proc, "{err}")
-            };
-            proc.state = ProcessState::Runnable;
-            reply.len()
-        } else {
-            let cap = match cap.validate(proc.id) {
-                Ok(cap) => cap,
-                Err(err) => kill!(user, proc, "{err}"),
-            };
+        let cap = match cap.validate(proc.id) {
+            Ok(cap) => cap,
+            Err(err) => kill!(user, proc, "{err}"),
+        };
 
-            proc.state = ProcessState::WaitingForReply {
-                from: cap.certifier(),
-            };
-            proc.pc = user_pc;
+        match cap.certifier() {
+            Actor::Userspace(dest) => {
+                let Some(mut dest) = get_process(dest).lock_if_some() else {
+                    // This can't actually happen because capability validation will catch this
+                    // earlier, but let's check in case the design changes later.
+                    kill!(user, proc, "ipc send to nonexistent process");
+                };
 
-            match cap.certifier() {
-                Actor::Userspace(dest) => {
-                    let Some(mut dest) = get_process(dest).lock_if_some() else {
-                        // This can't actually happen because capability validation will catch this
-                        // earlier, but let's check in case the design changes later.
-                        kill!(user, proc, "ipc send to nonexistent process");
-                    };
+                proc.state = ProcessState::WaitingForReply {
+                    from: cap.certifier(),
+                    result_buffer,
+                };
+                proc.pc = user_pc + 4;
 
-                    dest.messages.push_back(Message {
-                        cap,
-                        method,
-                        args: args_buffer.copy_to_kernel(),
-                        sender: user.pid(),
-                    });
+                dest.messages.push_back(Message {
+                    cap,
+                    method,
+                    args: args_buffer.copy_to_kernel(),
+                    sender: user.pid(),
+                });
 
-                    drop(proc);
-                    drop(dest);
-                    schedule_and_switch_to_userspace(user);
-                }
-                Actor::Kernel => {
-                    drop(proc);
-                    let handler = capability::get_handler(cap.local_index());
-                    let result =
-                        handler.call_method(method, &args_buffer.copy_to_kernel(), user.pid());
-                    if let Err(err) = result_buffer.write_to_user(&result) {
-                        kill!(user, "{err}")
-                    };
-                    user.process().state = ProcessState::Runnable;
-                    result.len()
-                }
+                drop(proc);
+                drop(dest);
+                schedule_and_switch_to_userspace(user);
+            }
+            Actor::Kernel => {
+                drop(proc);
+                let handler = capability::get_handler(cap.local_index());
+                let result = handler.call_method(method, &args_buffer.copy_to_kernel(), user.pid());
+                if let Err(err) = result_buffer.write_to_user(&result) {
+                    kill!(user, "{err}")
+                };
+                result.len()
             }
         }
     }
@@ -284,12 +271,17 @@ impl SyscallHandler for () {
             kill!(user, proc, "ipc_reply called without matching ipc_serve")
         };
         let mut caller = get_process(caller).lock_if_some().unwrap();
-        if let ProcessState::WaitingForReply { from } = caller.state {
-            if from != Actor::Userspace(proc.id) {
+        if let ProcessState::WaitingForReply {
+            from,
+            result_buffer,
+        } = &caller.state
+        {
+            if *from != Actor::Userspace(proc.id) {
                 kill!(user, proc, "replied to process waiting for someone else");
             }
             caller.state = ProcessState::ReadyReply {
                 reply: result.copy_to_kernel(),
+                result_buffer: result_buffer.clone(),
             };
         } else if let ProcessState::WaitingForStreamMap { from } = caller.state {
             if from != Actor::Userspace(proc.id) {

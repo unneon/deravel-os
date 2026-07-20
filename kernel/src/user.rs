@@ -11,6 +11,7 @@ use deravel_types::InvalidCapabilityError;
 
 pub unsafe trait SafeUserType {}
 
+#[derive(Debug, Eq, PartialEq)]
 pub struct UserPtr<T: ?Sized>(NonNull<T>);
 
 pub struct UserPtrInvalid;
@@ -61,6 +62,12 @@ impl<T: SafeUserType> UserPtr<[T]> {
 }
 
 unsafe impl SafeUserType for u8 {}
+
+impl<T: ?Sized> Clone for UserPtr<T> {
+    fn clone(&self) -> Self {
+        Self(self.0)
+    }
+}
 
 impl From<InvalidCapabilityError> for UserSyscallError {
     fn from(err: InvalidCapabilityError) -> UserSyscallError {

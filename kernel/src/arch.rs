@@ -1,9 +1,11 @@
 use crate::page::satp;
-use crate::process::Process;
+use crate::process::{Process, ProcessState};
 use crate::stack::UserCtx;
 use crate::sync::MutexGuard;
+use crate::user::UserSliceTooSmall;
 use crate::{handle_kernel_trap, handle_user_trap, main};
 use core::arch::{asm, naked_asm};
+use log::warn;
 use riscv::register::mtvec::TrapMode;
 use riscv::register::stvec::Stvec;
 
@@ -73,11 +75,24 @@ pub fn enable_user_trap_handler() {
     unsafe { riscv::register::stvec::write(Stvec::new(address, TrapMode::Direct)) }
 }
 
-pub fn switch_to_user(next: MutexGuard<Process>) -> ! {
+pub fn switch_to_user(mut next: MutexGuard<Process>) -> Result<!, UserSliceTooSmall> {
     unsafe { riscv::register::satp::write(satp(next.page_table)) };
 
     // SFENCE.VMA is required after SATP write. (RISC-V Privileged 12.2.1).
     riscv::asm::sfence_vma_all();
+
+    match &mut next.state {
+        ProcessState::Runnable => {}
+        ProcessState::ReadyReply {
+            reply,
+            result_buffer,
+        } => {
+            result_buffer.write_to_user(reply)?;
+            next.registers.a0 = reply.len();
+            next.state = ProcessState::Runnable;
+        }
+        _ => warn!("switching to process with state {:?}", next.state),
+    }
 
     unsafe { riscv::register::sepc::write(next.pc) };
     let mut status = riscv::register::sstatus::read();

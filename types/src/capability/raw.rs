@@ -64,6 +64,14 @@ impl RawCapability {
     }
 }
 
+impl Eq for RawCapability {}
+
+impl PartialEq for RawCapability {
+    fn eq(&self, other: &Self) -> bool {
+        core::ptr::eq(self.0, other.0)
+    }
+}
+
 impl core::fmt::Display for CapabilityError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{:?} claimed {:?}", self.1, self.0)?;
