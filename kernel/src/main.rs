@@ -40,7 +40,10 @@ mod user;
 mod util;
 mod virtio;
 
-use crate::arch::{RiscvRegisters, initialize_trap_handler, switch_to_userspace_registers_only};
+use crate::arch::{
+    RiscvRegisters, enable_kernel_trap_handler, initialize_trap_handler,
+    switch_to_userspace_registers_only,
+};
 use crate::capability::{grant_kernel_capability, reserve_kernel_capability};
 use crate::device_tree::initialize_timebase_frequency;
 use crate::drvli::{ShutdownServer, SyscallHandler, dispatch_syscall};
@@ -84,14 +87,15 @@ fn main(_hart_id: u64, dt_ptr: *const u8) -> ! {
     clear_bss();
 
     initialize_log();
+    enable_kernel_trap_handler();
     initialize_early_heap();
-    initialize_hart_stack();
-    initialize_trap_handler();
     initialize_memory_mapping();
     let dt = unsafe { Fdt::from_ptr(phys_to_virt(dt_ptr)) }.unwrap();
     initialize_timebase_frequency(&dt);
     log_sbi_metadata();
     initialize_heap(&dt, dt_ptr);
+    initialize_hart_stack();
+    initialize_trap_handler();
     let (virtio_blk, virtio_net, virtio_gpu, virtio_keyboard, virtio_mouse) =
         initialize_all_pci(&dt);
     initialize_plic(&dt);
@@ -144,6 +148,15 @@ fn enable_interrupts() {
     unsafe { riscv::register::sie::write(sie) }
 
     unsafe { riscv::register::sstatus::set_sie() }
+}
+
+fn handle_kernel_trap(_: &mut RiscvRegisters) -> ! {
+    let scause = riscv::register::scause::read()
+        .cause()
+        .try_into::<Interrupt, Exception>();
+    let stval = riscv::register::stval::read();
+    let pc = riscv::register::sepc::read();
+    panic!("unexpected kernel trap, scause {scause:?} stval {stval:#x} pc {pc:#x}");
 }
 
 fn handle_trap(registers: &mut RiscvRegisters, hart: &mut HartContext) -> ! {

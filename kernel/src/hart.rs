@@ -14,7 +14,7 @@ pub struct HartStack {
     ctx: HartContext,
 }
 
-const STACK_SIZE: usize = 128 * 4096;
+const STACK_SIZE: usize = 128 * 1024;
 
 impl HartContext {
     pub fn try_current_pid(&self) -> Option<ProcessId> {

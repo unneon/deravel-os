@@ -1,7 +1,8 @@
+use crate::hart::HartContext;
 use crate::page::satp;
 use crate::process::Process;
 use crate::sync::MutexGuard;
-use crate::{handle_trap, main};
+use crate::{handle_kernel_trap, handle_trap, main};
 use core::arch::{asm, naked_asm};
 use riscv::register::mtvec::TrapMode;
 use riscv::register::stvec::Stvec;
@@ -11,7 +12,7 @@ unsafe extern "C" {
 }
 
 #[repr(C)]
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct RiscvRegisters {
     pub ra: usize,
     pub sp: usize,
@@ -46,6 +47,10 @@ pub struct RiscvRegisters {
     pub t6: usize,
 }
 
+const _: fn(&mut RiscvRegisters) -> ! = handle_kernel_trap;
+
+const _: fn(&mut RiscvRegisters, &mut HartContext) -> ! = handle_trap;
+
 #[unsafe(link_section = ".text.boot")]
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
@@ -56,6 +61,11 @@ unsafe extern "C" fn _start() -> ! {
         stack_top = sym stack_top,
         main = sym main,
     )
+}
+
+pub fn enable_kernel_trap_handler() {
+    let address = supervisor_trap_entry as *const () as usize;
+    unsafe { riscv::register::stvec::write(Stvec::new(address, TrapMode::Direct)) }
 }
 
 pub fn initialize_trap_handler() {
@@ -118,6 +128,63 @@ pub fn switch_to_userspace_registers_only(registers: *const RiscvRegisters) -> !
             options(noreturn),
         )
     }
+}
+
+#[unsafe(naked)]
+unsafe extern "C" fn supervisor_trap_entry() -> ! {
+    naked_asm!(
+        ".align 4",
+
+        // TODO: Handle kernel stack overflow guard pages once I add them,
+
+        // As this trap was triggered while in supervisor mode, sp is as trustworthy as sscratch so
+        // we might as well use it to avoid complexity. We can also assume it is 16-byte aligend as
+        // per the RISC-V ABI. So, let's store the registers immediately below the stack (this also
+        // assumes no red zone, which is true on this target).
+
+        "addi sp, sp, -8 * 32",
+        "sd ra, 8 * 0(sp)",
+
+        "addi ra, sp, 8 * 32",
+        "sd ra, 8 * 1(sp)",
+
+        "sd gp, 8 * 2(sp)",
+        "sd tp, 8 * 3(sp)",
+        "sd t0, 8 * 4(sp)",
+        "sd t1, 8 * 5(sp)",
+        "sd t2, 8 * 6(sp)",
+        "sd s0, 8 * 7(sp)",
+        "sd s1, 8 * 8(sp)",
+        "sd a0, 8 * 9(sp)",
+        "sd a1, 8 * 10(sp)",
+        "sd a2, 8 * 11(sp)",
+        "sd a3, 8 * 12(sp)",
+        "sd a4, 8 * 13(sp)",
+        "sd a5, 8 * 14(sp)",
+        "sd a6, 8 * 15(sp)",
+        "sd a7, 8 * 16(sp)",
+        "sd s2, 8 * 17(sp)",
+        "sd s3, 8 * 18(sp)",
+        "sd s4, 8 * 19(sp)",
+        "sd s5, 8 * 20(sp)",
+        "sd s6, 8 * 21(sp)",
+        "sd s7, 8 * 22(sp)",
+        "sd s8, 8 * 23(sp)",
+        "sd s9, 8 * 24(sp)",
+        "sd s10, 8 * 25(sp)",
+        "sd s11, 8 * 26(sp)",
+        "sd t3, 8 * 27(sp)",
+        "sd t4, 8 * 28(sp)",
+        "sd t5, 8 * 29(sp)",
+        "sd t6, 8 * 30(sp)",
+
+        // This assumes handle_kernel_trap has signature fn(&mut RiscvRegisters) -> !. It would be
+        // nice if it was possible to type-check that.
+        "mv a0, sp",
+        "j {handle_kernel_trap}",
+
+        handle_kernel_trap = sym handle_kernel_trap,
+    )
 }
 
 #[unsafe(naked)]
