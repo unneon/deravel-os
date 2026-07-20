@@ -56,6 +56,7 @@ pub struct Process {
     pub id: ProcessId,
     pub name: &'static str,
     pub state: ProcessState,
+    // TODO: This gets overwritten on user trap, should have a wrapper type.
     pub registers: RiscvRegisters,
     pub pc: usize,
     pub page_table: *mut TopPageTable,
@@ -231,17 +232,17 @@ fn find_free_process_slot() -> Option<(ProcessId, MutexGuard<'static, Option<Pro
 }
 
 pub fn schedule_and_switch_to_userspace(user: &mut UserCtx) -> ! {
-    let Some(next) = find_runnable_process(Some(user)) else {
+    let Some(mut next) = find_runnable_process(Some(user)) else {
         shutdown()
     };
-    user.pid = next.id;
+    user.set_process(&mut next);
 
     switch_to_userspace_full(next);
 }
 
 pub fn find_runnable_process(user: Option<&UserCtx>) -> Option<MutexGuard<'static, Process>> {
     let scan_start = match user {
-        Some(hart) => hart.pid.as_u16() + 1,
+        Some(hart) => hart.pid().as_u16() + 1,
         None => 0,
     };
 

@@ -1,3 +1,4 @@
+use crate::arch::RiscvRegisters;
 use crate::process::{Process, get_process};
 use crate::sync::MutexGuard;
 use alloc::boxed::Box;
@@ -9,16 +10,26 @@ struct KernelStack {
     ctx: UserCtx,
 }
 
-#[repr(align(16))]
+#[repr(C, align(16))]
 pub struct UserCtx {
-    pub pid: ProcessId,
+    pid: ProcessId,
+    registers: *mut RiscvRegisters,
 }
 
 const STACK_SIZE: usize = 32 * 1024;
 
 impl UserCtx {
+    pub fn pid(&self) -> ProcessId {
+        self.pid
+    }
+
     pub fn process(&self) -> MutexGuard<'_, Process> {
         get_process(self.pid).lock_if_some().unwrap()
+    }
+
+    pub fn set_process(&mut self, process: &mut Process) {
+        self.pid = process.id;
+        self.registers = &raw mut process.registers;
     }
 }
 

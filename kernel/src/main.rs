@@ -151,19 +151,21 @@ fn handle_kernel_trap(_: &mut RiscvRegisters) -> ! {
     panic!("unexpected kernel trap, scause {scause:?} stval {stval:#x} pc {pc:#x}");
 }
 
-fn handle_user_trap(registers: &mut RiscvRegisters, user: &mut UserCtx) -> ! {
+fn handle_user_trap(user: &mut UserCtx) -> ! {
     enable_kernel_trap_handler();
     let scause = riscv::register::scause::read()
         .cause()
         .try_into::<Interrupt, Exception>();
     let stval = riscv::register::stval::read();
     let user_pc = riscv::register::sepc::read();
+    // TODO: Don't copy this to the stack.
+    let mut registers = user.process().registers.clone();
     if scause == Ok(Trap::Exception(Exception::UserEnvCall)) {
-        let Err(err) = dispatch_syscall(user_pc, registers, user);
+        let Err(err) = dispatch_syscall(user_pc, &mut registers, user);
         kill!(user, "{err}");
     } else if scause == Ok(Trap::Interrupt(Interrupt::SupervisorTimer)) {
         sbi::set_timer(u64::MAX);
-        switch_to_userspace_registers_only(registers)
+        switch_to_userspace_registers_only(&registers)
     } else if scause == Ok(Trap::Interrupt(Interrupt::SupervisorExternal)) {
         let irq = plic_claim();
         for ie in &INTERRUPTS {
@@ -175,7 +177,7 @@ fn handle_user_trap(registers: &mut RiscvRegisters, user: &mut UserCtx) -> ! {
             }
         }
         plic_complete(irq);
-        switch_to_userspace_registers_only(registers)
+        switch_to_userspace_registers_only(&registers)
     } else if USER_STACK_GUARD.contains(&stval) {
         kill!(user, "stack overflow")
     } else {
@@ -184,14 +186,13 @@ fn handle_user_trap(registers: &mut RiscvRegisters, user: &mut UserCtx) -> ! {
 }
 
 impl SyscallHandler for () {
-    fn exit(_: usize, _: &mut RiscvRegisters, user: &mut UserCtx) -> ! {
+    fn exit(_: usize, user: &mut UserCtx) -> ! {
         user.process().state = ProcessState::Finished;
         schedule_and_switch_to_userspace(user);
     }
 
     fn ipc_call(
         user_pc: usize,
-        registers: &mut RiscvRegisters,
         user: &mut UserCtx,
         cap: RawCapability,
         method: usize,
@@ -217,7 +218,6 @@ impl SyscallHandler for () {
             proc.state = ProcessState::WaitingForReply {
                 from: cap.certifier(),
             };
-            proc.registers = registers.clone();
             proc.pc = user_pc;
 
             match cap.certifier() {
@@ -232,7 +232,7 @@ impl SyscallHandler for () {
                         cap,
                         method,
                         args: args_buffer.copy_to_kernel(),
-                        sender: user.pid,
+                        sender: user.pid(),
                     });
 
                     drop(proc);
@@ -243,7 +243,7 @@ impl SyscallHandler for () {
                     drop(proc);
                     let handler = capability::get_handler(cap.local_index());
                     let result =
-                        handler.call_method(method, &args_buffer.copy_to_kernel(), user.pid);
+                        handler.call_method(method, &args_buffer.copy_to_kernel(), user.pid());
                     if let Err(err) = result_buffer.write_to_user(&result) {
                         kill!(user, "{err}")
                     };
@@ -256,7 +256,6 @@ impl SyscallHandler for () {
 
     fn ipc_receive(
         _: usize,
-        _: &mut RiscvRegisters,
         user: &mut UserCtx,
         mut args: UserPtr<[u8]>,
     ) -> (Option<RawCapability>, usize, usize, Option<ProcessId>) {
@@ -279,7 +278,7 @@ impl SyscallHandler for () {
         )
     }
 
-    fn ipc_reply(_: usize, _: &mut RiscvRegisters, user: &mut UserCtx, result: UserPtr<[u8]>) {
+    fn ipc_reply(_: usize, user: &mut UserCtx, result: UserPtr<[u8]>) {
         let mut proc = user.process();
         let Some(caller) = proc.currently_serving.take() else {
             kill!(user, proc, "ipc_reply called without matching ipc_serve")
@@ -307,7 +306,6 @@ impl SyscallHandler for () {
 
     fn ipc_stream(
         user_pc: usize,
-        registers: &mut RiscvRegisters,
         user: &mut UserCtx,
         cap: RawCapability,
         stream: usize,
@@ -356,14 +354,13 @@ impl SyscallHandler for () {
                     proc.state = ProcessState::WaitingForStreamMap {
                         from: original_pid.into(),
                     };
-                    proc.registers = registers.clone();
                     proc.pc = user_pc;
                     let mut dest = get_process(original_pid).lock_if_some().unwrap();
                     dest.messages.push_back(Message {
                         cap,
                         method: 1000 + stream,
                         args: Vec::new(),
-                        sender: user.pid,
+                        sender: user.pid(),
                     });
 
                     drop(proc);
@@ -391,7 +388,7 @@ impl SyscallHandler for () {
         }
     }
 
-    fn alloc(_: usize, _: &mut RiscvRegisters, user: &mut UserCtx, size: usize) -> *mut u8 {
+    fn alloc(_: usize, user: &mut UserCtx, size: usize) -> *mut u8 {
         let size = size.next_multiple_of(PAGE_SIZE);
         let layout = Layout::from_size_align(size, PAGE_SIZE).unwrap();
         let mut proc = user.process();
@@ -404,7 +401,6 @@ impl SyscallHandler for () {
 
     fn alloc_shared(
         _: usize,
-        _: &mut RiscvRegisters,
         user: &mut UserCtx,
         size: usize,
     ) -> (*mut u8, Capability<SharedMemory>) {
@@ -416,7 +412,7 @@ impl SyscallHandler for () {
         let phys = virt_to_phys(Vec::leak(alloc_pages(size)).as_ptr()) as usize;
         map_pages(table, virt, phys, PageFlags::readwrite().user(), size);
         let cap = grant_kernel_capability(
-            user.pid,
+            user.pid(),
             Box::leak(Box::new(shared_memory::SharedMemory {
                 physical_address: phys,
                 size,
@@ -425,12 +421,7 @@ impl SyscallHandler for () {
         (virt as *mut u8, cap)
     }
 
-    fn map_shared(
-        _: usize,
-        _: &mut RiscvRegisters,
-        user: &mut UserCtx,
-        cap: Capability<SharedMemory>,
-    ) -> (*mut u8, usize) {
+    fn map_shared(_: usize, user: &mut UserCtx, cap: Capability<SharedMemory>) -> (*mut u8, usize) {
         let mut proc = user.process();
         let cap = match cap.validate(proc.id) {
             Ok(cap) => cap,
@@ -457,21 +448,14 @@ impl SyscallHandler for () {
         (virtual_addr as *mut u8, length)
     }
 
-    fn yield_(user_pc: usize, registers: &mut RiscvRegisters, user: &mut UserCtx) {
+    fn yield_(user_pc: usize, user: &mut UserCtx) {
         let mut current_proc = user.process();
-        current_proc.registers = registers.clone();
         current_proc.pc = user_pc + 4;
         drop(current_proc);
         schedule_and_switch_to_userspace(user);
     }
 
-    fn log(
-        _: usize,
-        _: &mut RiscvRegisters,
-        user: &mut UserCtx,
-        message: UserPtr<[u8]>,
-        level: u64,
-    ) {
+    fn log(_: usize, user: &mut UserCtx, message: UserPtr<[u8]>, level: u64) {
         let Ok(text) = String::from_utf8(message.copy_to_kernel()) else {
             kill!(user, "invalid utf-8")
         };
