@@ -165,9 +165,9 @@ fn sign_unextend(addr: usize) -> usize {
     addr & (MAX_VIRTUAL_ADDR - 1)
 }
 
-pub fn satp(table: *mut TopPageTable) -> Satp {
+pub fn satp(table: &TopPageTable) -> Satp {
     let mut satp = Satp::from_bits(0);
     satp.set_mode(Mode::Sv39);
-    satp.set_ppn(virt_to_phys(table) as usize / PAGE_SIZE);
+    satp.set_ppn(virt_to_phys(table as *const _) as usize / PAGE_SIZE);
     satp
 }

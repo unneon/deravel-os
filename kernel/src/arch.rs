@@ -77,7 +77,7 @@ pub fn enable_user_trap_handler() {
 }
 
 pub fn switch_to_user(mut next: MutexGuard<Process>) -> Result<!, UserSyscallError> {
-    unsafe { riscv::register::satp::write(satp(next.page_table)) };
+    unsafe { riscv::register::satp::write(satp(&next.page_table)) };
 
     // SFENCE.VMA is required after SATP write. (RISC-V Privileged 12.2.1).
     riscv::asm::sfence_vma_all();
@@ -99,17 +99,12 @@ pub fn switch_to_user(mut next: MutexGuard<Process>) -> Result<!, UserSyscallErr
             let ring = *ring;
             let declared_size = *declared_size;
             let handler = capability::get_handler(ring.local_index());
-            let (physical_address, length) = handler.shared_memory();
+            let (phys, length) = handler.shared_memory();
             let layout = Layout::from_size_align(length, PAGE_SIZE).unwrap();
-            let virtual_addr = next.virtual_memory.alloc(layout).unwrap();
-            map_pages(
-                unsafe { &mut *next.page_table },
-                virtual_addr,
-                physical_address,
-                PageFlags::readwrite().user(),
-                length,
-            );
-            next.registers.a0 = virtual_addr;
+            let virt = next.virtual_memory.alloc(layout).unwrap();
+            let table = &mut next.page_table;
+            map_pages(table, virt, phys, PageFlags::readwrite().user(), length);
+            next.registers.a0 = virt;
             next.registers.a1 = declared_size;
             next.state = ProcessState::Runnable;
         }

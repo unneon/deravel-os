@@ -20,7 +20,7 @@ use alloc::collections::VecDeque;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::num::NonZeroUsize;
-use core::sync::atomic::Ordering;
+use core::sync::atomic::{AtomicU16, Ordering};
 use deravel_types::memory::{USER_INPUTS, USER_STACK};
 use deravel_types::*;
 use log::*;
@@ -46,7 +46,6 @@ pub macro kill {
 pub enum ProcessState {
     Runnable,
     Finished,
-    Reserved,
     WaitingForReply {
         from: Actor,
         result_buffer: UserPtr<[u8]>,
@@ -71,7 +70,7 @@ pub struct Process {
     // TODO: This gets overwritten on user trap, should have a wrapper type.
     pub registers: RiscvRegisters,
     pub pc: usize,
-    pub page_table: *mut TopPageTable,
+    pub page_table: Box<TopPageTable>,
     pub virtual_memory: BuddyAllocator,
     pub messages: VecDeque<Message, BuddyHeap>,
     pub currently_serving: Option<ProcessId>,
@@ -95,6 +94,7 @@ pub struct Message {
 pub const PROCESS_COUNT: usize = 8;
 
 static PROCESSES: [Mutex<Option<Process>>; PROCESS_COUNT] = [const { Mutex::new(None) }; _];
+static PROCESSES_RESERVED: AtomicU16 = AtomicU16::new(0);
 
 impl<T: ProcessTag> ProcessReservation<T> {
     pub fn spawn(self, args: T::Args) {
@@ -139,18 +139,7 @@ pub fn get_process(pid: ProcessId) -> &'static Mutex<Option<Process>> {
 }
 
 pub fn reserve_process<T: ProcessTag>(elf: &'static [u8]) -> ProcessReservation<T> {
-    let (pid, mut proc) = find_free_process_slot().expect("exhausted all process slots");
-    *proc = Some(Process {
-        id: pid,
-        name: T::NAME,
-        state: ProcessState::Reserved,
-        registers: RiscvRegisters::default(),
-        pc: 0,
-        page_table: core::ptr::null_mut(),
-        virtual_memory: BuddyAllocator::new(0..0),
-        messages: VecDeque::new_in(BuddyHeap),
-        currently_serving: None,
-    });
+    let pid = ProcessId::new(PROCESSES_RESERVED.fetch_add(1, Ordering::Relaxed) + 1);
     ProcessReservation {
         id: pid,
         elf,
@@ -178,7 +167,7 @@ pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: Pro
             ..RiscvRegisters::default()
         },
         pc: entry_point,
-        page_table: Box::leak(page_table),
+        page_table,
         virtual_memory: BuddyAllocator::new(0x4000000..0x80000000),
         messages: VecDeque::new_in(BuddyHeap),
         currently_serving: None,
@@ -231,16 +220,6 @@ fn map_user_stack(table: &mut TopPageTable) {
     let phys = virt_to_phys(pages.as_ptr()) as usize;
     let virt = USER_STACK.start;
     map_pages(table, virt, phys, PageFlags::readwrite().user(), stack_size);
-}
-
-fn find_free_process_slot() -> Option<(ProcessId, MutexGuard<'static, Option<Process>>)> {
-    for (i, proc) in PROCESSES.iter().enumerate().skip(1) {
-        let lock = proc.lock();
-        if lock.is_none() {
-            return Some((ProcessId::new(i as u16), lock));
-        }
-    }
-    None
 }
 
 pub fn schedule_and_switch_to_userspace(user: &mut UserCtx) -> ! {

@@ -344,15 +344,15 @@ impl SyscallHandler for () {
                 let ring_buffer_layout =
                     Layout::from_size_align(ring_buffer_size, PAGE_SIZE).unwrap();
 
-                let virtual_addr = proc.virtual_memory.alloc(ring_buffer_layout).unwrap();
+                let virt = proc.virtual_memory.alloc(ring_buffer_layout).unwrap();
                 map_pages(
-                    unsafe { &mut *proc.page_table },
-                    virtual_addr,
+                    &mut proc.page_table,
+                    virt,
                     virt_to_phys(ring_buffer as *const _ as *const u8) as usize,
                     PageFlags::readwrite().user(),
                     PAGE_SIZE,
                 );
-                (virtual_addr as *mut (), ring_buffer.0.data.0.len())
+                (virt as *mut (), ring_buffer.0.data.0.len())
             }
         }
     }
@@ -361,9 +361,9 @@ impl SyscallHandler for () {
         let size = size.next_multiple_of(PAGE_SIZE);
         let layout = Layout::from_size_align(size, PAGE_SIZE).unwrap();
         let mut proc = user.process();
-        let table = unsafe { &mut *proc.page_table };
         let virt = proc.virtual_memory.alloc(layout).unwrap();
         let phys = virt_to_phys(Vec::leak(alloc_pages(size)).as_ptr()) as usize;
+        let table = &mut proc.page_table;
         map_pages(table, virt, phys, PageFlags::readwrite().user(), size);
         virt as *mut u8
     }
@@ -372,9 +372,9 @@ impl SyscallHandler for () {
         let size = size.next_multiple_of(PAGE_SIZE);
         let layout = Layout::from_size_align(size, PAGE_SIZE).unwrap();
         let mut proc = user.process();
-        let table = unsafe { &mut *proc.page_table };
         let virt = proc.virtual_memory.alloc(layout).unwrap();
         let phys = virt_to_phys(Vec::leak(alloc_pages(size)).as_ptr()) as usize;
+        let table = &mut proc.page_table;
         map_pages(table, virt, phys, PageFlags::readwrite().user(), size);
         let cap = grant_kernel_capability(
             user.pid(),
@@ -397,20 +397,20 @@ impl SyscallHandler for () {
         }
 
         let handler = capability::get_handler(cap.local_index());
-        let (physical_address, length) = handler.shared_memory();
+        let (phys, length) = handler.shared_memory();
         let padded_length = length.next_multiple_of(PAGE_SIZE);
         let layout = Layout::from_size_align(padded_length, PAGE_SIZE).unwrap();
 
-        let virtual_addr = proc.virtual_memory.alloc(layout).unwrap();
+        let virt = proc.virtual_memory.alloc(layout).unwrap();
         map_pages(
-            unsafe { &mut *proc.page_table },
-            virtual_addr,
-            physical_address,
+            &mut proc.page_table,
+            virt,
+            phys,
             PageFlags::readwrite().user(),
             padded_length,
         );
 
-        (virtual_addr as *mut u8, length)
+        (virt as *mut u8, length)
     }
 
     fn yield_(user: &mut UserCtx) {
