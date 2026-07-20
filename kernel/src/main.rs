@@ -160,7 +160,9 @@ fn handle_user_trap(user: &mut UserCtx) -> ! {
     // TODO: Don't copy this to the stack.
     let mut registers = user.process().registers.clone();
     if scause == Ok(Trap::Exception(Exception::UserEnvCall)) {
-        let Err(err) = dispatch_syscall(user_pc, &mut registers, user);
+        user.process().pc = user_pc + 4;
+        unsafe { riscv::register::sepc::write(user_pc + 4) }
+        let Err(err) = dispatch_syscall(&mut registers, user);
         kill!(user, "{err}");
     } else if scause == Ok(Trap::Interrupt(Interrupt::SupervisorTimer)) {
         sbi::set_timer(u64::MAX);
@@ -185,13 +187,12 @@ fn handle_user_trap(user: &mut UserCtx) -> ! {
 }
 
 impl SyscallHandler for () {
-    fn exit(_: usize, user: &mut UserCtx) -> ! {
+    fn exit(user: &mut UserCtx) -> ! {
         user.process().state = ProcessState::Finished;
         schedule_and_switch_to_userspace(user);
     }
 
     fn ipc_call(
-        user_pc: usize,
         user: &mut UserCtx,
         cap: RawCapability,
         method: usize,
@@ -216,7 +217,6 @@ impl SyscallHandler for () {
                     from: cap.certifier(),
                     result_buffer,
                 };
-                proc.pc = user_pc + 4;
 
                 dest.messages.push_back(Message {
                     cap,
@@ -242,7 +242,6 @@ impl SyscallHandler for () {
     }
 
     fn ipc_receive(
-        _: usize,
         user: &mut UserCtx,
         mut args: UserPtr<[u8]>,
     ) -> (Option<RawCapability>, usize, usize, Option<ProcessId>) {
@@ -265,7 +264,7 @@ impl SyscallHandler for () {
         )
     }
 
-    fn ipc_reply(_: usize, user: &mut UserCtx, result: UserPtr<[u8]>) {
+    fn ipc_reply(user: &mut UserCtx, result: UserPtr<[u8]>) {
         let mut proc = user.process();
         let Some(caller) = proc.currently_serving.take() else {
             kill!(user, proc, "ipc_reply called without matching ipc_serve")
@@ -315,12 +314,7 @@ impl SyscallHandler for () {
         }
     }
 
-    fn ipc_stream(
-        user_pc: usize,
-        user: &mut UserCtx,
-        cap: RawCapability,
-        stream: usize,
-    ) -> (*mut (), usize) {
+    fn ipc_stream(user: &mut UserCtx, cap: RawCapability, stream: usize) -> (*mut (), usize) {
         let mut proc = user.process();
         let cap = match cap.validate(proc.id) {
             Ok(cap) => cap,
@@ -331,7 +325,6 @@ impl SyscallHandler for () {
                 proc.state = ProcessState::WaitingForStreamMap {
                     from: original_pid.into(),
                 };
-                proc.pc = user_pc + 4;
                 let mut dest = get_process(original_pid).lock_if_some().unwrap();
                 dest.messages.push_back(Message {
                     cap,
@@ -364,7 +357,7 @@ impl SyscallHandler for () {
         }
     }
 
-    fn alloc(_: usize, user: &mut UserCtx, size: usize) -> *mut u8 {
+    fn alloc(user: &mut UserCtx, size: usize) -> *mut u8 {
         let size = size.next_multiple_of(PAGE_SIZE);
         let layout = Layout::from_size_align(size, PAGE_SIZE).unwrap();
         let mut proc = user.process();
@@ -375,11 +368,7 @@ impl SyscallHandler for () {
         virt as *mut u8
     }
 
-    fn alloc_shared(
-        _: usize,
-        user: &mut UserCtx,
-        size: usize,
-    ) -> (*mut u8, Capability<SharedMemory>) {
+    fn alloc_shared(user: &mut UserCtx, size: usize) -> (*mut u8, Capability<SharedMemory>) {
         let size = size.next_multiple_of(PAGE_SIZE);
         let layout = Layout::from_size_align(size, PAGE_SIZE).unwrap();
         let mut proc = user.process();
@@ -397,7 +386,7 @@ impl SyscallHandler for () {
         (virt as *mut u8, cap)
     }
 
-    fn map_shared(_: usize, user: &mut UserCtx, cap: Capability<SharedMemory>) -> (*mut u8, usize) {
+    fn map_shared(user: &mut UserCtx, cap: Capability<SharedMemory>) -> (*mut u8, usize) {
         let mut proc = user.process();
         let cap = match cap.validate(proc.id) {
             Ok(cap) => cap,
@@ -424,14 +413,11 @@ impl SyscallHandler for () {
         (virtual_addr as *mut u8, length)
     }
 
-    fn yield_(user_pc: usize, user: &mut UserCtx) {
-        let mut current_proc = user.process();
-        current_proc.pc = user_pc + 4;
-        drop(current_proc);
+    fn yield_(user: &mut UserCtx) {
         schedule_and_switch_to_userspace(user);
     }
 
-    fn log(_: usize, user: &mut UserCtx, message: UserPtr<[u8]>, level: u64) {
+    fn log(user: &mut UserCtx, message: UserPtr<[u8]>, level: u64) {
         let Ok(text) = String::from_utf8(message.copy_to_kernel()) else {
             kill!(user, "invalid utf-8")
         };
