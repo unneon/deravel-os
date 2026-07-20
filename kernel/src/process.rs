@@ -5,7 +5,6 @@ use crate::capability::{
 };
 use crate::device_tree::timebase_frequency;
 use crate::elf::load_elf;
-use crate::hart::UserCtx;
 use crate::heap::BuddyHeap;
 use crate::heap::granularity::PageGranular;
 use crate::page::{
@@ -13,6 +12,7 @@ use crate::page::{
     virt_to_phys,
 };
 use crate::shutdown;
+use crate::stack::UserCtx;
 use crate::sync::{Mutex, MutexGuard};
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;

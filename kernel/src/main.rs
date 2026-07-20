@@ -24,7 +24,6 @@ mod capability;
 mod device_tree;
 mod drvli;
 mod elf;
-mod hart;
 mod heap;
 mod interrupt;
 mod log;
@@ -35,6 +34,7 @@ mod process;
 mod process_spawner;
 mod sbi;
 mod shared_memory;
+mod stack;
 mod sync;
 mod user;
 mod util;
@@ -45,7 +45,6 @@ use crate::capability::{grant_kernel_capability, reserve_kernel_capability};
 use crate::device_tree::initialize_timebase_frequency;
 use crate::drvli::{ShutdownServer, SyscallHandler, dispatch_syscall};
 use crate::elf::elf;
-use crate::hart::{HartStack, UserCtx};
 use crate::heap::granularity::PageGranular;
 use crate::heap::{initialize_early_heap, initialize_heap, log_heap_usage};
 use crate::interrupt::INTERRUPTS;
@@ -58,6 +57,7 @@ use crate::process::{
 };
 use crate::process_spawner::ProcessSpawnerService;
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
+use crate::stack::{UserCtx, initialize_kernel_stack};
 use crate::user::UserPtr;
 use ::log::*;
 use alloc::boxed::Box;
@@ -91,7 +91,7 @@ fn main(_hart_id: u64, dt_ptr: *const u8) -> ! {
     initialize_timebase_frequency(&dt);
     log_sbi_metadata();
     initialize_heap(&dt, dt_ptr);
-    initialize_hart_stack();
+    initialize_kernel_stack();
     let (virtio_blk, virtio_net, virtio_gpu, virtio_keyboard, virtio_mouse) =
         initialize_all_pci(&dt);
     initialize_plic(&dt);
@@ -130,11 +130,6 @@ fn clear_bss() {
     }
     let bss = unsafe { core::slice::from_mut_ptr_range(&raw mut bss_start..&raw mut bss_end) };
     bss.fill(0);
-}
-
-fn initialize_hart_stack() {
-    let stack = Box::leak(HartStack::new());
-    unsafe { riscv::register::sscratch::write(stack.as_raw_ctx() as usize) }
 }
 
 fn enable_interrupts() {
