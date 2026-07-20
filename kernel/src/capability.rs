@@ -71,11 +71,18 @@ pub fn get_handler(local_index: usize) -> &'static dyn RawHandler {
     HANDLERS[local_index].lock().unwrap()
 }
 
-pub fn capability_page(pid: ProcessId) -> &'static CapabilityPage {
+pub fn capability_certificate(cap: RawCapability) -> &'static CapabilityCertificate {
+    match cap.certifier() {
+        Actor::Userspace(pid) => &capability_page(pid).0[cap.local_index()],
+        Actor::Kernel => &kernel_capability_page().0[cap.local_index()],
+    }
+}
+
+fn capability_page(pid: ProcessId) -> &'static CapabilityPage {
     &CAPABILITY_PAGES[pid.as_u16() as usize]
 }
 
-pub fn kernel_capability_page() -> &'static CapabilityPage {
+fn kernel_capability_page() -> &'static CapabilityPage {
     &CAPABILITY_PAGES[0]
 }
 

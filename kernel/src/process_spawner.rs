@@ -1,4 +1,4 @@
-use crate::capability::{Handler, capability_page};
+use crate::capability::{Handler, capability_certificate};
 use crate::process::{get_process, reserve_process};
 use alloc::vec;
 use alloc::vec::Vec;
@@ -27,7 +27,7 @@ impl<T: ProcessTag> Handler<T::Spawner> for ProcessSpawnerService<T> {
     fn call_method(&self, _: usize, args: &[u8], sender: ProcessId) -> Vec<u8> {
         let reserve = reserve_process::<T>(self.elf);
         let export = reserve.export;
-        capability_page(reserve.id).0[0].store(
+        capability_certificate(*export).store(
             CapabilityCertificateValue::granted(sender),
             Ordering::Relaxed,
         );
@@ -37,7 +37,7 @@ impl<T: ProcessTag> Handler<T::Spawner> for ProcessSpawnerService<T> {
                 get_process(sender).lock_if_some().unwrap().name,
                 cap.certifier()
             );
-            let slot = &capability_page(sender).0[cap.local_index()];
+            let slot = capability_certificate(cap);
             let preforward = slot.load(Ordering::Relaxed).unpack();
             match preforward {
                 CapabilityCertificateUnpacked::Granted {

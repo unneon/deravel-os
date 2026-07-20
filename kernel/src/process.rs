@@ -1,8 +1,6 @@
 use crate::arch::{RiscvRegisters, switch_to_user};
 use crate::buddy::BuddyAllocator;
-use crate::capability::{
-    capability_page, capability_pages_physical_address, kernel_capability_page,
-};
+use crate::capability::{capability_certificate, capability_pages_physical_address};
 use crate::device_tree::timebase_frequency;
 use crate::elf::load_elf;
 use crate::heap::BuddyHeap;
@@ -99,12 +97,7 @@ static PROCESSES_RESERVED: AtomicU16 = AtomicU16::new(0);
 impl<T: ProcessTag> ProcessReservation<T> {
     pub fn spawn(self, args: T::Args) {
         args.for_all(|cap: RawCapability| {
-            match cap.certifier() {
-                Actor::Userspace(pid) => capability_page(pid),
-                Actor::Kernel => kernel_capability_page(),
-            }
-            .0[cap.local_index()]
-            .store(
+            capability_certificate(cap).store(
                 CapabilityCertificateValue::granted(self.id),
                 Ordering::Relaxed,
             )
