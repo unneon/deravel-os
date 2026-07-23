@@ -1,14 +1,14 @@
+mod available;
 pub mod granularity;
+pub mod stats;
 
 use crate::buddy::BuddyMemoryAllocator;
 use crate::bump::BumpMemoryAllocator;
+use crate::heap::available::{collect_available, collect_reserved};
 use crate::page::phys_to_drmp;
 use crate::sync::Mutex;
-use crate::util::fmt::memory::{fmt_memory, fmt_memory_size};
-use alloc::vec::Vec;
+use crate::util::fmt::memory::fmt_memory;
 use core::alloc::{AllocError, Allocator, GlobalAlloc, Layout};
-use core::iter::once;
-use core::ops::Range;
 use core::ptr::NonNull;
 use fdt::Fdt;
 use log::*;
@@ -32,13 +32,6 @@ singleton_allocator!(BuddyHeap, BUDDY);
 singleton_allocator!(EarlyBumpHeap, EARLY_BUMP);
 
 pub struct GlobalAllocator;
-
-pub struct HeapStats {
-    // Does not include internal fragmentation.
-    pub alloc: usize,
-    // Does include internal fragmentation.
-    pub free: usize,
-}
 
 #[global_allocator]
 static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator;
@@ -74,14 +67,6 @@ unsafe impl GlobalAlloc for GlobalAllocator {
     }
 }
 
-impl core::fmt::Display for HeapStats {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let a = fmt_memory_size(self.alloc);
-        let fr = fmt_memory_size(self.free);
-        write!(f, "{a} allocated, {fr} free ")
-    }
-}
-
 pub fn initialize_early_heap() {
     unsafe extern "C" {
         static mut early_heap_start: u8;
@@ -103,48 +88,6 @@ pub fn initialize_heap(dt: &Fdt, dt_ptr: *const u8) {
         buddy.reserve_range(phys_to_drmp(reserved));
     }
     *BUDDY.lock() = Some(buddy);
-}
-
-fn collect_available(dt: &Fdt) -> Vec<Range<*mut u8>> {
-    dt.memory()
-        .regions()
-        .map(|reg| {
-            let start = reg.starting_address as *mut u8;
-            let end = start.wrapping_byte_add(reg.size.unwrap());
-            start..end
-        })
-        .collect()
-}
-
-fn collect_reserved(dt: &Fdt, dt_ptr: *const u8) -> impl Iterator<Item = Range<*const u8>> {
-    reserved_ranges_from_dt(dt)
-        .chain(once(reserved_kernel_range()))
-        .chain(once(reserved_dt_memory(dt, dt_ptr)))
-}
-
-fn reserved_ranges_from_dt(dt: &Fdt) -> impl Iterator<Item = Range<*const u8>> {
-    dt.find_node("/reserved-memory")
-        .unwrap()
-        .children()
-        .flat_map(|reserved| {
-            reserved.reg().into_iter().flatten().map(|reg| {
-                let start = reg.starting_address;
-                let end = start.wrapping_byte_add(reg.size.unwrap());
-                start..end
-            })
-        })
-}
-
-fn reserved_kernel_range() -> Range<*const u8> {
-    unsafe extern "C" {
-        static image_start: u8;
-        static image_end: u8;
-    }
-    &raw const image_start..&raw const image_end
-}
-
-fn reserved_dt_memory(dt: &Fdt, dt_ptr: *const u8) -> Range<*const u8> {
-    dt_ptr..dt_ptr.wrapping_byte_add(dt.total_size())
 }
 
 pub fn log_heap_usage() {

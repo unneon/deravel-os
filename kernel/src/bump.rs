@@ -1,4 +1,4 @@
-use crate::heap::HeapStats;
+use crate::heap::stats::HeapStats;
 use crate::sync::Mutex;
 use crate::util::address::Address;
 use core::alloc::{AllocError, Allocator, Layout};

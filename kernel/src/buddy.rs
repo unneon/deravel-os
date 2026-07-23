@@ -1,4 +1,4 @@
-use crate::heap::HeapStats;
+use crate::heap::stats::HeapStats;
 use crate::sync::Mutex;
 use alloc::alloc::Global;
 use alloc::boxed::Box;
