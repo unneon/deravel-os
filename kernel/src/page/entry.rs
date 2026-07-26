@@ -59,8 +59,8 @@ impl<const LEVEL: usize> PageTableEntry<LEVEL> {
         PageTableEntry(((table as usize / PAGE_SIZE) << 10) | PAGE_V)
     }
 
-    pub fn leaf(physical_addr: usize, flags: PageFlags) -> PageTableEntry<LEVEL> {
-        PageTableEntry(((physical_addr / PAGE_SIZE) << 10) | PAGE_V | flags.0)
+    pub fn leaf(phys: usize, flags: PageFlags) -> PageTableEntry<LEVEL> {
+        PageTableEntry(((phys / PAGE_SIZE) << 10) | PAGE_V | flags.0)
     }
 
     pub fn unpack(&self) -> PageTableEntryUnpacked<LEVEL>

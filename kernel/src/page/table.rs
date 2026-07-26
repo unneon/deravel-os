@@ -18,15 +18,14 @@ impl<const LEVEL: usize> PageTable<LEVEL> {
         PageTable([PageTableEntry(0); _])
     }
 
-    fn map_entry(&mut self, vpn_segment: usize, entry: PageTableEntry<LEVEL>) {
+    fn map_leaf(&mut self, virt: usize, phys: usize, flags: PageFlags) {
+        let vpn_segment = vpn_segment::<LEVEL>(virt);
         assert!(!self.0[vpn_segment].is_valid());
-        self.0[vpn_segment] = entry;
+        self.0[vpn_segment] = PageTableEntry::leaf(phys, flags);
     }
 
-    unsafe fn get_or_create_indirect(
-        &mut self,
-        vpn_segment: usize,
-    ) -> &'static mut PageTable<{ LEVEL - 1 }> {
+    fn indirect(&mut self, virt: usize) -> &'static mut PageTable<{ LEVEL - 1 }> {
+        let vpn_segment = vpn_segment::<LEVEL>(virt);
         match self.0[vpn_segment].unpack() {
             PageTableEntryUnpacked::Invalid => {
                 let indirect = Box::leak(Box::new(PageTable::new()));
@@ -51,15 +50,12 @@ impl TopPageTable {
         assert!(phys < MAX_PHYSICAL_ADDR);
         assert!(phys + size <= MAX_PHYSICAL_ADDR);
         assert!(size.is_multiple_of(PAGE_SIZE));
-        if self
-            .try_map_with_leaf_pages(virt, phys, size, flags)
-            .is_err()
-        {
-            self.map_without_huge_pages(virt, phys, size, flags);
+        if self.map_with_gigapages(virt, phys, size, flags).is_err() {
+            self.map_without_gigapages(virt, phys, size, flags);
         }
     }
 
-    fn try_map_with_leaf_pages(
+    fn map_with_gigapages(
         &mut self,
         virt: usize,
         phys: usize,
@@ -79,7 +75,7 @@ impl TopPageTable {
             self.map_page(v, phys + (v - virt), flags);
         }
         for v in l2p_aligned.step_by(LEVEL_2_PAGE_SIZE) {
-            self.map_level_2_page(v, phys + (v - virt), flags);
+            self.map_leaf(v, phys + (v - virt), flags);
         }
         for v in suffix.step_by(PAGE_SIZE) {
             self.map_page(v, phys + (v - virt), flags);
@@ -87,7 +83,7 @@ impl TopPageTable {
         Ok(())
     }
 
-    fn map_without_huge_pages(&mut self, virt: usize, phys: usize, size: usize, flags: PageFlags) {
+    fn map_without_gigapages(&mut self, virt: usize, phys: usize, size: usize, flags: PageFlags) {
         for v in (virt..virt + size).step_by(PAGE_SIZE) {
             self.map_page(v, phys + (v - virt), flags);
         }
@@ -98,28 +94,9 @@ impl TopPageTable {
         assert!(phys.is_multiple_of(PAGE_SIZE));
         assert!(phys < MAX_PHYSICAL_ADDR);
 
-        let vpn2 = (virt >> 30) & ((1 << 9) - 1);
-        let table1 = unsafe { self.get_or_create_indirect(vpn2) };
-        let vpn1 = (virt >> 21) & ((1 << 9) - 1);
-        let table0 = unsafe { table1.get_or_create_indirect(vpn1) };
-
-        let vpn0 = (virt >> 12) & ((1 << 9) - 1);
-        table0.map_entry(vpn0, PageTableEntry::leaf(phys, flags));
-    }
-
-    fn map_level_2_page(&mut self, virt: usize, phys: usize, flags: PageFlags) {
-        assert!(virt.is_multiple_of(LEVEL_2_PAGE_SIZE));
-        assert!(phys.is_multiple_of(LEVEL_2_PAGE_SIZE));
-        assert!(phys < MAX_PHYSICAL_ADDR);
-
-        let vpn2 = (virt >> 30) & ((1 << 9) - 1);
-        self.map_entry(vpn2, PageTableEntry::leaf(phys, flags));
-    }
-}
-
-impl<const LEVEL: usize> Default for PageTable<LEVEL> {
-    fn default() -> PageTable<LEVEL> {
-        PageTable([PageTableEntry::default(); _])
+        let table1 = self.indirect(virt);
+        let table0 = table1.indirect(virt);
+        table0.map_leaf(virt, phys, flags);
     }
 }
 
@@ -136,4 +113,8 @@ fn align_by(range: Range<usize>, align: usize) -> (Range<usize>, Range<usize>, R
     let aligned = aligned_start..aligned_end;
     let unaligned_suffix = aligned_end..range.end;
     (unaligned_prefix, aligned, unaligned_suffix)
+}
+
+fn vpn_segment<const LEVEL: usize>(virt: usize) -> usize {
+    virt >> (12 + 9 * LEVEL) & ((1 << 9) - 1)
 }
