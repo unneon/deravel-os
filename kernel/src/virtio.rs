@@ -1,7 +1,7 @@
 use crate::page::phys_to_virt;
 use crate::pci::AllocatedRange;
 use crate::pci::capability::{PciCapability, VendorPciCapability};
-use crate::pci::config::GeneralDeviceConfig;
+use crate::pci::config::{Config, GeneralDevice};
 use crate::sync::Mutex;
 use crate::util::volatile::{ReadWrite, Readonly, Volatile, volatile_struct};
 use crate::virtio::blk::VirtioBlk;
@@ -95,7 +95,7 @@ unsafe impl Sync for Isr {}
 unsafe impl VendorPciCapability for VirtioPciCapability {}
 
 pub fn initialize_blk(
-    config: &GeneralDeviceConfig,
+    config: &Config<GeneralDevice>,
     bars: &[AllocatedRange; 6],
 ) -> &'static VirtioBlk {
     let caps = extract_capabilities(config, bars);
@@ -104,7 +104,7 @@ pub fn initialize_blk(
 }
 
 pub fn initialize_gpu(
-    config: &GeneralDeviceConfig,
+    config: &Config<GeneralDevice>,
     bars: &[AllocatedRange; 6],
 ) -> &'static Mutex<VirtioGpu> {
     let caps = extract_capabilities(config, bars);
@@ -113,7 +113,7 @@ pub fn initialize_gpu(
 }
 
 pub fn initialize_input(
-    config: &GeneralDeviceConfig,
+    config: &Config<GeneralDevice>,
     bars: &[AllocatedRange; 6],
 ) -> &'static VirtioInput {
     let caps = extract_capabilities(config, bars);
@@ -122,7 +122,7 @@ pub fn initialize_input(
 }
 
 pub fn initialize_net(
-    config: &GeneralDeviceConfig,
+    config: &Config<GeneralDevice>,
     bars: &[AllocatedRange; 6],
 ) -> &'static VirtioNet {
     let caps = extract_capabilities(config, bars);
@@ -131,7 +131,7 @@ pub fn initialize_net(
 }
 
 fn extract_capabilities<T, Access>(
-    config: &GeneralDeviceConfig,
+    config: &Config<GeneralDevice>,
     bars: &[AllocatedRange; 6],
 ) -> Capabilities<T, Access> {
     let mut common = None;

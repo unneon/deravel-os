@@ -4,7 +4,7 @@ pub mod config;
 use crate::bump::BumpAllocator;
 use crate::interrupt::register_interrupt;
 use crate::page::phys_to_virt;
-use crate::pci::config::{Config, GeneralDeviceConfig};
+use crate::pci::config::{Config, ConfigUntyped, GeneralDevice};
 use crate::sync::Mutex;
 use crate::virtio;
 use crate::virtio::blk::VirtioBlk;
@@ -52,7 +52,7 @@ pub fn initialize_all_pci(
     let mut mem32 = BumpAllocator::new(0..pci_ranges.mem32.length);
     let mut mem64 = BumpAllocator::new(0..pci_ranges.mem64.length);
     let region = pci.reg().unwrap().next().unwrap();
-    let configs = phys_to_virt(region.starting_address as *mut Config);
+    let configs = phys_to_virt(region.starting_address as *mut ConfigUntyped);
     let configs = configs..configs.wrapping_byte_add(region.size.unwrap());
     let configs = unsafe { core::slice::from_mut_ptr_range(configs) };
     let mut virtio_blk_slot = None;
@@ -120,7 +120,7 @@ pub fn initialize_all_pci(
 }
 
 fn allocate_all_bars(
-    config: &mut GeneralDeviceConfig,
+    config: &mut Config<GeneralDevice>,
     pci_ranges: &PciRanges,
     io: &mut BumpAllocator,
     mem32: &mut BumpAllocator,
@@ -237,7 +237,7 @@ fn pci_interrupt_to_plic(
     pci: &FdtNode,
     plic: &FdtNode,
     config_index: usize,
-    config: &GeneralDeviceConfig,
+    config: &GeneralDevice,
 ) -> u32 {
     assert_eq!(pci.cell_sizes().address_cells, 3);
     assert_eq!(pci.interrupt_cells().unwrap(), 1);

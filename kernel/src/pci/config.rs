@@ -4,13 +4,18 @@ use core::mem::ManuallyDrop;
 use core::ops::{Deref, DerefMut};
 
 #[repr(align(4096))]
-pub union Config {
-    common: ManuallyDrop<CommonConfig>,
-    general_device: ManuallyDrop<GeneralDeviceConfig>,
+pub union Config<T> {
+    data: ManuallyDrop<T>,
+    bytes: [u8; 4096],
+}
+
+pub union ConfigUntyped {
+    common: ManuallyDrop<Config<Common>>,
+    general_device: ManuallyDrop<Config<GeneralDevice>>,
 }
 
 #[repr(C)]
-pub struct CommonConfig {
+pub struct Common {
     pub vendor_id: u16,
     pub device_id: u16,
     pub command: VolatileCellWithPureReads<u16>,
@@ -25,10 +30,9 @@ pub struct CommonConfig {
     pub bist: u8,
 }
 
-#[allow(dead_code)]
 #[repr(C)]
-pub struct GeneralDeviceConfig {
-    pub common: CommonConfig,
+pub struct GeneralDevice {
+    pub common: Common,
     pub bars: [VolatileCellWithPureReads<u32>; 6],
     pub cardbus_cis_pointer: u32,
     pub subsystem_vendor_id: u16,
@@ -43,8 +47,11 @@ pub struct GeneralDeviceConfig {
     pub max_latency: u8,
 }
 
-impl Config {
-    pub fn as_general_device(&mut self) -> Option<&mut GeneralDeviceConfig> {
+const _: () = assert!(size_of::<Config<Common>>() == 4096);
+const _: () = assert!(size_of::<Config<GeneralDevice>>() == 4096);
+
+impl ConfigUntyped {
+    pub fn as_general_device(&mut self) -> Option<&mut Config<GeneralDevice>> {
         if self.header_type != 0x0 {
             return None;
         }
@@ -52,42 +59,54 @@ impl Config {
     }
 }
 
-impl GeneralDeviceConfig {
-    pub fn walk_capabilities(&self) -> impl Iterator<Item = &'static PciCapability> {
+impl Config<GeneralDevice> {
+    pub fn walk_capabilities(&self) -> impl Iterator<Item = &PciCapability> {
         assert_ne!(self.status.read() & (1 << 4), 0);
-        let config_space = self as *const GeneralDeviceConfig;
         let mut pointer = self.capabilities_pointer & !0x3;
         core::iter::from_fn(move || {
             if pointer == 0 {
                 return None;
             }
-            // TODO: Should I do all this with unions for some safety?
             let cap =
-                unsafe { &*(config_space.byte_add(pointer as usize) as *const PciCapability) };
+                unsafe { &*(&raw const self.bytes[pointer as usize] as *const PciCapability) };
             pointer = cap.next;
             Some(cap)
         })
     }
 }
 
-impl Deref for Config {
-    type Target = CommonConfig;
+impl<T> Deref for Config<T> {
+    type Target = T;
 
-    fn deref(&self) -> &CommonConfig {
-        unsafe { &self.common }
+    fn deref(&self) -> &T {
+        unsafe { &self.data }
     }
 }
 
-impl Deref for GeneralDeviceConfig {
-    type Target = CommonConfig;
+impl<T> DerefMut for Config<T> {
+    fn deref_mut(&mut self) -> &mut T {
+        unsafe { &mut self.data }
+    }
+}
 
-    fn deref(&self) -> &CommonConfig {
+impl Deref for ConfigUntyped {
+    type Target = Common;
+
+    fn deref(&self) -> &Common {
+        unsafe { &self.common.data }
+    }
+}
+
+impl Deref for GeneralDevice {
+    type Target = Common;
+
+    fn deref(&self) -> &Common {
         &self.common
     }
 }
 
-impl DerefMut for GeneralDeviceConfig {
-    fn deref_mut(&mut self) -> &mut CommonConfig {
+impl DerefMut for GeneralDevice {
+    fn deref_mut(&mut self) -> &mut Common {
         &mut self.common
     }
 }
