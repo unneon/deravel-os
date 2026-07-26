@@ -40,7 +40,9 @@ impl<const LEVEL: usize> PageTable<LEVEL> {
     }
 }
 
-impl TopPageTable {
+// TODO: Use const generics to DRY this.
+
+impl PageTable<2> {
     #[track_caller]
     pub fn map_pages(&mut self, virt: usize, phys: usize, size: usize, flags: PageFlags) {
         assert!(virt.is_multiple_of(PAGE_SIZE));
@@ -50,53 +52,60 @@ impl TopPageTable {
         assert!(phys < MAX_PHYSICAL_ADDR);
         assert!(phys + size <= MAX_PHYSICAL_ADDR);
         assert!(size.is_multiple_of(PAGE_SIZE));
-        if self.map_with_gigapages(virt, phys, size, flags).is_err() {
-            self.map_without_gigapages(virt, phys, size, flags);
-        }
-    }
 
-    fn map_with_gigapages(
-        &mut self,
-        virt: usize,
-        phys: usize,
-        size: usize,
-        flags: PageFlags,
-    ) -> Result<(), ()> {
         let (prefix, l2p_aligned, suffix) = align_by(virt..virt + size, LEVEL_2_PAGE_SIZE);
+
+        if !prefix.is_empty() {
+            self.indirect(prefix.start).map_pages(
+                prefix.start,
+                phys + (prefix.start - virt),
+                prefix.end - prefix.start,
+                flags,
+            );
+        }
+
         if !l2p_aligned.is_empty()
             && !(phys + (l2p_aligned.start - virt)).is_multiple_of(LEVEL_2_PAGE_SIZE)
         {
             // Sv39 supports 2 MiB megapages and 1 GiB gigapages, each of which must be virtually
             // and physically aligned to a boundary equal to its size. (RISC-V Privileged 12.4.1).
             warn!("physical address {phys:#x} not gigapage-aligned with {virt:#x}");
-            return Err(());
+
+            for v in l2p_aligned.step_by(LEVEL_2_PAGE_SIZE) {
+                self.indirect(v)
+                    .map_pages(v, phys + (v - virt), LEVEL_2_PAGE_SIZE, flags);
+            }
+        } else {
+            for v in l2p_aligned.step_by(LEVEL_2_PAGE_SIZE) {
+                self.map_leaf(v, phys + (v - virt), flags);
+            }
         }
-        for v in prefix.step_by(PAGE_SIZE) {
-            self.map_page(v, phys + (v - virt), flags);
+
+        if !suffix.is_empty() {
+            self.indirect(suffix.start).map_pages(
+                suffix.start,
+                phys + (suffix.start - virt),
+                suffix.end - suffix.start,
+                flags,
+            );
         }
-        for v in l2p_aligned.step_by(LEVEL_2_PAGE_SIZE) {
+    }
+}
+
+impl PageTable<1> {
+    pub fn map_pages(&mut self, virt: usize, phys: usize, size: usize, flags: PageFlags) {
+        for v in (virt..virt + size).step_by(PAGE_SIZE) {
+            self.indirect(v)
+                .map_pages(v, phys + (v - virt), PAGE_SIZE, flags);
+        }
+    }
+}
+
+impl PageTable<0> {
+    pub fn map_pages(&mut self, virt: usize, phys: usize, size: usize, flags: PageFlags) {
+        for v in (virt..virt + size).step_by(PAGE_SIZE) {
             self.map_leaf(v, phys + (v - virt), flags);
         }
-        for v in suffix.step_by(PAGE_SIZE) {
-            self.map_page(v, phys + (v - virt), flags);
-        }
-        Ok(())
-    }
-
-    fn map_without_gigapages(&mut self, virt: usize, phys: usize, size: usize, flags: PageFlags) {
-        for v in (virt..virt + size).step_by(PAGE_SIZE) {
-            self.map_page(v, phys + (v - virt), flags);
-        }
-    }
-
-    fn map_page(&mut self, virt: usize, phys: usize, flags: PageFlags) {
-        assert!(virt.is_multiple_of(PAGE_SIZE));
-        assert!(phys.is_multiple_of(PAGE_SIZE));
-        assert!(phys < MAX_PHYSICAL_ADDR);
-
-        let table1 = self.indirect(virt);
-        let table0 = table1.indirect(virt);
-        table0.map_leaf(virt, phys, flags);
     }
 }
 
