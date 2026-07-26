@@ -1,4 +1,4 @@
-use crate::page::{PageFlags, TopPageTable, map_pages, virt_to_phys};
+use crate::page::{PageFlags, TopPageTable, virt_to_phys};
 use alloc::vec;
 use alloc::vec::Vec;
 use deravel_types::PAGE_SIZE;
@@ -19,7 +19,7 @@ pub macro elf($env:literal) {{
 const USER_START: usize = 0x1000000;
 const USER_END: usize = 0x2000000;
 
-pub fn load_elf(elf_bytes: &[u8], page_table: &mut TopPageTable) -> usize {
+pub fn load_elf(elf_bytes: &[u8], table: &mut TopPageTable) -> usize {
     let elf = ElfBytes::<LittleEndian>::minimal_parse(elf_bytes).unwrap();
     assert_eq!(elf.ehdr.class, Class::ELF64);
     assert_eq!(elf.ehdr.endianness, LittleEndian);
@@ -50,12 +50,11 @@ pub fn load_elf(elf_bytes: &[u8], page_table: &mut TopPageTable) -> usize {
             let size = (segment.p_memsz as usize).next_multiple_of(PAGE_SIZE);
             let pages = vec![0u8; size];
 
-            map_pages(
-                page_table,
+            table.map_pages(
                 segment.p_vaddr as usize,
                 virt_to_phys(pages.as_ptr()) as usize,
-                flags,
                 size,
+                flags,
             );
 
             let flat_memory = Vec::leak(pages);
@@ -65,12 +64,11 @@ pub fn load_elf(elf_bytes: &[u8], page_table: &mut TopPageTable) -> usize {
             assert!((data.as_ptr() as usize).is_multiple_of(PAGE_SIZE));
             assert!(elf_data_is_zero_padded(&segment, elf_bytes));
 
-            map_pages(
-                page_table,
+            table.map_pages(
                 segment.p_vaddr as usize,
                 data.as_ptr() as usize,
-                flags,
                 data.len().next_multiple_of(PAGE_SIZE),
+                flags,
             );
         }
     }

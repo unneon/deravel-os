@@ -6,8 +6,7 @@ use crate::elf::load_elf;
 use crate::heap::BuddyHeap;
 use crate::heap::granularity::PageGranular;
 use crate::page::{
-    Page, PageFlags, PageTable, TopPageTable, map_direct_mapping, map_kernel_image, map_pages,
-    virt_to_phys,
+    Page, PageFlags, PageTable, TopPageTable, map_direct_mapping, map_kernel_image, virt_to_phys,
 };
 use crate::shutdown;
 use crate::stack::UserCtx;
@@ -175,26 +174,18 @@ fn map_capability_memory(table: &mut TopPageTable, pid: ProcessId) {
     let suf_v = own_v + PAGE_SIZE;
     let suf_p = own_p + PAGE_SIZE;
     let suf_l = PROCESS_COUNT - pid.as_u16() as usize - 1;
-    map_pages(
-        table,
+    table.map_pages(
         pre_v,
         pre_p,
-        PageFlags::readonly().user(),
         (pid.as_u16() as usize) * PAGE_SIZE,
+        PageFlags::readonly().user(),
     );
-    map_pages(
-        table,
-        own_v,
-        own_p,
-        PageFlags::readwrite().user(),
-        PAGE_SIZE,
-    );
-    map_pages(
-        table,
+    table.map_pages(own_v, own_p, PAGE_SIZE, PageFlags::readwrite().user());
+    table.map_pages(
         suf_v,
         suf_p,
-        PageFlags::readonly().user(),
         suf_l * PAGE_SIZE,
+        PageFlags::readonly().user(),
     );
 }
 
@@ -204,7 +195,7 @@ fn map_inputs_memory<T: ProcessTag>(table: &mut TopPageTable, inputs: ProcessInp
     let page = Box::leak(Box::new_in(inputs, PageGranular::new()));
     let virt = USER_INPUTS.start;
     let phys = virt_to_phys(page as *mut _) as usize;
-    map_pages(table, virt, phys, PageFlags::readonly().user(), size);
+    table.map_pages(virt, phys, size, PageFlags::readonly().user());
 }
 
 fn map_user_stack(table: &mut TopPageTable) {
@@ -212,7 +203,7 @@ fn map_user_stack(table: &mut TopPageTable) {
     let pages = Vec::leak(vec![Page::zeroed(); stack_size / PAGE_SIZE]);
     let phys = virt_to_phys(pages.as_ptr()) as usize;
     let virt = USER_STACK.start;
-    map_pages(table, virt, phys, PageFlags::readwrite().user(), stack_size);
+    table.map_pages(virt, phys, stack_size, PageFlags::readwrite().user());
 }
 
 pub fn schedule_and_switch_to_userspace(user: &mut UserCtx) -> ! {

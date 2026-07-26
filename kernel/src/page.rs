@@ -56,7 +56,7 @@ pub fn initialize_memory_mapping() {
 pub fn map_direct_mapping(table: &mut TopPageTable) {
     let virt = DIRECT_MAPPING_START;
     let size = DIRECT_MAPPING_SIZE;
-    map_pages(table, virt, 0, PageFlags::readwrite(), size);
+    table.map_pages(virt, 0, size, PageFlags::readwrite());
 }
 
 pub fn map_kernel_image(table: &mut TopPageTable) {
@@ -80,47 +80,7 @@ fn map_kernel_image_section(table: &mut TopPageTable, range: Range<*const u8>, f
     let start = range.start as usize;
     let size = (range.end as usize - start).next_multiple_of(PAGE_SIZE);
     assert!(start.is_multiple_of(PAGE_SIZE));
-    map_pages(table, start, start, flags, size);
-}
-
-#[track_caller]
-pub fn map_pages(
-    table: &mut TopPageTable,
-    virtual_start: usize,
-    physical_start: usize,
-    flags: PageFlags,
-    size: usize,
-) {
-    assert!(virtual_start.is_multiple_of(PAGE_SIZE));
-    assert!(physical_start.is_multiple_of(PAGE_SIZE));
-    assert!(physical_start < MAX_PHYSICAL_ADDR);
-    assert!(size.is_multiple_of(PAGE_SIZE));
-    let virtual_end = virtual_start + size;
-    let (prefix, l2p_aligned, suffix) = align_by(virtual_start..virtual_end, LEVEL_2_PAGE_SIZE);
-    for v in prefix.step_by(PAGE_SIZE) {
-        table.map_page(v, physical_start + (v - virtual_start), flags);
-    }
-    for v in l2p_aligned.step_by(LEVEL_2_PAGE_SIZE) {
-        table.map_level_2_page(v, physical_start + (v - virtual_start), flags);
-    }
-    for v in suffix.step_by(PAGE_SIZE) {
-        table.map_page(v, physical_start + (v - virtual_start), flags);
-    }
-}
-
-fn align_by(range: Range<usize>, align: usize) -> (Range<usize>, Range<usize>, Range<usize>) {
-    let aligned_start = range.start.next_multiple_of(align);
-    if aligned_start >= range.end {
-        return (range, 0..0, 0..0);
-    }
-    let unaligned_prefix = range.start..aligned_start;
-    let mut aligned_end = range.end.next_multiple_of(align);
-    if aligned_end > range.end {
-        aligned_end -= align;
-    }
-    let aligned = aligned_start..aligned_end;
-    let unaligned_suffix = aligned_end..range.end;
-    (unaligned_prefix, aligned, unaligned_suffix)
+    table.map_pages(start, start, size, flags);
 }
 
 pub fn phys_to_virt<T: Address>(phys: T) -> T {

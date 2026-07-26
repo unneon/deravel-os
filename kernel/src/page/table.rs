@@ -1,9 +1,10 @@
 use crate::page::entry::{PageTableEntry, PageTableEntryUnpacked};
 use crate::page::{
-    LEVEL_2_PAGE_SIZE, MAX_PHYSICAL_ADDR, PAGE_TABLE_ENTRY_COUNT, PageFlags, phys_to_virt,
-    virt_to_phys,
+    LEVEL_2_PAGE_SIZE, MAX_PHYSICAL_ADDR, MAX_VIRTUAL_ADDR, PAGE_TABLE_ENTRY_COUNT, PageFlags,
+    phys_to_virt, virt_to_phys,
 };
 use alloc::boxed::Box;
+use core::ops::Range;
 use deravel_types::PAGE_SIZE;
 
 #[repr(align(4096))]
@@ -40,7 +41,29 @@ impl<const LEVEL: usize> PageTable<LEVEL> {
 }
 
 impl TopPageTable {
-    pub fn map_page(&mut self, virtual_addr: usize, phys: usize, virt: PageFlags) {
+    #[track_caller]
+    pub fn map_pages(&mut self, virt: usize, phys: usize, size: usize, flags: PageFlags) {
+        assert!(virt.is_multiple_of(PAGE_SIZE));
+        assert!(virt < MAX_VIRTUAL_ADDR);
+        assert!(virt + size <= MAX_VIRTUAL_ADDR);
+        assert!(phys.is_multiple_of(PAGE_SIZE));
+        assert!(phys < MAX_PHYSICAL_ADDR);
+        assert!(phys + size <= MAX_PHYSICAL_ADDR);
+        assert!(size.is_multiple_of(PAGE_SIZE));
+        let virtual_end = virt + size;
+        let (prefix, l2p_aligned, suffix) = align_by(virt..virtual_end, LEVEL_2_PAGE_SIZE);
+        for v in prefix.step_by(PAGE_SIZE) {
+            self.map_page(v, phys + (v - virt), flags);
+        }
+        for v in l2p_aligned.step_by(LEVEL_2_PAGE_SIZE) {
+            self.map_level_2_page(v, phys + (v - virt), flags);
+        }
+        for v in suffix.step_by(PAGE_SIZE) {
+            self.map_page(v, phys + (v - virt), flags);
+        }
+    }
+
+    fn map_page(&mut self, virtual_addr: usize, phys: usize, virt: PageFlags) {
         assert!(virtual_addr.is_multiple_of(PAGE_SIZE));
         assert!(phys.is_multiple_of(PAGE_SIZE));
         assert!(phys < MAX_PHYSICAL_ADDR);
@@ -54,7 +77,7 @@ impl TopPageTable {
         table0.map_entry(vpn0, PageTableEntry::leaf(phys, virt));
     }
 
-    pub fn map_level_2_page(&mut self, virt: usize, phys: usize, flags: PageFlags) {
+    fn map_level_2_page(&mut self, virt: usize, phys: usize, flags: PageFlags) {
         assert!(virt.is_multiple_of(LEVEL_2_PAGE_SIZE));
         assert!(phys.is_multiple_of(LEVEL_2_PAGE_SIZE));
         assert!(phys < MAX_PHYSICAL_ADDR);
@@ -68,4 +91,19 @@ impl<const LEVEL: usize> Default for PageTable<LEVEL> {
     fn default() -> PageTable<LEVEL> {
         PageTable([PageTableEntry::default(); _])
     }
+}
+
+fn align_by(range: Range<usize>, align: usize) -> (Range<usize>, Range<usize>, Range<usize>) {
+    let aligned_start = range.start.next_multiple_of(align);
+    if aligned_start >= range.end {
+        return (range, 0..0, 0..0);
+    }
+    let unaligned_prefix = range.start..aligned_start;
+    let mut aligned_end = range.end.next_multiple_of(align);
+    if aligned_end > range.end {
+        aligned_end -= align;
+    }
+    let aligned = aligned_start..aligned_end;
+    let unaligned_suffix = aligned_end..range.end;
+    (unaligned_prefix, aligned, unaligned_suffix)
 }

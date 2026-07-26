@@ -1,4 +1,4 @@
-use crate::page::{PageFlags, map_pages, satp};
+use crate::page::{PageFlags, satp};
 use crate::process::{Process, ProcessState};
 use crate::stack::UserCtx;
 use crate::sync::MutexGuard;
@@ -103,7 +103,7 @@ pub fn switch_to_user(mut next: MutexGuard<Process>) -> Result<!, UserSyscallErr
             let layout = Layout::from_size_align(length, PAGE_SIZE).unwrap();
             let virt = next.virtual_memory.alloc(layout).unwrap();
             let table = &mut next.page_table;
-            map_pages(table, virt, phys, PageFlags::readwrite().user(), length);
+            table.map_pages(virt, phys, length, PageFlags::readwrite().user());
             next.registers.a0 = virt;
             next.registers.a1 = declared_size;
             next.state = ProcessState::Runnable;

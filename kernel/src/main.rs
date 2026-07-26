@@ -49,7 +49,7 @@ use crate::heap::granularity::PageGranular;
 use crate::heap::{initialize_early_heap, initialize_heap, log_heap_usage};
 use crate::interrupt::INTERRUPTS;
 use crate::log::{initialize_log, log_userspace};
-use crate::page::{PageFlags, initialize_memory_mapping, map_pages, phys_to_virt, virt_to_phys};
+use crate::page::{PageFlags, initialize_memory_mapping, phys_to_virt, virt_to_phys};
 use crate::pci::initialize_all_pci;
 use crate::plic::{initialize_plic, plic_claim, plic_complete};
 use crate::process::{
@@ -345,12 +345,11 @@ impl SyscallHandler for () {
                     Layout::from_size_align(ring_buffer_size, PAGE_SIZE).unwrap();
 
                 let virt = proc.virtual_memory.alloc(ring_buffer_layout).unwrap();
-                map_pages(
-                    &mut proc.page_table,
+                proc.page_table.map_pages(
                     virt,
                     virt_to_phys(ring_buffer as *const _ as *const u8) as usize,
-                    PageFlags::readwrite().user(),
                     PAGE_SIZE,
+                    PageFlags::readwrite().user(),
                 );
                 (virt as *mut (), ring_buffer.0.data.0.len())
             }
@@ -364,7 +363,7 @@ impl SyscallHandler for () {
         let virt = proc.virtual_memory.alloc(layout).unwrap();
         let phys = virt_to_phys(Vec::leak(alloc_pages(size)).as_ptr()) as usize;
         let table = &mut proc.page_table;
-        map_pages(table, virt, phys, PageFlags::readwrite().user(), size);
+        table.map_pages(virt, phys, size, PageFlags::readwrite().user());
         virt as *mut u8
     }
 
@@ -375,7 +374,7 @@ impl SyscallHandler for () {
         let virt = proc.virtual_memory.alloc(layout).unwrap();
         let phys = virt_to_phys(Vec::leak(alloc_pages(size)).as_ptr()) as usize;
         let table = &mut proc.page_table;
-        map_pages(table, virt, phys, PageFlags::readwrite().user(), size);
+        table.map_pages(virt, phys, size, PageFlags::readwrite().user());
         let cap = grant_kernel_capability(
             user.pid(),
             Box::leak(Box::new(shared_memory::SharedMemory {
@@ -402,13 +401,8 @@ impl SyscallHandler for () {
         let layout = Layout::from_size_align(padded_length, PAGE_SIZE).unwrap();
 
         let virt = proc.virtual_memory.alloc(layout).unwrap();
-        map_pages(
-            &mut proc.page_table,
-            virt,
-            phys,
-            PageFlags::readwrite().user(),
-            padded_length,
-        );
+        proc.page_table
+            .map_pages(virt, phys, padded_length, PageFlags::readwrite().user());
 
         (virt as *mut u8, length)
     }
