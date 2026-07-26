@@ -1,7 +1,7 @@
 use crate::page::entry::{PageTableEntry, PageTableEntryUnpacked};
 use crate::page::{
-    LEVEL_2_PAGE_SIZE, MAX_PHYSICAL_ADDR, MAX_VIRTUAL_ADDR, PAGE_TABLE_ENTRY_COUNT, PageFlags,
-    phys_to_virt, virt_to_phys,
+    LEVEL_1_PAGE_SIZE, LEVEL_2_PAGE_SIZE, MAX_PHYSICAL_ADDR, MAX_VIRTUAL_ADDR,
+    PAGE_TABLE_ENTRY_COUNT, PageFlags, phys_to_virt, virt_to_phys,
 };
 use alloc::boxed::Box;
 use core::ops::Range;
@@ -93,16 +93,48 @@ impl PageTable<2> {
 }
 
 impl PageTable<1> {
-    pub fn map_pages(&mut self, virt: usize, phys: usize, size: usize, flags: PageFlags) {
-        for v in (virt..virt + size).step_by(PAGE_SIZE) {
-            self.indirect(v)
-                .map_pages(v, phys + (v - virt), PAGE_SIZE, flags);
+    fn map_pages(&mut self, virt: usize, phys: usize, size: usize, flags: PageFlags) {
+        let (prefix, l1p_aligned, suffix) = align_by(virt..virt + size, LEVEL_1_PAGE_SIZE);
+
+        if !prefix.is_empty() {
+            self.indirect(prefix.start).map_pages(
+                prefix.start,
+                phys + (prefix.start - virt),
+                prefix.end - prefix.start,
+                flags,
+            );
+        }
+
+        if !l1p_aligned.is_empty()
+            && !(phys + (l1p_aligned.start - virt)).is_multiple_of(LEVEL_1_PAGE_SIZE)
+        {
+            // Sv39 supports 2 MiB megapages and 1 GiB gigapages, each of which must be virtually
+            // and physically aligned to a boundary equal to its size. (RISC-V Privileged 12.4.1).
+            warn!("physical address {phys:#x} not megapage-aligned with {virt:#x}");
+
+            for v in l1p_aligned.step_by(LEVEL_1_PAGE_SIZE) {
+                self.indirect(v)
+                    .map_pages(v, phys + (v - virt), LEVEL_1_PAGE_SIZE, flags);
+            }
+        } else {
+            for v in l1p_aligned.step_by(LEVEL_1_PAGE_SIZE) {
+                self.map_leaf(v, phys + (v - virt), flags);
+            }
+        }
+
+        if !suffix.is_empty() {
+            self.indirect(suffix.start).map_pages(
+                suffix.start,
+                phys + (suffix.start - virt),
+                suffix.end - suffix.start,
+                flags,
+            );
         }
     }
 }
 
 impl PageTable<0> {
-    pub fn map_pages(&mut self, virt: usize, phys: usize, size: usize, flags: PageFlags) {
+    fn map_pages(&mut self, virt: usize, phys: usize, size: usize, flags: PageFlags) {
         for v in (virt..virt + size).step_by(PAGE_SIZE) {
             self.map_leaf(v, phys + (v - virt), flags);
         }
@@ -112,7 +144,7 @@ impl PageTable<0> {
 fn align_by(range: Range<usize>, align: usize) -> (Range<usize>, Range<usize>, Range<usize>) {
     let aligned_start = range.start.next_multiple_of(align);
     if aligned_start >= range.end {
-        return (range, 0..0, 0..0);
+        return (range.start..range.end, 0..0, range.end..range.end);
     }
     let unaligned_prefix = range.start..aligned_start;
     let mut aligned_end = range.end.next_multiple_of(align);

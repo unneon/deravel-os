@@ -29,7 +29,7 @@ SECTIONS {
     }
 
     . = ALIGN(16);
-    . += 16 * 1024;
+    . += 32 * 1024;
     early_stack_top = .;
 
     . = ALIGN(4096);
