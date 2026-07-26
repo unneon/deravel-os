@@ -6,6 +6,7 @@ use crate::page::{
 use alloc::boxed::Box;
 use core::ops::Range;
 use deravel_types::PAGE_SIZE;
+use log::*;
 
 #[repr(align(4096))]
 pub struct PageTable<const LEVEL: usize>([PageTableEntry<LEVEL>; PAGE_TABLE_ENTRY_COUNT]);
@@ -50,8 +51,30 @@ impl TopPageTable {
         assert!(phys < MAX_PHYSICAL_ADDR);
         assert!(phys + size <= MAX_PHYSICAL_ADDR);
         assert!(size.is_multiple_of(PAGE_SIZE));
-        let virtual_end = virt + size;
-        let (prefix, l2p_aligned, suffix) = align_by(virt..virtual_end, LEVEL_2_PAGE_SIZE);
+        if self
+            .try_map_with_leaf_pages(virt, phys, size, flags)
+            .is_err()
+        {
+            self.map_without_huge_pages(virt, phys, size, flags);
+        }
+    }
+
+    fn try_map_with_leaf_pages(
+        &mut self,
+        virt: usize,
+        phys: usize,
+        size: usize,
+        flags: PageFlags,
+    ) -> Result<(), ()> {
+        let (prefix, l2p_aligned, suffix) = align_by(virt..virt + size, LEVEL_2_PAGE_SIZE);
+        if !l2p_aligned.is_empty()
+            && !(phys + (l2p_aligned.start - virt)).is_multiple_of(LEVEL_2_PAGE_SIZE)
+        {
+            // Sv39 supports 2 MiB megapages and 1 GiB gigapages, each of which must be virtually
+            // and physically aligned to a boundary equal to its size. (RISC-V Privileged 12.4.1).
+            warn!("physical address {phys:#x} not gigapage-aligned with {virt:#x}");
+            return Err(());
+        }
         for v in prefix.step_by(PAGE_SIZE) {
             self.map_page(v, phys + (v - virt), flags);
         }
@@ -61,20 +84,27 @@ impl TopPageTable {
         for v in suffix.step_by(PAGE_SIZE) {
             self.map_page(v, phys + (v - virt), flags);
         }
+        Ok(())
     }
 
-    fn map_page(&mut self, virtual_addr: usize, phys: usize, virt: PageFlags) {
-        assert!(virtual_addr.is_multiple_of(PAGE_SIZE));
+    fn map_without_huge_pages(&mut self, virt: usize, phys: usize, size: usize, flags: PageFlags) {
+        for v in (virt..virt + size).step_by(PAGE_SIZE) {
+            self.map_page(v, phys + (v - virt), flags);
+        }
+    }
+
+    fn map_page(&mut self, virt: usize, phys: usize, flags: PageFlags) {
+        assert!(virt.is_multiple_of(PAGE_SIZE));
         assert!(phys.is_multiple_of(PAGE_SIZE));
         assert!(phys < MAX_PHYSICAL_ADDR);
 
-        let vpn2 = (virtual_addr >> 30) & ((1 << 9) - 1);
+        let vpn2 = (virt >> 30) & ((1 << 9) - 1);
         let table1 = unsafe { self.get_or_create_indirect(vpn2) };
-        let vpn1 = (virtual_addr >> 21) & ((1 << 9) - 1);
+        let vpn1 = (virt >> 21) & ((1 << 9) - 1);
         let table0 = unsafe { table1.get_or_create_indirect(vpn1) };
 
-        let vpn0 = (virtual_addr >> 12) & ((1 << 9) - 1);
-        table0.map_entry(vpn0, PageTableEntry::leaf(phys, virt));
+        let vpn0 = (virt >> 12) & ((1 << 9) - 1);
+        table0.map_entry(vpn0, PageTableEntry::leaf(phys, flags));
     }
 
     fn map_level_2_page(&mut self, virt: usize, phys: usize, flags: PageFlags) {
