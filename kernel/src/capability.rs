@@ -1,6 +1,5 @@
 use crate::process::PROCESS_COUNT;
 use crate::sync::Mutex;
-use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 use core::sync::atomic::{AtomicUsize, Ordering};
@@ -22,7 +21,8 @@ pub trait RawHandler {
     fn shared_memory(&self) -> (usize, usize);
 }
 
-struct TypedHandler<T, H: 'static>(&'static H, PhantomData<T>);
+#[repr(transparent)]
+struct TypedHandler<T, H>(H, PhantomData<T>);
 
 static CAPABILITY_PAGES: [CapabilityPage; PROCESS_COUNT + 1] =
     [const { CapabilityPage([const { CapabilityCertificate::new() }; _]) }; _];
@@ -59,16 +59,17 @@ pub fn grant_kernel_capability<T: 'static + Sync>(
     cap
 }
 
-pub fn reserve_kernel_capability<T: 'static + Sync>(
-    handler: &'static (impl Handler<T> + Sync),
+pub fn reserve_kernel_capability<T: 'static + Sync, H: Handler<T> + Sync>(
+    handler: &'static H,
 ) -> Capability<T> {
     let local_index = ALLOCATED_COUNT.fetch_add(1, Ordering::Relaxed);
-    *HANDLERS[local_index].lock() = Some(Box::leak(Box::new(TypedHandler(handler, PhantomData))));
+    *HANDLERS[local_index].lock() =
+        Some(unsafe { core::mem::transmute::<&'static H, &'static TypedHandler<T, H>>(handler) });
     unsafe { Capability::new(RawCapability::new(Actor::Kernel, local_index)) }
 }
 
-pub fn get_handler(local_index: usize) -> &'static dyn RawHandler {
-    HANDLERS[local_index].lock().unwrap()
+pub fn get_handler(local_index: usize) -> &'static (dyn RawHandler + Sync) {
+    *HANDLERS[local_index].lock().as_ref().unwrap()
 }
 
 pub fn capability_certificate(cap: RawCapability) -> &'static CapabilityCertificate {
