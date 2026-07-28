@@ -160,6 +160,7 @@ impl<A: Allocator + Copy> Node<A> {
     pub fn dealloc(&mut self, ptr: usize, req_size: usize, node_size: usize) {
         if ptr == 0 && req_size > node_size / 2 {
             assert_eq!(self.max_available, 0);
+            assert_eq!(self.allocated, req_size);
             self.max_available = node_size;
             self.allocated = 0;
             return;

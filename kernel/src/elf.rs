@@ -1,6 +1,5 @@
-use crate::page::{PageFlags, TopPageTable, virt_to_phys};
-use alloc::vec;
-use alloc::vec::Vec;
+use crate::page::{PageFlags, virt_to_phys};
+use crate::process::Process;
 use deravel_types::PAGE_SIZE;
 use elf::ElfBytes;
 use elf::abi::{EM_RISCV, ET_EXEC, PF_R, PF_W, PF_X, PT_LOAD};
@@ -19,7 +18,7 @@ pub macro elf($env:literal) {{
 const USER_START: usize = 0x1000000;
 const USER_END: usize = 0x2000000;
 
-pub fn load_elf(elf_bytes: &[u8], table: &mut TopPageTable) -> usize {
+pub fn load_elf(elf_bytes: &[u8], proc: &mut Process) {
     let elf = ElfBytes::<LittleEndian>::minimal_parse(elf_bytes).unwrap();
     assert_eq!(elf.ehdr.class, Class::ELF64);
     assert_eq!(elf.ehdr.endianness, LittleEndian);
@@ -48,23 +47,22 @@ pub fn load_elf(elf_bytes: &[u8], table: &mut TopPageTable) -> usize {
 
         if flags.is_writable() {
             let size = (segment.p_memsz as usize).next_multiple_of(PAGE_SIZE);
-            let pages = vec![0u8; size];
 
-            table.map_pages(
+            let pages = proc.alloc_array(size, 0u8);
+            pages[..segment.p_filesz as usize].copy_from_slice(data);
+
+            let pages = pages.as_ptr();
+            proc.page_table.map_pages(
                 segment.p_vaddr as usize,
-                virt_to_phys(pages.as_ptr()) as usize,
+                virt_to_phys(pages) as usize,
                 size,
                 flags,
             );
-
-            let flat_memory = Vec::leak(pages);
-            flat_memory[..segment.p_filesz as usize].copy_from_slice(data);
-            flat_memory[segment.p_memsz as usize..].fill(0);
         } else {
             assert!((data.as_ptr() as usize).is_multiple_of(PAGE_SIZE));
             assert!(elf_data_is_zero_padded(&segment, elf_bytes));
 
-            table.map_pages(
+            proc.page_table.map_pages(
                 segment.p_vaddr as usize,
                 data.as_ptr() as usize,
                 data.len().next_multiple_of(PAGE_SIZE),
@@ -73,7 +71,7 @@ pub fn load_elf(elf_bytes: &[u8], table: &mut TopPageTable) -> usize {
         }
     }
 
-    elf.ehdr.e_entry as usize
+    proc.pc = elf.ehdr.e_entry as usize;
 }
 
 fn paging_flags(segment: &ProgramHeader) -> PageFlags {

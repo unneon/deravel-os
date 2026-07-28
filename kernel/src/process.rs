@@ -12,10 +12,12 @@ use crate::shutdown;
 use crate::stack::UserCtx;
 use crate::sync::{Mutex, MutexGuard};
 use crate::user::UserPtr;
+use alloc::alloc::dealloc;
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::alloc::Layout;
 use core::num::NonZeroUsize;
 use core::sync::atomic::{AtomicU16, Ordering};
 use deravel_types::memory::{USER_INPUTS, USER_STACK};
@@ -71,6 +73,7 @@ pub struct Process {
     pub virtual_memory: BuddyAllocator,
     pub messages: VecDeque<Message, BuddyHeap>,
     pub currently_serving: Option<ProcessId>,
+    pub memory: Vec<(*mut u8, Layout)>,
 }
 unsafe impl Send for Process {}
 
@@ -92,6 +95,15 @@ pub const PROCESS_COUNT: usize = 8;
 
 static PROCESSES: [Mutex<Option<Process>>; PROCESS_COUNT] = [const { Mutex::new(None) }; _];
 static PROCESSES_RESERVED: AtomicU16 = AtomicU16::new(0);
+
+impl Process {
+    pub fn alloc_array<T: Copy>(&mut self, len: usize, initial: T) -> &mut [T] {
+        let pages = vec![initial; len];
+        let layout = Layout::array::<T>(pages.capacity()).unwrap();
+        self.memory.push((pages.as_ptr() as *mut u8, layout));
+        pages.leak()
+    }
+}
 
 impl<T: ProcessTag> ProcessReservation<T> {
     pub fn spawn(self, args: T::Args) {
@@ -140,30 +152,30 @@ pub fn reserve_process<T: ProcessTag>(elf: &'static [u8]) -> ProcessReservation<
 }
 
 pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: ProcessInputs<T>) {
-    let pid = inputs.id;
-    let mut page_table = Box::new(PageTable::new());
-    map_direct_mapping(&mut page_table);
-    map_kernel_image(&mut page_table);
-    let entry_point = load_elf(elf, &mut page_table);
-    map_capability_memory(&mut page_table, pid);
-    map_inputs_memory(&mut page_table, inputs);
-    map_user_stack(&mut page_table);
-
-    let mut proc = get_process(pid).lock();
-    *proc = Some(Process {
-        id: pid,
+    let mut proc = Process {
+        id: inputs.id,
         name,
         state: ProcessState::Runnable,
         registers: RiscvRegisters {
             sp: USER_STACK.end,
             ..RiscvRegisters::default()
         },
-        pc: entry_point,
-        page_table,
+        pc: 0,
+        page_table: Box::new(PageTable::new()),
         virtual_memory: BuddyAllocator::new(0x4000000..0x80000000),
         messages: VecDeque::new_in(BuddyHeap),
         currently_serving: None,
-    });
+        memory: Vec::new(),
+    };
+    map_direct_mapping(&mut proc.page_table);
+    map_kernel_image(&mut proc.page_table);
+    load_elf(elf, &mut proc);
+    map_capability_memory(&mut proc.page_table, proc.id);
+    map_inputs_memory(&mut proc.page_table, inputs);
+    map_user_stack(&mut proc.page_table);
+
+    let pid = proc.id;
+    *get_process(pid).lock() = Some(proc);
 }
 
 fn map_capability_memory(table: &mut TopPageTable, pid: ProcessId) {
@@ -234,6 +246,12 @@ pub fn find_runnable_process(user: Option<&UserCtx>) -> Option<MutexGuard<'stati
             ) {
                 return Some(proc);
             }
+            if proc.state == ProcessState::Finished {
+                cleanup_process(&mut proc);
+                drop(proc);
+                // TODO: Race condition here.
+                *PROCESSES[scan_index as usize].lock() = None;
+            }
         }
     }
 
@@ -253,5 +271,11 @@ pub fn inspect_can_progress(proc: &mut Process) {
                 proc.name, proc.id, from.name, from.id
             );
         }
+    }
+}
+
+pub fn cleanup_process(proc: &mut Process) {
+    for (ptr, layout) in proc.memory.drain(..) {
+        unsafe { dealloc(ptr, layout) }
     }
 }
