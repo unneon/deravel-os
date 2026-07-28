@@ -45,7 +45,6 @@ use crate::capability::{grant_kernel_capability, reserve_kernel_capability};
 use crate::device_tree::initialize_timebase_frequency;
 use crate::drvli::{ShutdownServer, SyscallHandler, dispatch_syscall};
 use crate::elf::elf;
-use crate::heap::granularity::PageGranular;
 use crate::heap::{initialize_early_heap, initialize_heap, log_heap_usage};
 use crate::interrupt::INTERRUPTS;
 use crate::log::{initialize_log, log_userspace};
@@ -361,7 +360,8 @@ impl SyscallHandler for () {
         let layout = Layout::from_size_align(size, PAGE_SIZE).unwrap();
         let mut proc = user.process();
         let virt = proc.virtual_memory.alloc(layout).unwrap();
-        let phys = virt_to_phys(Vec::leak(alloc_pages(size)).as_ptr()) as usize;
+        let pages = proc.alloc_array(size, 0u8);
+        let phys = virt_to_phys(pages.as_ptr()) as usize;
         let table = &mut proc.page_table;
         table.map_pages(virt, phys, size, PageFlags::readwrite().user());
         virt as *mut u8
@@ -372,7 +372,7 @@ impl SyscallHandler for () {
         let layout = Layout::from_size_align(size, PAGE_SIZE).unwrap();
         let mut proc = user.process();
         let virt = proc.virtual_memory.alloc(layout).unwrap();
-        let phys = virt_to_phys(Vec::leak(alloc_pages(size)).as_ptr()) as usize;
+        let phys = virt_to_phys(proc.alloc_array(size, 0u8).as_ptr()) as usize;
         let table = &mut proc.page_table;
         table.map_pages(virt, phys, size, PageFlags::readwrite().user());
         let cap = grant_kernel_capability(
@@ -425,12 +425,6 @@ impl SyscallHandler for () {
         };
         log_userspace(level, &user.process(), &text);
     }
-}
-
-fn alloc_pages(size: usize) -> Vec<u8, PageGranular> {
-    let mut pages = Vec::new_in(PageGranular::new());
-    pages.resize(size, 0);
-    pages
 }
 
 fn shutdown() -> ! {

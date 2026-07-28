@@ -36,12 +36,6 @@ unsafe extern "C" {
 
 static mut KERNEL_PAGE_TABLE: TopPageTable = PageTable::new();
 
-impl Page {
-    pub fn zeroed() -> Page {
-        Page([0; _])
-    }
-}
-
 pub fn initialize_memory_mapping() {
     let table = unsafe { &mut *&raw mut KERNEL_PAGE_TABLE };
     map_direct_mapping(table);

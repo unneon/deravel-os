@@ -6,19 +6,18 @@ use crate::elf::load_elf;
 use crate::heap::BuddyHeap;
 use crate::heap::granularity::PageGranular;
 use crate::page::{
-    Page, PageFlags, PageTable, TopPageTable, map_direct_mapping, map_kernel_image, virt_to_phys,
+    PageFlags, PageTable, TopPageTable, map_direct_mapping, map_kernel_image, virt_to_phys,
 };
 use crate::shutdown;
 use crate::stack::UserCtx;
 use crate::sync::{Mutex, MutexGuard};
 use crate::user::UserPtr;
-use alloc::alloc::dealloc;
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
-use alloc::vec;
 use alloc::vec::Vec;
-use core::alloc::Layout;
+use core::alloc::{Allocator, Layout};
 use core::num::NonZeroUsize;
+use core::ptr::NonNull;
 use core::sync::atomic::{AtomicU16, Ordering};
 use deravel_types::memory::{USER_INPUTS, USER_STACK};
 use deravel_types::*;
@@ -73,7 +72,7 @@ pub struct Process {
     pub virtual_memory: BuddyAllocator,
     pub messages: VecDeque<Message, BuddyHeap>,
     pub currently_serving: Option<ProcessId>,
-    pub memory: Vec<(*mut u8, Layout)>,
+    pub allocated: Vec<(*mut u8, Layout)>,
 }
 unsafe impl Send for Process {}
 
@@ -97,11 +96,22 @@ static PROCESSES: [Mutex<Option<Process>>; PROCESS_COUNT] = [const { Mutex::new(
 static PROCESSES_RESERVED: AtomicU16 = AtomicU16::new(0);
 
 impl Process {
+    pub fn alloc<T>(&mut self, initial: T) -> &mut T {
+        // TODO: Zero-initialize possible leftover.
+        let pages = Box::new_in(initial, PageGranular::new());
+        let layout = Layout::new::<T>();
+        self.allocated
+            .push((Box::as_ptr(&pages) as *mut u8, layout));
+        Box::leak(pages)
+    }
+
     pub fn alloc_array<T: Copy>(&mut self, len: usize, initial: T) -> &mut [T] {
-        let pages = vec![initial; len];
-        let layout = Layout::array::<T>(pages.capacity()).unwrap();
-        self.memory.push((pages.as_ptr() as *mut u8, layout));
-        pages.leak()
+        // TODO: Zero-initialize possible leftover.
+        let mut pages = Vec::with_capacity_in(len, PageGranular::new());
+        pages.resize(len, initial);
+        let layout = Layout::array::<T>(len).unwrap();
+        self.allocated.push((pages.as_ptr() as *mut u8, layout));
+        Vec::leak(pages)
     }
 }
 
@@ -165,14 +175,14 @@ pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: Pro
         virtual_memory: BuddyAllocator::new(0x4000000..0x80000000),
         messages: VecDeque::new_in(BuddyHeap),
         currently_serving: None,
-        memory: Vec::new(),
+        allocated: Vec::new(),
     };
     map_direct_mapping(&mut proc.page_table);
     map_kernel_image(&mut proc.page_table);
     load_elf(elf, &mut proc);
     map_capability_memory(&mut proc.page_table, proc.id);
-    map_inputs_memory(&mut proc.page_table, inputs);
-    map_user_stack(&mut proc.page_table);
+    map_inputs_memory(&mut proc, inputs);
+    map_user_stack(&mut proc);
 
     let pid = proc.id;
     *get_process(pid).lock() = Some(proc);
@@ -201,21 +211,23 @@ fn map_capability_memory(table: &mut TopPageTable, pid: ProcessId) {
     );
 }
 
-fn map_inputs_memory<T: ProcessTag>(table: &mut TopPageTable, inputs: ProcessInputs<T>) {
+fn map_inputs_memory<T: ProcessTag>(proc: &mut Process, inputs: ProcessInputs<T>) {
     let size = USER_INPUTS.end - USER_INPUTS.start;
     assert!(size_of::<ProcessInputs<T>>() <= size);
-    let page = Box::leak(Box::new_in(inputs, PageGranular::new()));
+    let page = proc.alloc(inputs);
     let virt = USER_INPUTS.start;
     let phys = virt_to_phys(page as *mut _) as usize;
-    table.map_pages(virt, phys, size, PageFlags::readonly().user());
+    proc.page_table
+        .map_pages(virt, phys, size, PageFlags::readonly().user());
 }
 
-fn map_user_stack(table: &mut TopPageTable) {
+fn map_user_stack(proc: &mut Process) {
     let stack_size = USER_STACK.end - USER_STACK.start;
-    let pages = Vec::leak(vec![Page::zeroed(); stack_size / PAGE_SIZE]);
+    let pages = proc.alloc_array(stack_size, 0u8);
     let phys = virt_to_phys(pages.as_ptr()) as usize;
     let virt = USER_STACK.start;
-    table.map_pages(virt, phys, stack_size, PageFlags::readwrite().user());
+    proc.page_table
+        .map_pages(virt, phys, stack_size, PageFlags::readwrite().user());
 }
 
 pub fn schedule_and_switch_to_userspace(user: &mut UserCtx) -> ! {
@@ -274,8 +286,8 @@ pub fn inspect_can_progress(proc: &mut Process) {
     }
 }
 
-pub fn cleanup_process(proc: &mut Process) {
-    for (ptr, layout) in proc.memory.drain(..) {
-        unsafe { dealloc(ptr, layout) }
+fn cleanup_process(proc: &mut Process) {
+    for (ptr, layout) in proc.allocated.drain(..) {
+        unsafe { PageGranular::new().deallocate(NonNull::new(ptr).unwrap(), layout) }
     }
 }
