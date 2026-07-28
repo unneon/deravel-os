@@ -89,7 +89,7 @@ impl<const LEVEL: usize> PageTable<LEVEL> {
                 indirect
             }
             PageTableEntryUnpacked::Indirect { phys_ptr } => unsafe {
-                &mut *phys_to_virt(phys_ptr)
+                &mut *phys_to_virt(phys_ptr as *mut PageTable<{ LEVEL - 1 }>)
             },
             PageTableEntryUnpacked::Leaf { .. } => unreachable!(),
         }
@@ -120,6 +120,18 @@ impl PageTable<0> {
     fn map_pages(&mut self, virt: usize, phys: usize, size: usize, flags: PageFlags) {
         for v in (virt..virt + size).step_by(PAGE_SIZE) {
             self.map_leaf(v, phys + (v - virt), flags);
+        }
+    }
+}
+
+impl<const LEVEL: usize> Drop for PageTable<LEVEL> {
+    fn drop(&mut self) {
+        for entry in &mut self.0 {
+            if let PageTableEntryUnpacked::Indirect { phys_ptr } = entry.unpack() {
+                let ptr = phys_to_virt(phys_ptr);
+                drop(unsafe { Box::from_raw(ptr as *mut PageTable<0>) });
+                *entry = PageTableEntry::invalid();
+            }
         }
     }
 }
