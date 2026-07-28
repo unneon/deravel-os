@@ -11,6 +11,7 @@ app image_viewer(image shared_memory, windowing windowing)
 
 interface filesystem
     func read(path text) bytes
+    func read_large(path text) shared_memory
     func write(path text, data bytes)
     func subcapability(path text) filesystem
 

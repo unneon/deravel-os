@@ -67,6 +67,22 @@ impl FilesystemServer<usize> for Server {
         file.data[..file.size].to_owned()
     }
 
+    fn read_large(
+        &mut self,
+        ctx: &mut Ctx<Self>,
+        cap: usize,
+        path_suffix: &str,
+    ) -> Capability<SharedMemory> {
+        let path = concat_path(&self.caps[cap], path_suffix);
+        let file = self.files.iter().find(|file| file.name == path);
+        let Some(file) = file else {
+            panic!("file {path:?} not found")
+        };
+        let (shared, shared_cap) = alloc_shared(file.size);
+        unsafe { &mut *shared }.copy_from_slice(&file.data[..file.size]);
+        ctx.forward_to_sender(shared_cap)
+    }
+
     fn write(&mut self, _: &mut Ctx<Self>, cap: usize, path_suffix: &str, data: &[u8]) {
         let path = concat_path(&self.caps[cap], path_suffix);
         let file = self.files.iter().find(|file| file.name == path);

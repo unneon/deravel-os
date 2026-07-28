@@ -26,12 +26,10 @@ fn main(args: ShellArgs) {
             };
             args.fs.write(file_name, file.as_bytes());
         } else if let Some(file_name) = cmdline.strip_prefix("image ") {
-            let file = args.fs.read(file_name);
-            let (mem, mem_cap) = alloc_shared(file.len());
-            unsafe { &mut *mem }.copy_from_slice(&file);
-            let mem_cap = forward(mem_cap, Actor::Kernel);
+            let file = args.fs.read_large(file_name);
+            let file = forward(file, Actor::Kernel);
             let windowing = forward(args.windowing, Actor::Kernel);
-            args.image_viewer.spawn(mem_cap, windowing);
+            args.image_viewer.spawn(file, windowing);
         } else if let Some(domain) = cmdline.strip_prefix("dns ") {
             let ip = args.net.dns(domain);
             println!("{ip}");
