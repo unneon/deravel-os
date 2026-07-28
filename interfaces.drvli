@@ -1,11 +1,13 @@
-app shell(console console, fs filesystem, net network, shutdown shutdown)
+app shell(console console, fs filesystem, image_viewer process_spawner image_viewer, windowing windowing, net network, shutdown shutdown)
 
 app tar_fs(drive drive) implements filesystem
 
-app windowing(display display, keyboard input_device, mouse input_device, fs filesystem, net network, shutdown shutdown, terminal process_spawner terminal, shell process_spawner shell)
-    func create_window() window
+app windowing(display display, keyboard input_device, mouse input_device, fs filesystem, image_viewer process_spawner image_viewer, net network, shutdown shutdown, terminal process_spawner terminal, shell process_spawner shell)
+    func create_window(width usize, height usize) window
 
 app terminal(windowing windowing) implements console
+
+app image_viewer(image shared_memory, windowing windowing)
 
 interface filesystem
     func read(path text) bytes
@@ -47,8 +49,6 @@ interface input_device
     stream events input_event
 
 interface window
-    func width() usize
-    func height() usize
     func framebuffer() shared_memory
     func draw()
     stream events input_event

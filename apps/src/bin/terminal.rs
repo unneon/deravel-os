@@ -133,9 +133,9 @@ fn find_glyph(c: u8) -> Option<&'static Glyph> {
 }
 
 fn main(args: TerminalArgs) {
-    let window = args.windowing.create_window();
-    let width = window.width();
-    let height = window.height();
+    let width = 400;
+    let height = 300;
+    let window = args.windowing.create_window(width, height);
     let framebuffer = Framebuffer::map(width, height, window.framebuffer());
     let mut renderer = Renderer {
         cursor_x: FONT.leftpad as i32,

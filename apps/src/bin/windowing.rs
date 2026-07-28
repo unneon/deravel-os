@@ -27,6 +27,7 @@ struct Server {
     cursor_x: usize,
     cursor_y: usize,
     fs: Capability<Filesystem>,
+    image_viewer: Capability<ImageViewerSpawner>,
     net: Capability<Network>,
     shutdown: Capability<Shutdown>,
     global_shortcut: Shortcut,
@@ -59,11 +60,23 @@ struct KeyboardTag;
 #[derive(Clone, Copy)]
 struct MouseTag;
 
+impl Server {
+    fn draw_window(&mut self, window_id: usize) {
+        let window = &self.windows[window_id];
+        self.display_framebuffer
+            .copy_rect(window.x, window.y, &window.framebuffer);
+    }
+}
+
 impl WindowingServer for Server {
-    fn create_window(&mut self, ctx: &mut Ctx<Self>, _: ()) -> Capability<Window> {
+    fn create_window(
+        &mut self,
+        ctx: &mut Ctx<Self>,
+        _: (),
+        width: usize,
+        height: usize,
+    ) -> Capability<Window> {
         let window_id = self.windows.len();
-        let width = 400;
-        let height = 300;
         let (framebuffer, memory) = Framebuffer::alloc(width, height);
         self.windows.push(WindowData {
             x: self.cursor_x - width / 2,
@@ -81,24 +94,16 @@ impl WindowingServer for Server {
 }
 
 impl WindowServer<usize> for Server {
-    fn width(&mut self, _: &mut Ctx<Self>, window_id: usize) -> usize {
-        self.windows[window_id].width
-    }
-
-    fn height(&mut self, _: &mut Ctx<Self>, window_id: usize) -> usize {
-        self.windows[window_id].height
-    }
-
     fn framebuffer(&mut self, ctx: &mut Ctx<Self>, window_id: usize) -> Capability<SharedMemory> {
         ctx.forward_to_sender(self.windows[window_id].memory)
     }
 
     fn draw(&mut self, _: &mut Ctx<Self>, window_id: usize) {
-        let window = &mut self.windows[window_id];
-        for window_y in 0..window.height {
-            let display_y = window.y + window_y;
-            self.display_framebuffer.row(display_y)[window.x..][..window.width]
-                .copy_from_slice(window.framebuffer.row(window_y))
+        self.draw_window(window_id);
+        if let Some(active) = self.active_window
+            && active != window_id
+        {
+            self.draw_window(active);
         }
         self.display.draw();
     }
@@ -125,9 +130,12 @@ impl Observer<InputEvent, KeyboardTag> for Server {
                     let term = self.terminal_spawner.spawn(ctx.grant_to_kernel(()));
                     let term = forward(term, Actor::Kernel);
                     let fs = forward(self.fs, Actor::Kernel);
+                    let image_viewer = forward(self.image_viewer, Actor::Kernel);
+                    let windowing = ctx.grant_to_kernel(());
                     let net = forward(self.net, Actor::Kernel);
                     let shutdown = forward(self.shutdown, Actor::Kernel);
-                    self.shell_spawner.spawn(term, fs, net, shutdown);
+                    self.shell_spawner
+                        .spawn(term, fs, image_viewer, windowing, net, shutdown);
                     self.active_window = None;
                     self.global_shortcut = Shortcut::NotStarted;
                 }
@@ -223,6 +231,7 @@ fn main(args: WindowingArgs) {
         cursor_x: width / 2,
         cursor_y: height / 2,
         fs: args.fs,
+        image_viewer: args.image_viewer,
         net: args.net,
         shutdown: args.shutdown,
         global_shortcut: Shortcut::NotStarted,

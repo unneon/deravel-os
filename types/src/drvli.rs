@@ -1,5 +1,6 @@
 #![allow(non_camel_case_types, unused)]
 
+use crate::SharedMemory;
 use crate::capability::{Capability, RawCapability};
 use core::fmt::Debug;
 use serde::{Deserialize, Serialize};

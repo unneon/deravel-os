@@ -103,6 +103,11 @@ fn main(_hart_id: u64, dt_ptr: *const u8) -> ! {
         keyboard: reserve_kernel_capability(virtio_keyboard),
         mouse: reserve_kernel_capability(virtio_mouse),
         fs: fs_tar.export,
+        image_viewer: reserve_kernel_capability(Box::leak(Box::new(ProcessSpawnerService::<
+            ImageViewer,
+        >::new(elf!(
+            "CARGO_BIN_FILE_DERAVEL_APPS_image_viewer"
+        ))))),
         net: reserve_kernel_capability(virtio_net),
         shutdown: reserve_kernel_capability(&KernelShutdown),
         terminal: reserve_kernel_capability(Box::leak(Box::new(

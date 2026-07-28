@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-(mkdir -p disk && cd disk && tar cf ../disk.tar --format=ustar *.txt)
+(mkdir -p disk && cd disk && tar cf ../disk.tar --format=ustar *)
 
 if [[ "${DERAVEL_QEMU}" == *"-S"* ]] ; then
     DERAVEL_FULL_SCREEN=off

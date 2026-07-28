@@ -4,6 +4,7 @@ use deravel_types::{Capability, PAGE_SIZE, SharedMemory};
 pub struct Framebuffer {
     ptr: &'static mut [u32],
     width: usize,
+    height: usize,
 }
 
 impl Framebuffer {
@@ -11,7 +12,7 @@ impl Framebuffer {
         let (ptr, cap) = alloc_shared(4 * width * height);
         let ptr =
             unsafe { core::slice::from_raw_parts_mut(ptr.as_mut_ptr() as *mut u32, ptr.len() / 4) };
-        (Framebuffer { ptr, width }, cap)
+        (Framebuffer { ptr, width, height }, cap)
     }
 
     pub fn map(width: usize, height: usize, cap: Capability<SharedMemory>) -> Framebuffer {
@@ -19,11 +20,11 @@ impl Framebuffer {
         assert_eq!(ptr.len(), (4 * width * height).next_multiple_of(PAGE_SIZE));
         let ptr =
             unsafe { core::slice::from_raw_parts_mut(ptr.as_mut_ptr() as *mut u32, ptr.len() / 4) };
-        Framebuffer { ptr, width }
+        Framebuffer { ptr, width, height }
     }
 
     pub fn set_pixel(&mut self, x: usize, y: usize, r: u8, g: u8, b: u8, a: u8) {
-        self.row(y)[x] = bgra(r, g, b, a);
+        self.row_mut(y)[x] = bgra(r, g, b, a);
     }
 
     pub fn fill(&mut self, r: u8, g: u8, b: u8, a: u8) {
@@ -50,6 +51,13 @@ impl Framebuffer {
         self.rows(y_start, y_end).fill(bgra(r, g, b, a))
     }
 
+    pub fn copy_rect(&mut self, offset_x: usize, offset_y: usize, rect: &Framebuffer) {
+        for rect_y in 0..rect.height {
+            let y = offset_y + rect_y;
+            self.row_mut(y)[offset_x..][..rect.width].copy_from_slice(rect.row(rect_y))
+        }
+    }
+
     pub fn shift_rows(&mut self, y_from: usize, y_to: usize, count: usize) {
         self.ptr.copy_within(
             y_from * self.width..(y_from + count) * self.width,
@@ -74,7 +82,11 @@ impl Framebuffer {
         &mut self.ptr[y_start * self.width..y_end * self.width]
     }
 
-    pub fn row(&mut self, y: usize) -> &mut [u32] {
+    pub fn row(&self, y: usize) -> &[u32] {
+        &self.ptr[y * self.width..][..self.width]
+    }
+
+    pub fn row_mut(&mut self, y: usize) -> &mut [u32] {
         &mut self.ptr[y * self.width..][..self.width]
     }
 }

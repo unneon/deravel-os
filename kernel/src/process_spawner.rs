@@ -33,26 +33,43 @@ impl<T: ProcessTag> Handler<T::Spawner> for ProcessSpawnerService<T> {
         );
         let args: <T as ProcessTag>::Args = postcard::from_bytes(args).unwrap();
         args.for_all(|cap| {
-            assert_eq!(cap.certifier(), Actor::from(sender), "process {}[{sender:?}] tried to pass capability {cap:?} that was granted by {:?}, not itself",
-                get_process(sender).lock_if_some().unwrap().name,
-                cap.certifier()
-            );
             let slot = capability_certificate(cap);
             let preforward = slot.load(Ordering::Relaxed).unpack();
             match preforward {
                 CapabilityCertificateUnpacked::Granted {
                     grantee: Actor::Kernel,
-                } => slot.store(
-                    CapabilityCertificateValue::granted(reserve.id),
-                    Ordering::Relaxed,
-                ),
+                } => {
+                    assert_eq!(
+                        cap.certifier(),
+                        Actor::Userspace(sender),
+                        "{}{sender:?} tried to pass {cap:?} granted by {}{:?}",
+                        get_process(sender).lock_if_some().unwrap().name,
+                        get_process(cap.certifier().unwrap_user())
+                            .lock_if_some()
+                            .unwrap()
+                            .name,
+                        cap.certifier(),
+                    );
+                    slot.store(
+                        CapabilityCertificateValue::granted(reserve.id),
+                        Ordering::Relaxed,
+                    )
+                }
                 CapabilityCertificateUnpacked::Forwarded {
                     forwardee: Actor::Kernel,
                     inner,
-                } => slot.store(
-                    CapabilityCertificateValue::forwarded(reserve.id.into(), inner),
-                    Ordering::Relaxed,
-                ),
+                } => {
+                    if let Err(err) = inner.validate(sender) {
+                        panic!(
+                            "{}{sender:?} tried to pass {cap:?}, {err}",
+                            get_process(sender).lock_if_some().unwrap().name
+                        );
+                    }
+                    slot.store(
+                        CapabilityCertificateValue::forwarded(reserve.id.into(), inner),
+                        Ordering::Relaxed,
+                    )
+                }
                 _ => unreachable!("{preforward:?}"),
             }
         });

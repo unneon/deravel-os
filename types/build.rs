@@ -86,5 +86,13 @@ fn main() {
 
 fn generate_spawner(interface: &Interface, out: &mut String) {
     let camel_name = camel_case(interface.name);
+    let snake_case = interface.name;
     writeln!(out, "pub struct {camel_name}Spawner;").unwrap();
+    writeln!(out, "impl Interface for {camel_name}Spawner {{").unwrap();
+    writeln!(
+        out,
+        "    const NAME: &'static str = \"process_spawner {snake_case}\";"
+    )
+    .unwrap();
+    writeln!(out, "}}").unwrap();
 }
