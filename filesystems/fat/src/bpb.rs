@@ -19,7 +19,7 @@ pub struct BpbCommon {
     pub root_ent_cnt: u16,
     pub tot_sec_16: u16,
     pub media: u8,
-    pub fats_z16: u16,
+    pub fat_sz_16: u16,
     pub sec_per_trk: u16,
     pub num_heads: u16,
     pub hidd_sec: u32,
@@ -30,7 +30,7 @@ pub struct BpbCommon {
 #[repr(C, packed)]
 pub struct BpbExtended32 {
     pub common: BpbCommon,
-    pub fats_z32: u32,
+    pub fat_sz_32: u32,
     pub ext_flags: u16,
     pub fs_ver: u16,
     pub root_clus: u32,
@@ -58,7 +58,7 @@ impl Bpb {
         unsafe { &self.common }
     }
 
-    pub fn as_extended32(&self) -> &BpbExtended32 {
+    pub fn as_extended_32(&self) -> &BpbExtended32 {
         // SAFETY: BPB is plain old data.
         unsafe { &self.extended32 }
     }

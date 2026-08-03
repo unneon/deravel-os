@@ -17,6 +17,14 @@ use log::*;
 
 struct Server;
 
+#[derive(Debug, Eq, PartialEq)]
+enum Type {
+    Fat12,
+    Fat16,
+    Fat32,
+}
+
+#[allow(unused)]
 impl FilesystemServer<usize> for Server {
     fn read(&mut self, _: &mut Ctx<Self>, cap: usize, path_suffix: &str) -> Vec<u8> {
         todo!()
@@ -71,45 +79,49 @@ fn main(args: TarFsArgs) {
     // TODO: Validate common.hidd_sec.
     // common.tot_sec_32 validated once FAT type is determined.
 
-    // Calculation written exactly as in spec. (Microsoft FAT Specification 3.5).
-
-    // TODO: Can this use u32? Does that have good instructions on RISC-V 64?
-    #[allow(clippy::manual_div_ceil)]
-    let root_dir_sectors = ((common.root_ent_cnt as usize * 32)
-        + (common.byts_per_sec as usize - 1))
-        / common.byts_per_sec as usize;
-    let fats_z = if common.fats_z16 != 0 {
-        common.fats_z16 as usize
+    let root_dir_sectors = (common.root_ent_cnt as u32 * 32).div_ceil(common.byts_per_sec as u32);
+    let fat_sz = if common.fat_sz_16 != 0 {
+        common.fat_sz_16 as u32
     } else {
-        bpb.as_extended32().fats_z32 as usize
+        bpb.as_extended_32().fat_sz_32
     };
 
     let tot_sec = if common.tot_sec_16 != 0 {
-        common.tot_sec_16 as usize
+        common.tot_sec_16 as u32
     } else {
-        common.tot_sec_32 as usize
+        common.tot_sec_32
     };
 
-    let data_sec = tot_sec - (common.rsvd_sec_cnt as usize + common.num_fats as usize * fats_z)
-        + root_dir_sectors;
+    let data_sec =
+        tot_sec - (common.rsvd_sec_cnt as u32 + common.num_fats as u32 * fat_sz) + root_dir_sectors;
 
-    let count_of_clusters = data_sec / common.sec_per_clus as usize;
+    let count_of_clusters = data_sec / common.sec_per_clus as u32;
 
-    if count_of_clusters < 4085 {
-        unimplemented!("FAT12")
+    let type_ = if count_of_clusters < 4085 {
+        Type::Fat12
     } else if count_of_clusters < 65525 {
-        unimplemented!("FAT16")
+        Type::Fat16
     } else {
-        let extended32 = bpb.as_extended32();
-        debug!("{extended32:?}");
-        // TODO: Validate the extended BPB.
-    }
+        Type::Fat32
+    };
+
+    // TODO: Validate the extended BPB.
+
+    let max_valid_cluster_number = count_of_clusters + 1;
+    let count_of_clusters_including_two_reserved = count_of_clusters + 2;
+
+    debug!("fat count is {}, fat size is {}", common.num_fats, fat_sz);
+
+    assert_eq!(type_, Type::Fat32);
+
+    let fat_region_start = common.rsvd_sec_cnt as usize;
 
     let server = Server;
     let mut dispatch = Dispatch::new_object(server, 0);
     dispatch.run();
 }
 
+#[allow(dead_code)]
 fn concat_path<'a>(prefix: &'a str, suffix: &'a str) -> Cow<'a, str> {
     if prefix.is_empty() {
         suffix.into()
