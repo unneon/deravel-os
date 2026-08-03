@@ -2,6 +2,7 @@
 members = [
     "apps",
     "codegen",
+    "filesystems/fat",
     "filesystems/tar",
     "kernel",
     "kernel-api",

@@ -95,14 +95,14 @@ fn main(_hart_id: u64, dt_ptr: *const u8) -> ! {
     initialize_plic(&dt);
     enable_interrupts();
 
-    let fs_tar = reserve_process::<TarFs>(elf!("CARGO_BIN_FILE_DERAVEL_FILESYSTEM_TAR"));
+    let fat = reserve_process::<FatFs>(elf!("CARGO_BIN_FILE_DERAVEL_FILESYSTEM_FAT"));
     let windowing = reserve_process::<Windowing>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_windowing"));
 
     windowing.spawn(WindowingArgs {
         display: reserve_kernel_capability(virtio_gpu),
         keyboard: reserve_kernel_capability(virtio_keyboard),
         mouse: reserve_kernel_capability(virtio_mouse),
-        fs: fs_tar.export,
+        fs: fat.export,
         image_viewer: reserve_kernel_capability(Box::leak(Box::new(ProcessSpawnerService::<
             ImageViewer,
         >::new(elf!(
@@ -117,7 +117,7 @@ fn main(_hart_id: u64, dt_ptr: *const u8) -> ! {
             elf!("CARGO_BIN_FILE_DERAVEL_APPS_shell"),
         )))),
     });
-    fs_tar.spawn(TarFsArgs {
+    fat.spawn(FatFsArgs {
         drive: reserve_kernel_capability(virtio_blk),
     });
 
