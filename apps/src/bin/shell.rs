@@ -2,6 +2,7 @@
 #![no_main]
 
 use deravel_kernel_api::*;
+use log::*;
 
 fn main(args: ShellArgs) {
     set_stdio(args.console);
@@ -38,6 +39,7 @@ fn main(args: ShellArgs) {
         } else if cmdline == "exit" {
             break;
         } else {
+            error!("unknown command {cmdline}");
             println!("unknown command: {cmdline}");
         }
     }

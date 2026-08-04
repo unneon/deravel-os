@@ -1,5 +1,7 @@
 app shell(console console, fs filesystem, image_viewer process_spawner image_viewer, windowing windowing, net network, shutdown shutdown)
 
+app fat_fs(drive drive) implements filesystem
+
 app tar_fs(drive drive) implements filesystem
 
 app windowing(display display, keyboard input_device, mouse input_device, fs filesystem, image_viewer process_spawner image_viewer, net network, shutdown shutdown, terminal process_spawner terminal, shell process_spawner shell)

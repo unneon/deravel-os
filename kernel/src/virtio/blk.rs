@@ -1,6 +1,7 @@
 use crate::drvli::DriveServer;
 use crate::interrupt::InterruptHandler;
 use crate::sync::Mutex;
+use crate::util::fmt::memory::fmt_memory_size;
 use crate::util::volatile::{Readonly, Volatile, volatile_struct};
 use crate::virtio::queue::{QUEUE_SIZE, Queue};
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK};
@@ -34,6 +35,8 @@ struct State {
 #[derive(Debug)]
 pub struct VirtioBlkError;
 
+pub const SECTOR_SIZE: usize = 512;
+
 pub const VIRTIO_BLK_T_IN: u32 = 0;
 pub const VIRTIO_BLK_T_OUT: u32 = 1;
 
@@ -44,8 +47,8 @@ impl VirtioBlk {
         common.device_status().write_bitor(STATUS_ACKNOWLEDGE as u8);
         common.device_status().write_bitor(STATUS_DRIVER as u8);
 
-        let capacity = caps.device.capacity().read();
-        info!("drive has a capacity of {capacity} sectors");
+        let capacity = caps.device.capacity().read() as usize;
+        info!("found a {} drive", fmt_memory_size(capacity * SECTOR_SIZE));
 
         let queue = Queue::new(&mut common, &caps.notify, QUEUE_SIZE);
         common.device_status().write_bitor(STATUS_DRIVER_OK as u8);
@@ -59,7 +62,7 @@ impl VirtioBlk {
         }
     }
 
-    pub fn read(&self, sector: u64, buf: &mut [u8; 512]) -> Result<(), VirtioBlkError> {
+    pub fn read(&self, sector: u64, buf: &mut [u8; SECTOR_SIZE]) -> Result<(), VirtioBlkError> {
         let header = Header {
             type_: VIRTIO_BLK_T_IN,
             reserved: 0,
@@ -74,7 +77,7 @@ impl VirtioBlk {
         result_from_status(status)
     }
 
-    pub fn write(&self, sector: u64, buf: &[u8; 512]) -> Result<(), VirtioBlkError> {
+    pub fn write(&self, sector: u64, buf: &[u8; SECTOR_SIZE]) -> Result<(), VirtioBlkError> {
         let header = Header {
             type_: VIRTIO_BLK_T_OUT,
             reserved: 0,
@@ -102,7 +105,7 @@ impl InterruptHandler for VirtioBlk {
 
 impl DriveServer for VirtioBlk {
     fn read(&self, _: ProcessId, sector: u64) -> Vec<u8> {
-        let mut buf = Box::new([0u8; 512]);
+        let mut buf = Box::new([0u8; SECTOR_SIZE]);
         self.read(sector, &mut buf).unwrap();
         Vec::from(buf as Box<[u8]>)
     }

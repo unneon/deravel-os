@@ -64,6 +64,14 @@ name = "deravel-codegen"
 version = "0.0.0"
 
 [[package]]
+name = "deravel-filesystem-fat"
+version = "0.0.0"
+dependencies = [
+ "deravel-kernel-api",
+ "log",
+]
+
+[[package]]
 name = "deravel-filesystem-tar"
 version = "0.0.0"
 dependencies = [
@@ -77,6 +85,7 @@ version = "0.0.0"
 dependencies = [
  "deravel-apps",
  "deravel-codegen",
+ "deravel-filesystem-fat",
  "deravel-filesystem-tar",
  "deravel-types",
  "elf",
