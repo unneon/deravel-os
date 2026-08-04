@@ -15,7 +15,6 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::assert_matches;
 use deravel_kernel_api::*;
-use log::*;
 
 struct Fat {
     drive: Capability<Drive>,
@@ -33,9 +32,8 @@ enum Type {
 }
 
 impl Fat {
-    fn traverse_path(&self, mut dir: u32, mut path: &str) -> u32 {
+    fn traverse_path(&self, mut dir: u32, mut path: &str) -> (u32, usize) {
         'segments: loop {
-            debug!("traverse_path({dir}, {path:?})");
             let (path_seg, path_tail) = match path.split_once('/') {
                 Some((path_seg, path_tail)) => (path_seg, Some(path_tail)),
                 None => (path, None),
@@ -45,7 +43,7 @@ impl Fat {
                 if de.name == needle {
                     let de_cluster = (de.fst_clus_hi as u32) << 16 | de.fst_clus_lo as u32;
                     let Some(path_tail) = path_tail else {
-                        return de_cluster;
+                        return (de_cluster, de.file_size as usize);
                     };
                     dir = de_cluster;
                     path = path_tail;
@@ -113,8 +111,10 @@ impl Fat {
 
 impl FilesystemServer<u32> for Fat {
     fn read(&mut self, _: &mut Ctx<Self>, dir: u32, path: &str) -> Vec<u8> {
-        let file = self.traverse_path(dir, path);
-        self.read_file(file)
+        let (file, file_size) = self.traverse_path(dir, path);
+        let mut data = self.read_file(file);
+        data.resize(file_size, 0);
+        data
     }
 
     fn read_large(
@@ -123,10 +123,10 @@ impl FilesystemServer<u32> for Fat {
         dir: u32,
         path: &str,
     ) -> Capability<SharedMemory> {
-        let file = self.traverse_path(dir, path);
+        let (file, file_size) = self.traverse_path(dir, path);
         let data = self.read_file(file);
-        let (shared, shared_cap) = alloc_shared(data.len());
-        unsafe { &mut *shared }.copy_from_slice(&data);
+        let (shared, shared_cap) = alloc_shared(file_size);
+        unsafe { &mut *shared }.copy_from_slice(&data[..file_size]);
         ctx.forward_to_sender(shared_cap)
     }
 
@@ -140,7 +140,7 @@ impl FilesystemServer<u32> for Fat {
         dir: u32,
         path: &str,
     ) -> Capability<Filesystem> {
-        ctx.grant_to_sender(self.traverse_path(dir, path))
+        ctx.grant_to_sender(self.traverse_path(dir, path).0)
     }
 }
 
