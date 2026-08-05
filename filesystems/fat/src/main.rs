@@ -182,11 +182,15 @@ impl Fat {
             + self.bpb.root_ent_cnt as u64 * 32 / DISK_SECTOR_SIZE as u64
     }
 
-    fn volume_label(&self) -> ArrayCStr<11> {
-        match self.type_ {
+    fn volume_label(&self) -> Option<ArrayCStr<11>> {
+        let name = match self.type_ {
             Fat12 | Fat16 => self.bpb.as_extended_12_16().bs_vol_lab,
             Fat32 => self.bpb.as_extended_32().bs_vol_lab,
-        }
+        };
+        if &name.0 == b"NO NAME    " {
+            return None;
+        };
+        Some(name)
     }
 }
 
@@ -244,8 +248,11 @@ fn main(args: TarFsArgs) {
         max_cluster: count_of_clusters + 1,
     };
 
-    let volume_label = server.volume_label();
-    info!("mounting FAT volume {volume_label:?}");
+    if let Some(volume_label) = server.volume_label() {
+        info!("mounting FAT volume {volume_label:?}");
+    } else {
+        info!("mounting unnamed FAT volume");
+    }
 
     let root_directory = match server.type_ {
         Fat12 | Fat16 => Directory::RootDirectoryRegion,
