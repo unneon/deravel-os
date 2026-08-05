@@ -75,12 +75,10 @@ impl Fat {
     }
 
     fn read_root_directory_region(&self) -> Vec<DirectoryEntry> {
-        let rdr_sectors_start =
-            self.bpb.rsvd_sec_cnt as u64 + self.bpb.num_fats as u64 * self.bpb.fat_sz_16 as u64;
         let rdr_sectors_count = self.bpb.root_ent_cnt as u64 * 32 / DISK_SECTOR_SIZE as u64;
         let mut entries = Vec::new();
         for i in 0..rdr_sectors_count {
-            let bytes = self.drive.read(rdr_sectors_start + i);
+            let bytes = self.drive.read(self.root_directory_sectors_start() + i);
             entries.extend_from_slice(&directory_bytes_to_entries(bytes));
         }
         entries
@@ -92,6 +90,10 @@ impl Fat {
             data.extend_from_slice(&self.read_data(cluster));
             let fat_entry = self.read_fat_entry(cluster);
             match (self.type_, fat_entry & ((!0) >> 4)) {
+                (Fat12, next_cluster @ 0x002..) if next_cluster <= self.max_cluster => {
+                    cluster = next_cluster;
+                }
+                (Fat12, 0xFF8..=0xFFF) => break data,
                 (Fat16, next_cluster @ 0x0002..) if next_cluster <= self.max_cluster => {
                     cluster = next_cluster;
                 }
@@ -107,22 +109,43 @@ impl Fat {
 
     fn read_fat_entry(&self, cluster: u32) -> u32 {
         match self.type_ {
-            Fat12 => unimplemented!(),
+            Fat12 => {
+                let global_byte_index = cluster + cluster / 2;
+                let fat_sector_index = global_byte_index as u64 / DISK_SECTOR_SIZE as u64;
+                let fat_entry_byte_index = global_byte_index as usize % DISK_SECTOR_SIZE;
+                let bytes = if fat_entry_byte_index + 1 < DISK_SECTOR_SIZE {
+                    let sector = self.drive.read(self.fat_sectors_start() + fat_sector_index);
+                    [
+                        sector[fat_entry_byte_index],
+                        sector[fat_entry_byte_index + 1],
+                    ]
+                } else {
+                    let first_sector = self.drive.read(self.fat_sectors_start() + fat_sector_index);
+                    let second_sector = self
+                        .drive
+                        .read(self.fat_sectors_start() + fat_sector_index + 1);
+                    [first_sector[fat_entry_byte_index], second_sector[0]]
+                };
+                let value = u16::from_le_bytes(bytes) as u32;
+                if cluster.is_multiple_of(2) {
+                    value & 0x0FFF
+                } else {
+                    value >> 4
+                }
+            }
             Fat16 => {
                 let entries_per_sector = DISK_SECTOR_SIZE as u32 / 2;
-                let fat_sectors_start = self.bpb.rsvd_sec_cnt as u64;
-                let fat_sector_index = cluster / entries_per_sector;
+                let fat_sector_index = (cluster / entries_per_sector) as u64;
                 let fat_entry_index = cluster % entries_per_sector;
-                let sector = self.drive.read(fat_sectors_start + fat_sector_index as u64);
+                let sector = self.drive.read(self.fat_sectors_start() + fat_sector_index);
                 let entry = sector.as_chunks().0[fat_entry_index as usize];
                 u16::from_le_bytes(entry) as u32
             }
             Fat32 => {
                 let entries_per_sector = DISK_SECTOR_SIZE as u32 / 4;
-                let fat_sectors_start = self.bpb.rsvd_sec_cnt as u64;
-                let fat_sector_index = cluster / entries_per_sector;
+                let fat_sector_index = (cluster / entries_per_sector) as u64;
                 let fat_entry_index = cluster % entries_per_sector;
-                let sector = self.drive.read(fat_sectors_start + fat_sector_index as u64);
+                let sector = self.drive.read(self.fat_sectors_start() + fat_sector_index);
                 let entry = sector.as_chunks().0[fat_entry_index as usize];
                 u32::from_le_bytes(entry)
             }
@@ -139,9 +162,16 @@ impl Fat {
         data
     }
 
-    fn data_sectors_start(&self) -> u64 {
+    fn fat_sectors_start(&self) -> u64 {
         self.bpb.rsvd_sec_cnt as u64
-            + self.bpb.num_fats as u64 * self.fat_sz as u64
+    }
+
+    fn root_directory_sectors_start(&self) -> u64 {
+        self.fat_sectors_start() + self.bpb.num_fats as u64 * self.fat_sz as u64
+    }
+
+    fn data_sectors_start(&self) -> u64 {
+        self.root_directory_sectors_start()
             + self.bpb.root_ent_cnt as u64 * 32 / DISK_SECTOR_SIZE as u64
     }
 
@@ -243,10 +273,6 @@ fn main(args: TarFsArgs) {
     };
 
     // TODO: Validate the extended BPB.
-
-    if type_ != Fat16 && type_ != Fat32 {
-        unimplemented!("unsupported FAT type")
-    }
 
     let server = Fat {
         drive: args.drive,
