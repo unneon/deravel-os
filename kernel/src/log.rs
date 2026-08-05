@@ -29,7 +29,8 @@ impl log::Log for Logger {
             let early_color = match record.level() {
                 Level::Error => "\x1B[31m",
                 Level::Warn => "\x1B[33m",
-                _ => "",
+                _ if record.module_path().is_some() => "",
+                _ => "\x1B[36m",
             };
             let time = riscv::register::time::read64() - self.start_time;
             let time = match timebase_frequency() {
@@ -46,7 +47,7 @@ impl log::Log for Logger {
             } else {
                 let process_name = record.target();
                 sbi::console_writeln!(
-                    "\x1B[36m{time} {level}\x1B[36m \x1B[1m{process_name}:\x1B[0;36m {message}\x1B[0m"
+                    "{early_color}{time} {level}{early_color} \x1B[1m{process_name}:\x1B[0m{early_color} {message}\x1B[0m"
                 );
             }
         }
