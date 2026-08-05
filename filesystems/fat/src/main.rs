@@ -16,7 +16,7 @@ use alloc::vec::Vec;
 use deravel_kernel_api::*;
 use log::*;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum Directory {
     Normal { cluster: u32 },
     RootDirectoryRegion,
@@ -36,8 +36,6 @@ enum Type {
     Fat32,
 }
 
-pub const DISK_SECTOR_SIZE: usize = 512;
-
 impl Fat {
     fn traverse_path(&self, mut dir: Directory, mut path: &str) -> (u32, usize) {
         'segments: loop {
@@ -47,6 +45,9 @@ impl Fat {
             };
             let needle = str_to_short_file_name(path_seg);
             for de in self.read_directory(dir) {
+                if de.name.0[0] == 0x00 {
+                    break;
+                }
                 if de.name == needle {
                     let de_cluster = (de.fst_clus_hi as u32) << 16 | de.fst_clus_lo as u32;
                     let Some(path_tail) = path_tail else {
@@ -75,10 +76,10 @@ impl Fat {
     }
 
     fn read_root_directory_region(&self) -> Vec<DirectoryEntry> {
-        let rdr_sectors_count = self.bpb.root_ent_cnt as u64 * 32 / DISK_SECTOR_SIZE as u64;
+        let rdr_sectors_count = self.bpb.root_ent_cnt as u64 * 32 / self.bpb.byts_per_sec as u64;
         let mut entries = Vec::new();
         for i in 0..rdr_sectors_count {
-            let bytes = self.drive.read(self.root_directory_sectors_start() + i);
+            let bytes = self.read_sector(self.root_directory_sectors_start() + i);
             entries.extend_from_slice(&directory_bytes_to_entries(bytes));
         }
         entries
@@ -111,16 +112,18 @@ impl Fat {
         match self.type_ {
             Fat12 => {
                 let global_byte_index = cluster + cluster / 2;
-                let fat_sector_index = global_byte_index as u64 / DISK_SECTOR_SIZE as u64;
-                let fat_entry_byte_index = global_byte_index as usize % DISK_SECTOR_SIZE;
-                let bytes = if fat_entry_byte_index + 1 < DISK_SECTOR_SIZE {
-                    let sector = self.drive.read(self.fat_sectors_start() + fat_sector_index);
+                let fat_sector_index = global_byte_index as u64 / self.bpb.byts_per_sec as u64;
+                let fat_entry_byte_index =
+                    global_byte_index as usize % self.bpb.byts_per_sec as usize;
+                let bytes = if fat_entry_byte_index + 1 < self.bpb.byts_per_sec as usize {
+                    let sector = self.read_sector(self.fat_sectors_start() + fat_sector_index);
                     [
                         sector[fat_entry_byte_index],
                         sector[fat_entry_byte_index + 1],
                     ]
                 } else {
-                    let first_sector = self.drive.read(self.fat_sectors_start() + fat_sector_index);
+                    let first_sector =
+                        self.read_sector(self.fat_sectors_start() + fat_sector_index);
                     let second_sector = self
                         .drive
                         .read(self.fat_sectors_start() + fat_sector_index + 1);
@@ -134,18 +137,18 @@ impl Fat {
                 }
             }
             Fat16 => {
-                let entries_per_sector = DISK_SECTOR_SIZE as u32 / 2;
+                let entries_per_sector = self.bpb.byts_per_sec as u32 / 2;
                 let fat_sector_index = (cluster / entries_per_sector) as u64;
                 let fat_entry_index = cluster % entries_per_sector;
-                let sector = self.drive.read(self.fat_sectors_start() + fat_sector_index);
+                let sector = self.read_sector(self.fat_sectors_start() + fat_sector_index);
                 let entry = sector.as_chunks().0[fat_entry_index as usize];
                 u16::from_le_bytes(entry) as u32
             }
             Fat32 => {
-                let entries_per_sector = DISK_SECTOR_SIZE as u32 / 4;
+                let entries_per_sector = self.bpb.byts_per_sec as u32 / 4;
                 let fat_sector_index = (cluster / entries_per_sector) as u64;
                 let fat_entry_index = cluster % entries_per_sector;
-                let sector = self.drive.read(self.fat_sectors_start() + fat_sector_index);
+                let sector = self.read_sector(self.fat_sectors_start() + fat_sector_index);
                 let entry = sector.as_chunks().0[fat_entry_index as usize];
                 u32::from_le_bytes(entry)
             }
@@ -157,9 +160,19 @@ impl Fat {
             self.data_sectors_start() + (cluster - 2) as u64 * self.bpb.sec_per_clus as u64;
         let mut data = Vec::new();
         for i in 0..self.bpb.sec_per_clus as u64 {
-            data.extend_from_slice(&self.drive.read(cluster_sectors_start + i));
+            data.extend_from_slice(&self.read_sector(cluster_sectors_start + i));
         }
         data
+    }
+
+    fn read_sector(&self, sector: u64) -> Vec<u8> {
+        const DISK_SECTOR_SIZE: usize = 512;
+        let disk_sector_per_fat_sector = self.bpb.byts_per_sec as u64 / DISK_SECTOR_SIZE as u64;
+        let mut bytes = Vec::with_capacity(self.bpb.byts_per_sec as usize);
+        for i in 0..disk_sector_per_fat_sector {
+            bytes.extend_from_slice(&self.drive.read(disk_sector_per_fat_sector * sector + i));
+        }
+        bytes
     }
 
     fn fat_sectors_size(&self) -> u32 {
@@ -179,7 +192,7 @@ impl Fat {
 
     fn data_sectors_start(&self) -> u64 {
         self.root_directory_sectors_start()
-            + self.bpb.root_ent_cnt as u64 * 32 / DISK_SECTOR_SIZE as u64
+            + self.bpb.root_ent_cnt as u64 * 32 / self.bpb.byts_per_sec as u64
     }
 
     fn volume_label(&self) -> Option<ArrayCStr<11>> {
@@ -235,10 +248,6 @@ fn main(args: TarFsArgs) {
     let bpb = Bpb {
         bytes: *Box::try_from(args.drive.read(0)).unwrap(),
     };
-    if bpb.byts_per_sec as usize != DISK_SECTOR_SIZE {
-        unimplemented!("unsupported sector size")
-    }
-
     let (type_, count_of_clusters) = determine_type(&bpb);
     bpb.validate_bpb(type_);
     let server = Fat {

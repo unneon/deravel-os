@@ -75,11 +75,12 @@ impl Bpb {
     pub fn validate_bpb(&self, type_: Type) {
         assert_matches!(self.bs_jmp_boot, [0xEB, _, 0x90] | [0xE9, _, _]);
         assert_matches!({ self.byts_per_sec }, 512 | 1024 | 2048 | 4096);
-
         assert!(self.sec_per_clus.is_power_of_two() && self.sec_per_clus > 0);
         assert_ne!({ self.rsvd_sec_cnt }, 0);
         match type_ {
-            Fat12 | Fat16 => assert_ne!({ self.root_ent_cnt }, 0),
+            Fat12 | Fat16 => {
+                assert!((self.root_ent_cnt as u32 * 32).is_multiple_of(self.byts_per_sec as u32))
+            }
             Fat32 => assert_eq!({ self.root_ent_cnt }, 0),
         }
         match type_ {
