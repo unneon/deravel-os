@@ -1,8 +1,8 @@
 use crate::util::{ArrayCStr, Padding};
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 #[repr(C, packed)]
-pub struct Directory {
+pub struct DirectoryEntry {
     pub name: ArrayCStr<11>,
     pub attr: u8,
     pub nt_res: Padding<1>,
@@ -17,4 +17,4 @@ pub struct Directory {
     pub file_size: u32,
 }
 
-const _: () = assert!(size_of::<Directory>() == 32);
+const _: () = assert!(size_of::<DirectoryEntry>() == 32);

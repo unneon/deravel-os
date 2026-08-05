@@ -4,17 +4,24 @@
 extern crate alloc;
 
 mod bpb;
-mod directory;
+mod directory_entry;
 mod util;
 
 use crate::Type::*;
-use crate::bpb::{Bpb, SECTOR_SIZE};
-use crate::directory::Directory;
+use crate::bpb::{Bpb, DISK_SECTOR_SIZE};
+use crate::directory_entry::DirectoryEntry;
 use crate::util::ArrayCStr;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::assert_matches;
 use deravel_kernel_api::*;
+use log::info;
+
+#[derive(Clone, Copy)]
+enum Directory {
+    Normal { cluster: u32 },
+    RootDirectoryRegion,
+}
 
 struct Fat {
     drive: Capability<Drive>,
@@ -32,7 +39,7 @@ enum Type {
 }
 
 impl Fat {
-    fn traverse_path(&self, mut dir: u32, mut path: &str) -> (u32, usize) {
+    fn traverse_path(&self, mut dir: Directory, mut path: &str) -> (u32, usize) {
         'segments: loop {
             let (path_seg, path_tail) = match path.split_once('/') {
                 Some((path_seg, path_tail)) => (path_seg, Some(path_tail)),
@@ -45,7 +52,9 @@ impl Fat {
                     let Some(path_tail) = path_tail else {
                         return (de_cluster, de.file_size as usize);
                     };
-                    dir = de_cluster;
+                    dir = Directory::Normal {
+                        cluster: de_cluster,
+                    };
                     path = path_tail;
                     continue 'segments;
                 }
@@ -54,18 +63,27 @@ impl Fat {
         }
     }
 
-    fn read_directory(&self, cluster: u32) -> Vec<Directory> {
-        let file = self.read_file(cluster);
-        let (ptr, length, capacity) = file.into_raw_parts();
-        assert_eq!(length % size_of::<Directory>(), 0);
-        assert_eq!(capacity % size_of::<Directory>(), 0);
-        unsafe {
-            Vec::from_raw_parts(
-                ptr as *mut Directory,
-                length / size_of::<Directory>(),
-                capacity / size_of::<Directory>(),
-            )
+    fn read_directory(&self, dir: Directory) -> Vec<DirectoryEntry> {
+        match dir {
+            Directory::Normal { cluster } => self.read_normal_directory(cluster),
+            Directory::RootDirectoryRegion => self.read_root_directory_region(),
         }
+    }
+
+    fn read_normal_directory(&self, cluster: u32) -> Vec<DirectoryEntry> {
+        directory_bytes_to_entries(self.read_file(cluster))
+    }
+
+    fn read_root_directory_region(&self) -> Vec<DirectoryEntry> {
+        let rdr_sectors_start =
+            self.bpb.rsvd_sec_cnt as u64 + self.bpb.num_fats as u64 * self.bpb.fat_sz_16 as u64;
+        let rdr_sectors_count = self.bpb.root_ent_cnt as u64 * 32 / DISK_SECTOR_SIZE as u64;
+        let mut entries = Vec::new();
+        for i in 0..rdr_sectors_count {
+            let bytes = self.drive.read(rdr_sectors_start + i);
+            entries.extend_from_slice(&directory_bytes_to_entries(bytes));
+        }
+        entries
     }
 
     fn read_file(&self, mut cluster: u32) -> Vec<u8> {
@@ -74,6 +92,10 @@ impl Fat {
             data.extend_from_slice(&self.read_data(cluster));
             let fat_entry = self.read_fat_entry(cluster);
             match (self.type_, fat_entry & ((!0) >> 4)) {
+                (Fat16, next_cluster @ 0x0002..) if next_cluster <= self.max_cluster => {
+                    cluster = next_cluster;
+                }
+                (Fat16, 0xFFF8..=0xFFFF) => break data,
                 (Fat32, next_cluster @ 0x000_0002..) if next_cluster <= self.max_cluster => {
                     cluster = next_cluster;
                 }
@@ -84,13 +106,27 @@ impl Fat {
     }
 
     fn read_fat_entry(&self, cluster: u32) -> u32 {
-        let entries_per_sector = (SECTOR_SIZE / size_of::<u32>()) as u32;
-        let fat_sectors_start = self.bpb.rsvd_sec_cnt as u64;
-        let fat_sector_index = cluster / entries_per_sector;
-        let fat_entry_index = cluster % entries_per_sector;
-        let sector = self.drive.read(fat_sectors_start + fat_sector_index as u64);
-        let entry = sector.as_chunks().0[fat_entry_index as usize];
-        u32::from_le_bytes(entry)
+        match self.type_ {
+            Fat12 => unimplemented!(),
+            Fat16 => {
+                let entries_per_sector = DISK_SECTOR_SIZE as u32 / 2;
+                let fat_sectors_start = self.bpb.rsvd_sec_cnt as u64;
+                let fat_sector_index = cluster / entries_per_sector;
+                let fat_entry_index = cluster % entries_per_sector;
+                let sector = self.drive.read(fat_sectors_start + fat_sector_index as u64);
+                let entry = sector.as_chunks().0[fat_entry_index as usize];
+                u16::from_le_bytes(entry) as u32
+            }
+            Fat32 => {
+                let entries_per_sector = DISK_SECTOR_SIZE as u32 / 4;
+                let fat_sectors_start = self.bpb.rsvd_sec_cnt as u64;
+                let fat_sector_index = cluster / entries_per_sector;
+                let fat_entry_index = cluster % entries_per_sector;
+                let sector = self.drive.read(fat_sectors_start + fat_sector_index as u64);
+                let entry = sector.as_chunks().0[fat_entry_index as usize];
+                u32::from_le_bytes(entry)
+            }
+        }
     }
 
     fn read_data(&self, cluster: u32) -> Vec<u8> {
@@ -104,13 +140,21 @@ impl Fat {
     }
 
     fn data_sectors_start(&self) -> u64 {
-        // TODO: Add root directory region on FAT12/FAT16.
-        self.bpb.rsvd_sec_cnt as u64 + self.bpb.num_fats as u64 * self.fat_sz as u64
+        self.bpb.rsvd_sec_cnt as u64
+            + self.bpb.num_fats as u64 * self.fat_sz as u64
+            + self.bpb.root_ent_cnt as u64 * 32 / DISK_SECTOR_SIZE as u64
+    }
+
+    fn volume_label(&self) -> ArrayCStr<11> {
+        match self.type_ {
+            Fat12 | Fat16 => self.bpb.as_extended_12_16().bs_vol_lab,
+            Fat32 => self.bpb.as_extended_32().bs_vol_lab,
+        }
     }
 }
 
-impl FilesystemServer<u32> for Fat {
-    fn read(&mut self, _: &mut Ctx<Self>, dir: u32, path: &str) -> Vec<u8> {
+impl FilesystemServer<Directory> for Fat {
+    fn read(&mut self, _: &mut Ctx<Self>, dir: Directory, path: &str) -> Vec<u8> {
         let (file, file_size) = self.traverse_path(dir, path);
         let mut data = self.read_file(file);
         data.resize(file_size, 0);
@@ -120,7 +164,7 @@ impl FilesystemServer<u32> for Fat {
     fn read_large(
         &mut self,
         ctx: &mut Ctx<Self>,
-        dir: u32,
+        dir: Directory,
         path: &str,
     ) -> Capability<SharedMemory> {
         let (file, file_size) = self.traverse_path(dir, path);
@@ -130,17 +174,19 @@ impl FilesystemServer<u32> for Fat {
         ctx.forward_to_sender(shared_cap)
     }
 
-    fn write(&mut self, _: &mut Ctx<Self>, _dir: u32, _path: &str, _data: &[u8]) {
+    fn write(&mut self, _: &mut Ctx<Self>, _dir: Directory, _path: &str, _data: &[u8]) {
         unimplemented!()
     }
 
     fn subcapability(
         &mut self,
         ctx: &mut Ctx<Self>,
-        dir: u32,
+        dir: Directory,
         path: &str,
     ) -> Capability<Filesystem> {
-        ctx.grant_to_sender(self.traverse_path(dir, path).0)
+        ctx.grant_to_sender(Directory::Normal {
+            cluster: self.traverse_path(dir, path).0,
+        })
     }
 }
 
@@ -155,7 +201,7 @@ fn main(args: TarFsArgs) {
     // common.bs_oem_name has no invariant.
 
     assert_matches!({ common.byts_per_sec }, 512 | 1024 | 2048 | 4096);
-    if common.byts_per_sec as usize != SECTOR_SIZE {
+    if common.byts_per_sec as usize != DISK_SECTOR_SIZE {
         unimplemented!("unsupported sector size")
     }
 
@@ -198,7 +244,7 @@ fn main(args: TarFsArgs) {
 
     // TODO: Validate the extended BPB.
 
-    if type_ != Fat32 {
+    if type_ != Fat16 && type_ != Fat32 {
         unimplemented!("unsupported FAT type")
     }
 
@@ -210,10 +256,31 @@ fn main(args: TarFsArgs) {
         max_cluster: count_of_clusters + 1,
     };
 
-    let root_directory = server.bpb.as_extended_32().root_clus;
+    let volume_label = server.volume_label();
+    info!("mounting FAT volume {volume_label:?}");
+
+    let root_directory = match type_ {
+        Fat12 | Fat16 => Directory::RootDirectoryRegion,
+        Fat32 => Directory::Normal {
+            cluster: server.bpb.as_extended_32().root_clus,
+        },
+    };
 
     let mut dispatch = Dispatch::new_object(server, root_directory);
     dispatch.run();
+}
+
+fn directory_bytes_to_entries(bytes: Vec<u8>) -> Vec<DirectoryEntry> {
+    let (ptr, length, capacity) = bytes.into_raw_parts();
+    assert_eq!(length % size_of::<DirectoryEntry>(), 0);
+    assert_eq!(capacity % size_of::<DirectoryEntry>(), 0);
+    unsafe {
+        Vec::from_raw_parts(
+            ptr as *mut DirectoryEntry,
+            length / size_of::<DirectoryEntry>(),
+            capacity / size_of::<DirectoryEntry>(),
+        )
+    }
 }
 
 fn str_to_short_file_name(s: &str) -> ArrayCStr<11> {
