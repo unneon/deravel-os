@@ -8,14 +8,13 @@ mod directory_entry;
 mod util;
 
 use crate::Type::*;
-use crate::bpb::{Bpb, DISK_SECTOR_SIZE};
+use crate::bpb::Bpb;
 use crate::directory_entry::DirectoryEntry;
 use crate::util::ArrayCStr;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
-use core::assert_matches;
 use deravel_kernel_api::*;
-use log::info;
+use log::*;
 
 #[derive(Clone, Copy)]
 enum Directory {
@@ -26,7 +25,6 @@ enum Directory {
 struct Fat {
     drive: Capability<Drive>,
     bpb: Bpb,
-    fat_sz: u32,
     type_: Type,
     max_cluster: u32,
 }
@@ -37,6 +35,8 @@ enum Type {
     Fat16,
     Fat32,
 }
+
+pub const DISK_SECTOR_SIZE: usize = 512;
 
 impl Fat {
     fn traverse_path(&self, mut dir: Directory, mut path: &str) -> (u32, usize) {
@@ -162,12 +162,19 @@ impl Fat {
         data
     }
 
+    fn fat_sectors_size(&self) -> u32 {
+        match self.type_ {
+            Fat12 | Fat16 => self.bpb.fat_sz_16 as u32,
+            Fat32 => self.bpb.as_extended_32().fat_sz_32,
+        }
+    }
+
     fn fat_sectors_start(&self) -> u64 {
         self.bpb.rsvd_sec_cnt as u64
     }
 
     fn root_directory_sectors_start(&self) -> u64 {
-        self.fat_sectors_start() + self.bpb.num_fats as u64 * self.fat_sz as u64
+        self.fat_sectors_start() + self.bpb.num_fats as u64 * self.fat_sectors_size() as u64
     }
 
     fn data_sectors_start(&self) -> u64 {
@@ -224,68 +231,23 @@ fn main(args: TarFsArgs) {
     let bpb = Bpb {
         bytes: *Box::try_from(args.drive.read(0)).unwrap(),
     };
-
-    let common = bpb.as_common();
-
-    assert_matches!(common.bs_jmp_boot, [0xEB, _, 0x90] | [0xE9, _, _]);
-    // common.bs_oem_name has no invariant.
-
-    assert_matches!({ common.byts_per_sec }, 512 | 1024 | 2048 | 4096);
-    if common.byts_per_sec as usize != DISK_SECTOR_SIZE {
+    if bpb.byts_per_sec as usize != DISK_SECTOR_SIZE {
         unimplemented!("unsupported sector size")
     }
 
-    assert!(common.sec_per_clus.is_power_of_two() && common.sec_per_clus > 0);
-    assert_ne!({ common.rsvd_sec_cnt }, 0);
-    // common.num_fats has no invariant.
-    // common.root_ent_cnt and common.tot_sec_16 are validated once FAT type is determined.
-    assert_matches!(common.media, 0xF0 | 0xF8..=0xFF);
-    // common.fats_z16 is validated once FAT type is determined.
-    // common.sec_per_trk has no invariant.
-    // common.num_heads has no invariant.
-    // TODO: Validate common.hidd_sec.
-    // common.tot_sec_32 validated once FAT type is determined.
-
-    let root_dir_sectors = (common.root_ent_cnt as u32 * 32).div_ceil(common.byts_per_sec as u32);
-    let fat_sz = if common.fat_sz_16 != 0 {
-        common.fat_sz_16 as u32
-    } else {
-        bpb.as_extended_32().fat_sz_32
-    };
-
-    let tot_sec = if common.tot_sec_16 != 0 {
-        common.tot_sec_16 as u32
-    } else {
-        common.tot_sec_32
-    };
-
-    let data_sec =
-        tot_sec - (common.rsvd_sec_cnt as u32 + common.num_fats as u32 * fat_sz) + root_dir_sectors;
-
-    let count_of_clusters = data_sec / common.sec_per_clus as u32;
-
-    let type_ = if count_of_clusters < 4085 {
-        Fat12
-    } else if count_of_clusters < 65525 {
-        Fat16
-    } else {
-        Fat32
-    };
-
-    // TODO: Validate the extended BPB.
-
+    let (type_, count_of_clusters) = determine_type(&bpb);
+    bpb.validate_bpb(type_);
     let server = Fat {
         drive: args.drive,
-        bpb,
-        fat_sz,
         type_,
+        bpb,
         max_cluster: count_of_clusters + 1,
     };
 
     let volume_label = server.volume_label();
     info!("mounting FAT volume {volume_label:?}");
 
-    let root_directory = match type_ {
+    let root_directory = match server.type_ {
         Fat12 | Fat16 => Directory::RootDirectoryRegion,
         Fat32 => Directory::Normal {
             cluster: server.bpb.as_extended_32().root_clus,
@@ -294,6 +256,35 @@ fn main(args: TarFsArgs) {
 
     let mut dispatch = Dispatch::new_object(server, root_directory);
     dispatch.run();
+}
+
+fn determine_type(bpb: &Bpb) -> (Type, u32) {
+    let root_dir_sectors = (bpb.root_ent_cnt as u32 * 32).div_ceil(bpb.byts_per_sec as u32);
+    let fat_sz = if bpb.fat_sz_16 != 0 {
+        bpb.fat_sz_16 as u32
+    } else {
+        bpb.as_extended_32().fat_sz_32
+    };
+
+    let tot_sec = if bpb.tot_sec_16 != 0 {
+        bpb.tot_sec_16 as u32
+    } else {
+        bpb.tot_sec_32
+    };
+
+    let data_sec =
+        tot_sec - (bpb.rsvd_sec_cnt as u32 + bpb.num_fats as u32 * fat_sz) + root_dir_sectors;
+
+    let count_of_clusters = data_sec / bpb.sec_per_clus as u32;
+
+    let type_ = if count_of_clusters < 4085 {
+        Fat12
+    } else if count_of_clusters < 65525 {
+        Fat16
+    } else {
+        Fat32
+    };
+    (type_, count_of_clusters)
 }
 
 fn directory_bytes_to_entries(bytes: Vec<u8>) -> Vec<DirectoryEntry> {

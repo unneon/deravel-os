@@ -1,12 +1,15 @@
+use crate::Type;
+use crate::Type::*;
 use crate::util::{ArrayCStr, Padding};
+use core::assert_matches;
 use core::ops::Deref;
 
-#[repr(C, align(512))]
+#[repr(C)]
 pub union Bpb {
     pub common: BpbCommon,
     pub extended_12_16: BpbExtended1216,
     pub extended_32: BpbExtended32,
-    pub bytes: [u8; DISK_SECTOR_SIZE],
+    pub bytes: [u8; 512],
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -63,16 +66,40 @@ pub struct BpbExtended32 {
     pub bs_signature_word: u16,
 }
 
+const _: () = assert!(size_of::<Bpb>() == 512);
 const _: () = assert!(size_of::<BpbCommon>() == 36);
 const _: () = assert!(size_of::<BpbExtended1216>() == 512);
 const _: () = assert!(size_of::<BpbExtended32>() == 512);
 
-pub const DISK_SECTOR_SIZE: usize = 512;
-
 impl Bpb {
-    pub fn as_common(&self) -> &BpbCommon {
-        // SAFETY: BPB is plain old data.
-        unsafe { &self.common }
+    pub fn validate_bpb(&self, type_: Type) {
+        assert_matches!(self.bs_jmp_boot, [0xEB, _, 0x90] | [0xE9, _, _]);
+        assert_matches!({ self.byts_per_sec }, 512 | 1024 | 2048 | 4096);
+
+        assert!(self.sec_per_clus.is_power_of_two() && self.sec_per_clus > 0);
+        assert_ne!({ self.rsvd_sec_cnt }, 0);
+        match type_ {
+            Fat12 | Fat16 => assert_ne!({ self.root_ent_cnt }, 0),
+            Fat32 => assert_eq!({ self.root_ent_cnt }, 0),
+        }
+        match type_ {
+            Fat12 | Fat16 => {
+                if self.tot_sec_16 != 0 {
+                    assert_eq!({ self.tot_sec_32 }, 0);
+                } else {
+                    assert!(self.tot_sec_32 >= 0x10000);
+                }
+            }
+            Fat32 => {
+                assert_eq!({ self.tot_sec_16 }, 0);
+                assert_ne!({ self.tot_sec_32 }, 0);
+            }
+        }
+        assert_matches!(self.media, 0xF0 | 0xF8..=0xFF);
+        match type_ {
+            Fat12 | Fat16 => (),
+            Fat32 => assert_eq!({ self.fat_sz_16 }, 0),
+        }
     }
 
     pub fn as_extended_12_16(&self) -> &BpbExtended1216 {
@@ -90,6 +117,7 @@ impl Deref for Bpb {
     type Target = BpbCommon;
 
     fn deref(&self) -> &BpbCommon {
-        self.as_common()
+        // SAFETY: BPB is plain old data.
+        unsafe { &self.common }
     }
 }
