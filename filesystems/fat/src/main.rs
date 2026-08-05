@@ -1,3 +1,4 @@
+#![feature(min_adt_const_params)]
 #![no_std]
 #![no_main]
 
@@ -13,6 +14,7 @@ use crate::directory_entry::DirectoryEntry;
 use crate::util::ArrayCStr;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
+use core::marker::ConstParamTy;
 use deravel_kernel_api::*;
 use log::*;
 
@@ -22,21 +24,20 @@ enum Directory {
     RootDirectoryRegion,
 }
 
-struct Fat {
+struct Fat<const TYPE: Type> {
     drive: Capability<Drive>,
     bpb: Bpb,
-    type_: Type,
     max_cluster: u32,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, ConstParamTy, Copy, Debug, Eq, PartialEq)]
 enum Type {
     Fat12,
     Fat16,
     Fat32,
 }
 
-impl Fat {
+impl<const TYPE: Type> Fat<TYPE> {
     fn traverse_path(&self, mut dir: Directory, mut path: &str) -> (u32, usize) {
         'segments: loop {
             let (path_seg, path_tail) = match path.split_once('/') {
@@ -90,26 +91,24 @@ impl Fat {
         loop {
             data.extend_from_slice(&self.read_data(cluster));
             let fat_entry = self.read_fat_entry(cluster);
-            match (self.type_, fat_entry & ((!0) >> 4)) {
-                (Fat12, next_cluster @ 0x002..) if next_cluster <= self.max_cluster => {
+            match (TYPE, fat_entry & ((!0) >> 4)) {
+                (Fat12, next_cluster @ 0x002..)
+                | (Fat16, next_cluster @ 0x0002..)
+                | (Fat32, next_cluster @ 0x000_0002..)
+                    if next_cluster <= self.max_cluster =>
+                {
                     cluster = next_cluster;
                 }
-                (Fat12, 0xFF8..=0xFFF) => break data,
-                (Fat16, next_cluster @ 0x0002..) if next_cluster <= self.max_cluster => {
-                    cluster = next_cluster;
-                }
-                (Fat16, 0xFFF8..=0xFFFF) => break data,
-                (Fat32, next_cluster @ 0x000_0002..) if next_cluster <= self.max_cluster => {
-                    cluster = next_cluster;
-                }
-                (Fat32, 0xFFF_FFF8..=0xFFF_FFFF) => break data,
-                _ => unimplemented!("{:?} {:#x}", self.type_, fat_entry),
+                (Fat12, 0xFF8..=0xFFF)
+                | (Fat16, 0xFFF8..=0xFFFF)
+                | (Fat32, 0xFFF_FFF8..=0xFFF_FFFF) => break data,
+                _ => unimplemented!("{:?} {:#x}", TYPE, fat_entry),
             }
         }
     }
 
     fn read_fat_entry(&self, cluster: u32) -> u32 {
-        match self.type_ {
+        match TYPE {
             Fat12 => {
                 let global_byte_index = cluster + cluster / 2;
                 let fat_sector_index = global_byte_index as u64 / self.bpb.byts_per_sec as u64;
@@ -176,7 +175,7 @@ impl Fat {
     }
 
     fn fat_sectors_size(&self) -> u32 {
-        match self.type_ {
+        match TYPE {
             Fat12 | Fat16 => self.bpb.fat_sz_16 as u32,
             Fat32 => self.bpb.as_extended_32().fat_sz_32,
         }
@@ -196,7 +195,7 @@ impl Fat {
     }
 
     fn volume_label(&self) -> Option<ArrayCStr<11>> {
-        let name = match self.type_ {
+        let name = match TYPE {
             Fat12 | Fat16 => self.bpb.as_extended_12_16().bs_vol_lab,
             Fat32 => self.bpb.as_extended_32().bs_vol_lab,
         };
@@ -207,7 +206,7 @@ impl Fat {
     }
 }
 
-impl FilesystemServer<Directory> for Fat {
+impl<const TYPE: Type> FilesystemServer<Directory> for Fat<TYPE> {
     fn read(&mut self, _: &mut Ctx<Self>, dir: Directory, path: &str) -> Vec<u8> {
         let (file, file_size) = self.traverse_path(dir, path);
         let mut data = self.read_file(file);
@@ -249,10 +248,17 @@ fn main(args: TarFsArgs) {
         bytes: *Box::try_from(args.drive.read(0)).unwrap(),
     };
     let (type_, count_of_clusters) = determine_type(&bpb);
-    bpb.validate_bpb(type_);
-    let server = Fat {
-        drive: args.drive,
-        type_,
+    match type_ {
+        Fat12 => run::<{ Fat12 }>(args.drive, bpb, count_of_clusters),
+        Fat16 => run::<{ Fat16 }>(args.drive, bpb, count_of_clusters),
+        Fat32 => run::<{ Fat32 }>(args.drive, bpb, count_of_clusters),
+    }
+}
+
+fn run<const TYPE: Type>(drive: Capability<Drive>, bpb: Bpb, count_of_clusters: u32) {
+    bpb.validate_bpb(TYPE);
+    let server = Fat::<{ TYPE }> {
+        drive,
         bpb,
         max_cluster: count_of_clusters + 1,
     };
@@ -263,7 +269,7 @@ fn main(args: TarFsArgs) {
         info!("mounting unnamed FAT volume");
     }
 
-    let root_directory = match server.type_ {
+    let root_directory = match TYPE {
         Fat12 | Fat16 => Directory::RootDirectoryRegion,
         Fat32 => Directory::Normal {
             cluster: server.bpb.as_extended_32().root_clus,
