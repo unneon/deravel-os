@@ -1,3 +1,6 @@
+#![feature(coroutines)]
+#![feature(iter_from_coroutine)]
+#![feature(maybe_uninit_fill)]
 #![feature(min_adt_const_params)]
 #![no_std]
 #![no_main]
@@ -10,7 +13,7 @@ mod util;
 
 use crate::Type::*;
 use crate::bpb::Bpb;
-use crate::directory_entry::DirectoryEntry;
+use crate::directory_entry::{DirectoryEntry, coalesce_long_names, to_short_name};
 use crate::util::ArrayCStr;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -44,12 +47,20 @@ impl<const TYPE: Type> Fat<TYPE> {
                 Some((path_seg, path_tail)) => (path_seg, Some(path_tail)),
                 None => (path, None),
             };
-            let needle = str_to_short_file_name(path_seg);
-            for de in self.read_directory(dir) {
+            let short_needle = to_short_name(path_seg);
+            for (de, long_name) in coalesce_long_names(self.read_directory(dir).into_iter()) {
+                if de.name.0[0] == 0xE5 {
+                    continue;
+                }
                 if de.name.0[0] == 0x00 {
                     break;
                 }
-                if de.name == needle {
+                let name_matches = if let Some(long_name) = long_name {
+                    long_name == path_seg
+                } else {
+                    short_needle == Some(de.name)
+                };
+                if name_matches {
                     let de_cluster = (de.fst_clus_hi as u32) << 16 | de.fst_clus_lo as u32;
                     let Some(path_tail) = path_tail else {
                         return (de_cluster, de.file_size as usize);
@@ -320,28 +331,6 @@ fn directory_bytes_to_entries(bytes: Vec<u8>) -> Vec<DirectoryEntry> {
             capacity / size_of::<DirectoryEntry>(),
         )
     }
-}
-
-fn str_to_short_file_name(s: &str) -> ArrayCStr<11> {
-    let (main_part, extension) = s.split_once('.').unwrap_or((s, ""));
-    assert!(main_part.len() <= 8);
-    assert!(extension.len() <= 3);
-    let mut name = ArrayCStr([b' '; _]);
-    for (i, byte) in main_part.bytes().enumerate() {
-        let byte = byte.to_ascii_uppercase();
-        assert!(is_valid_short_file_name_char(byte));
-        name.0[i] = byte;
-    }
-    for (i, byte) in extension.bytes().enumerate() {
-        let byte = byte.to_ascii_uppercase();
-        assert!(is_valid_short_file_name_char(byte));
-        name.0[8 + i] = byte;
-    }
-    name
-}
-
-fn is_valid_short_file_name_char(byte: u8) -> bool {
-    matches!(byte, b'A'..=b'Z' | b'0'..=b'9' | 128.. | b'$' | b'%' | b'\'' | b'-' | b'_' | b'@' | b'~' | b'`' | b'!' | b'(' | b')' | b'{' | b'}' | b'^' | b'#' | b'&')
 }
 
 app! { main }
