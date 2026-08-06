@@ -92,8 +92,8 @@ impl VirtioBlk {
         result_from_status(status)
     }
 
-    pub fn capacity(&self) -> usize {
-        self.state.lock().device.capacity().read() as usize
+    pub fn capacity(&self) -> u64 {
+        self.state.lock().device.capacity().read()
     }
 }
 
@@ -115,7 +115,7 @@ impl DriveServer for VirtioBlk {
     }
 
     fn capacity(&self, _: ProcessId) -> u64 {
-        self.capacity() as u64
+        self.capacity()
     }
 }
 
