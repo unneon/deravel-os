@@ -104,6 +104,7 @@ pub fn switch_to_user(mut next: MutexGuard<Process>) -> Result<!, UserSyscallErr
             let virt = next.virtual_memory.alloc(layout).unwrap();
             let table = &mut next.page_table;
             table.map_pages(virt, phys, length, PageFlags::readwrite().user());
+            riscv::asm::sfence_vma_all();
             next.registers.a0 = virt;
             next.registers.a1 = declared_size;
             next.state = ProcessState::Runnable;

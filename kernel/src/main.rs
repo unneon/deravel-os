@@ -358,6 +358,7 @@ impl SyscallHandler for () {
                     PAGE_SIZE,
                     PageFlags::readwrite().user(),
                 );
+                riscv::asm::sfence_vma_all();
                 (virt as *mut (), ring_buffer.0.data.0.len())
             }
         }
@@ -368,7 +369,9 @@ impl SyscallHandler for () {
         let pages = Arc::new(UntypedBox::new(
             page_granular_vec![0u8; size].into_boxed_slice(),
         ));
-        user.process().alloc(pages, PageFlags::readwrite().user())
+        let virt = user.process().alloc(pages, PageFlags::readwrite().user());
+        riscv::asm::sfence_vma_all();
+        virt
     }
 
     fn alloc_shared(user: &mut UserCtx, size: usize) -> (*mut u8, Capability<SharedMemory>) {
@@ -379,6 +382,7 @@ impl SyscallHandler for () {
         let virt = user
             .process()
             .alloc(pages.clone(), PageFlags::readwrite().user());
+        riscv::asm::sfence_vma_all();
         let cap = grant_kernel_capability(
             user.pid(),
             Box::leak(Box::new(shared_memory::SharedMemory { backing: pages })),
@@ -404,6 +408,7 @@ impl SyscallHandler for () {
         let virt = proc.virtual_memory.alloc(layout).unwrap();
         proc.page_table
             .map_pages(virt, phys, padded_length, PageFlags::readwrite().user());
+        riscv::asm::sfence_vma_all();
 
         (virt as *mut u8, length)
     }
