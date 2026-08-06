@@ -1,5 +1,3 @@
-#![feature(coroutines)]
-#![feature(iter_from_coroutine)]
 #![feature(maybe_uninit_fill)]
 #![feature(min_adt_const_params)]
 #![no_std]

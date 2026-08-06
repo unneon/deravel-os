@@ -68,50 +68,43 @@ const UTF16_SPACE: u16 = b' ' as u16;
 pub fn coalesce_long_names<'a>(
     mut entries: impl Iterator<Item = DirectoryEntry> + 'a,
 ) -> impl Iterator<Item = (ShortNameDirectoryEntry, Option<String>)> + 'a {
-    core::iter::from_coroutine(
-        #[coroutine]
-        move || {
-            while let Some(mut entry) = entries.next() {
-                let long_name = if unsafe { entry.short.attr } & ATTR_LONG_NAME_MASK
-                    == ATTR_LONG_NAME
-                {
-                    let last = unsafe { &entry.long };
-                    assert_ne!(last.ord & LAST_LONG_ENTRY, 0);
-                    let long_entry_count = last.ord ^ LAST_LONG_ENTRY;
-                    assert!((1..=MAX_LONG_NAME_ENTRIES).contains(&(long_entry_count as usize)));
+    core::iter::from_fn(move || {
+        let mut entry = entries.next()?;
+        let long_name = if unsafe { entry.short.attr } & ATTR_LONG_NAME_MASK == ATTR_LONG_NAME {
+            let last = unsafe { &entry.long };
+            assert_ne!(last.ord & LAST_LONG_ENTRY, 0);
+            let long_entry_count = last.ord ^ LAST_LONG_ENTRY;
+            assert!((1..=MAX_LONG_NAME_ENTRIES).contains(&(long_entry_count as usize)));
 
-                    let checksum = last.chksum;
+            let checksum = last.chksum;
 
-                    let mut long_name_buf = [MaybeUninit::uninit(); MAX_LONG_NAME_BUFFER_LENGTH];
-                    let long_name = long_name_buf
-                        [..long_entry_count as usize * MAX_LONG_NAME_ENTRY_LENGTH]
-                        .write_filled(0);
-                    for (i, chunk) in long_name.as_chunks_mut().0.iter_mut().enumerate().rev() {
-                        let long = unsafe { &entry.long };
-                        if (i as u8) < long_entry_count - 1 {
-                            assert_eq!(long.ord, i as u8 + 1);
-                        }
-                        assert_eq!(long.chksum, checksum);
-                        copy_long_cps(long, chunk);
-                        entry = entries.next().unwrap();
-                    }
-
-                    assert_eq!(checksum, compute_checksum(unsafe { &entry.short.name }));
-
-                    let mut long_name = long_name as &[u16];
-                    trim_long_name(&mut long_name);
-                    for cp in long_name {
-                        assert!(is_valid_long_char(*cp));
-                    }
-                    assert!(long_name.len() <= MAX_LONG_NAME_RESULT_LENGTH);
-                    Some(String::from_utf16(long_name).unwrap())
-                } else {
-                    None
-                };
-                yield (unsafe { entry.short }, long_name);
+            let mut long_name_buf = [MaybeUninit::uninit(); MAX_LONG_NAME_BUFFER_LENGTH];
+            let long_name = long_name_buf[..long_entry_count as usize * MAX_LONG_NAME_ENTRY_LENGTH]
+                .write_filled(0);
+            for (i, chunk) in long_name.as_chunks_mut().0.iter_mut().enumerate().rev() {
+                let long = unsafe { &entry.long };
+                if (i as u8) < long_entry_count - 1 {
+                    assert_eq!(long.ord, i as u8 + 1);
+                }
+                assert_eq!(long.chksum, checksum);
+                copy_long_cps(long, chunk);
+                entry = entries.next().unwrap();
             }
-        },
-    )
+
+            assert_eq!(checksum, compute_checksum(unsafe { &entry.short.name }));
+
+            let mut long_name = long_name as &[u16];
+            trim_long_name(&mut long_name);
+            for cp in long_name {
+                assert!(is_valid_long_char(*cp));
+            }
+            assert!(long_name.len() <= MAX_LONG_NAME_RESULT_LENGTH);
+            Some(String::from_utf16(long_name).unwrap())
+        } else {
+            None
+        };
+        Some((unsafe { entry.short }, long_name))
+    })
 }
 
 fn copy_long_cps(long: &LongNameDirectoryEntry, out: &mut [u16; MAX_LONG_NAME_ENTRY_LENGTH]) {
