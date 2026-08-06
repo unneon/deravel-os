@@ -1,10 +1,15 @@
 use crate::capability::Handler;
+use crate::heap::granularity::PageGranular;
+use crate::page::virt_to_phys;
+use crate::util::untyped_box::UntypedBox;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
+use core::ops::Deref;
 use deravel_types::{ProcessId, UntypedRingBuffer};
 
+#[derive(Clone)]
 pub struct SharedMemory {
-    pub physical_address: usize,
-    pub size: usize,
+    pub backing: Arc<UntypedBox<PageGranular>>,
 }
 
 impl Handler<deravel_types::SharedMemory> for SharedMemory {
@@ -17,6 +22,9 @@ impl Handler<deravel_types::SharedMemory> for SharedMemory {
     }
 
     fn shared_memory(&self) -> (usize, usize) {
-        (self.physical_address, self.size)
+        (
+            virt_to_phys(Arc::deref(&self.backing).as_untyped_ptr().addr()),
+            self.backing.byte_size(),
+        )
     }
 }

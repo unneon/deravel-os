@@ -26,6 +26,21 @@ pub enum UserSyscallError {
     SliceTooSmall(UserSliceTooSmall),
 }
 
+impl<T: SafeUserType> UserPtr<T> {
+    pub fn from_ptr(ptr: *mut T) -> Result<UserPtr<T>, UserPtrInvalid> {
+        check(ptr)?;
+        // TODO: Check pointer does not extend into kernel space.
+        let Some(ptr) = NonNull::new(ptr) else {
+            return Err(UserPtrInvalid);
+        };
+        Ok(UserPtr(ptr))
+    }
+
+    pub fn as_ptr(&self) -> *mut T {
+        self.0.as_ptr()
+    }
+}
+
 impl<T: SafeUserType> UserPtr<[T]> {
     pub fn from_slice(ptr: *mut T, len: usize) -> Result<UserPtr<[T]>, UserPtrInvalid> {
         if (ptr as usize) & (1 << (usize::BITS - 1)) != 0 {
@@ -36,6 +51,7 @@ impl<T: SafeUserType> UserPtr<[T]> {
         if !ptr.is_aligned() {
             return Err(UserPtrInvalid);
         }
+        // TODO: Check pointer does not extend into kernel space.
         let ptr = core::ptr::slice_from_raw_parts_mut(ptr, len);
         let Some(ptr) = NonNull::new(ptr) else {
             return Err(UserPtrInvalid);
@@ -109,4 +125,16 @@ impl core::fmt::Display for UserSyscallError {
             UserSyscallError::SliceTooSmall(err) => err.fmt(f),
         }
     }
+}
+
+fn check<T: SafeUserType>(ptr: *mut T) -> Result<(), UserPtrInvalid> {
+    if (ptr as usize) & (1 << (usize::BITS - 1)) != 0 {
+        // This is not a user pointer, the condition works because of sign-extension.
+        // TODO: Confirm using non-sign-extended pointer causes a page fault.
+        return Err(UserPtrInvalid);
+    }
+    if !ptr.is_aligned() {
+        return Err(UserPtrInvalid);
+    }
+    Ok(())
 }

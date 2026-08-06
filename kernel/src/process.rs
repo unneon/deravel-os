@@ -4,7 +4,7 @@ use crate::capability::{capability_certificate, capability_pages_physical_addres
 use crate::device_tree::timebase_frequency;
 use crate::elf::load_elf;
 use crate::heap::BuddyHeap;
-use crate::heap::granularity::PageGranular;
+use crate::heap::granularity::{PageGranular, page_granular_vec};
 use crate::page::{
     PageFlags, PageTable, TopPageTable, map_direct_mapping, map_kernel_image, virt_to_phys,
 };
@@ -12,12 +12,12 @@ use crate::shutdown;
 use crate::stack::UserCtx;
 use crate::sync::{Mutex, MutexGuard};
 use crate::user::UserPtr;
+use crate::util::untyped_box::UntypedBox;
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::alloc::{Allocator, Layout};
 use core::num::NonZeroUsize;
-use core::ptr::NonNull;
 use core::sync::atomic::{AtomicU16, Ordering};
 use deravel_types::memory::{USER_INPUTS, USER_STACK};
 use deravel_types::*;
@@ -72,7 +72,7 @@ pub struct Process {
     pub virtual_memory: BuddyAllocator,
     pub messages: VecDeque<Message, BuddyHeap>,
     pub currently_serving: Option<ProcessId>,
-    pub allocated: Vec<(*mut u8, Layout)>,
+    pub allocated: Vec<(*mut u8, Arc<UntypedBox<PageGranular>>)>,
 }
 unsafe impl Send for Process {}
 
@@ -96,22 +96,22 @@ static PROCESSES: [Mutex<Option<Process>>; PROCESS_COUNT] = [const { Mutex::new(
 static PROCESSES_RESERVED: AtomicU16 = AtomicU16::new(0);
 
 impl Process {
-    pub fn alloc<T>(&mut self, initial: T) -> &mut T {
-        // TODO: Zero-initialize possible leftover.
-        let pages = Box::new_in(initial, PageGranular::new());
-        let layout = Layout::new::<T>();
-        self.allocated
-            .push((Box::as_ptr(&pages) as *mut u8, layout));
-        Box::leak(pages)
+    pub fn alloc(&mut self, backing: Arc<UntypedBox<PageGranular>>, flags: PageFlags) -> *mut u8 {
+        let virt = self.virtual_memory.alloc(backing.layout()).unwrap();
+        self.alloc_at(virt, backing, flags);
+        virt as *mut u8
     }
 
-    pub fn alloc_array<T: Copy>(&mut self, len: usize, initial: T) -> &mut [T] {
-        // TODO: Zero-initialize possible leftover.
-        let mut pages = Vec::with_capacity_in(len, PageGranular::new());
-        pages.resize(len, initial);
-        let layout = Layout::array::<T>(len).unwrap();
-        self.allocated.push((pages.as_ptr() as *mut u8, layout));
-        Vec::leak(pages)
+    pub fn alloc_at(
+        &mut self,
+        virt: usize,
+        backing: Arc<UntypedBox<PageGranular>>,
+        flags: PageFlags,
+    ) {
+        let layout = backing.layout().size();
+        let phys = virt_to_phys(backing.as_untyped_ptr().addr());
+        self.page_table.map_pages(virt, phys, layout, flags);
+        self.allocated.push((virt as *mut u8, backing));
     }
 }
 
@@ -214,20 +214,16 @@ fn map_capability_memory(table: &mut TopPageTable, pid: ProcessId) {
 fn map_inputs_memory<T: ProcessTag>(proc: &mut Process, inputs: ProcessInputs<T>) {
     let size = USER_INPUTS.end - USER_INPUTS.start;
     assert!(size_of::<ProcessInputs<T>>() <= size);
-    let page = proc.alloc(inputs);
-    let virt = USER_INPUTS.start;
-    let phys = virt_to_phys(page as *mut _) as usize;
-    proc.page_table
-        .map_pages(virt, phys, size, PageFlags::readonly().user());
+    let inputs = Arc::new(UntypedBox::new(Box::new_in(inputs, PageGranular::new())));
+    proc.alloc_at(USER_INPUTS.start, inputs, PageFlags::readonly().user());
 }
 
 fn map_user_stack(proc: &mut Process) {
     let stack_size = USER_STACK.end - USER_STACK.start;
-    let pages = proc.alloc_array(stack_size, 0u8);
-    let phys = virt_to_phys(pages.as_ptr()) as usize;
-    let virt = USER_STACK.start;
-    proc.page_table
-        .map_pages(virt, phys, stack_size, PageFlags::readwrite().user());
+    let pages = Arc::new(UntypedBox::new(
+        page_granular_vec![0u8; stack_size].into_boxed_slice(),
+    ));
+    proc.alloc_at(USER_STACK.start, pages, PageFlags::readwrite().user());
 }
 
 pub fn schedule_and_switch_to_userspace(user: &mut UserCtx) -> ! {
@@ -259,7 +255,6 @@ pub fn find_runnable_process(user: Option<&UserCtx>) -> Option<MutexGuard<'stati
                 return Some(proc);
             }
             if proc.state == ProcessState::Finished {
-                cleanup_process(&mut proc);
                 drop(proc);
                 // TODO: Race condition here.
                 *PROCESSES[scan_index as usize].lock() = None;
@@ -283,11 +278,5 @@ pub fn inspect_can_progress(proc: &mut Process) {
                 proc.name, proc.id, from.name, from.id
             );
         }
-    }
-}
-
-fn cleanup_process(proc: &mut Process) {
-    for (ptr, layout) in proc.allocated.drain(..) {
-        unsafe { PageGranular::new().deallocate(NonNull::new(ptr).unwrap(), layout) }
     }
 }

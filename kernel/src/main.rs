@@ -45,6 +45,7 @@ use crate::capability::{grant_kernel_capability, reserve_kernel_capability};
 use crate::device_tree::initialize_timebase_frequency;
 use crate::drvli::{ShutdownServer, SyscallHandler, dispatch_syscall};
 use crate::elf::elf;
+use crate::heap::granularity::page_granular_vec;
 use crate::heap::{initialize_early_heap, initialize_heap, log_heap_usage};
 use crate::interrupt::INTERRUPTS;
 use crate::log::{initialize_log, log_userspace};
@@ -58,9 +59,11 @@ use crate::process_spawner::ProcessSpawnerService;
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use crate::stack::{UserCtx, initialize_kernel_stack};
 use crate::user::UserPtr;
+use crate::util::untyped_box::UntypedBox;
 use ::log::*;
 use alloc::boxed::Box;
 use alloc::string::String;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::alloc::Layout;
 use core::panic::PanicInfo;
@@ -362,32 +365,25 @@ impl SyscallHandler for () {
 
     fn alloc(user: &mut UserCtx, size: usize) -> *mut u8 {
         let size = size.next_multiple_of(PAGE_SIZE);
-        let layout = Layout::from_size_align(size, PAGE_SIZE).unwrap();
-        let mut proc = user.process();
-        let virt = proc.virtual_memory.alloc(layout).unwrap();
-        let pages = proc.alloc_array(size, 0u8);
-        let phys = virt_to_phys(pages.as_ptr()) as usize;
-        let table = &mut proc.page_table;
-        table.map_pages(virt, phys, size, PageFlags::readwrite().user());
-        virt as *mut u8
+        let pages = Arc::new(UntypedBox::new(
+            page_granular_vec![0u8; size].into_boxed_slice(),
+        ));
+        user.process().alloc(pages, PageFlags::readwrite().user())
     }
 
     fn alloc_shared(user: &mut UserCtx, size: usize) -> (*mut u8, Capability<SharedMemory>) {
         let size = size.next_multiple_of(PAGE_SIZE);
-        let layout = Layout::from_size_align(size, PAGE_SIZE).unwrap();
-        let mut proc = user.process();
-        let virt = proc.virtual_memory.alloc(layout).unwrap();
-        let phys = virt_to_phys(proc.alloc_array(size, 0u8).as_ptr()) as usize;
-        let table = &mut proc.page_table;
-        table.map_pages(virt, phys, size, PageFlags::readwrite().user());
+        let pages = Arc::new(UntypedBox::new(
+            page_granular_vec![0u8; size].into_boxed_slice(),
+        ));
+        let virt = user
+            .process()
+            .alloc(pages.clone(), PageFlags::readwrite().user());
         let cap = grant_kernel_capability(
             user.pid(),
-            Box::leak(Box::new(shared_memory::SharedMemory {
-                physical_address: phys,
-                size,
-            })),
+            Box::leak(Box::new(shared_memory::SharedMemory { backing: pages })),
         );
-        (virt as *mut u8, cap)
+        (virt, cap)
     }
 
     fn map_shared(user: &mut UserCtx, cap: Capability<SharedMemory>) -> (*mut u8, usize) {
@@ -410,6 +406,24 @@ impl SyscallHandler for () {
             .map_pages(virt, phys, padded_length, PageFlags::readwrite().user());
 
         (virt as *mut u8, length)
+    }
+
+    fn free(user: &mut UserCtx, ptr: UserPtr<u8>) {
+        let mut proc = user.process();
+        let Some((i, _)) = proc
+            .allocated
+            .iter()
+            .enumerate()
+            .find(|a| a.1.0 == ptr.as_ptr())
+        else {
+            kill!(user, proc, "free of unallocated pointer")
+        };
+        let (virt, backing) = proc.allocated.swap_remove(i);
+        proc.page_table.unmap_pages(
+            virt as usize,
+            virt_to_phys(backing.as_untyped_ptr()) as usize,
+            backing.byte_size(),
+        );
     }
 
     fn yield_(user: &mut UserCtx) {

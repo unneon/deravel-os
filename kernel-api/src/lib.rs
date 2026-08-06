@@ -91,7 +91,9 @@ unsafe impl GlobalAlloc for PageAllocator {
         unsafe { syscall::alloc(layout.size()) }
     }
 
-    unsafe fn dealloc(&self, _: *mut u8, _: Layout) {}
+    unsafe fn dealloc(&self, ptr: *mut u8, _: Layout) {
+        unsafe { syscall::free(ptr) }
+    }
 }
 
 impl Log for KernelLogger {

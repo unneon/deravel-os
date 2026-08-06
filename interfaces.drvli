@@ -78,6 +78,8 @@ syscall alloc_shared(size usize) ptr u8, shared_memory
 
 syscall map_shared(cap shared_memory) ptr u8, usize
 
+syscall free(p ptr u8)
+
 syscall yield()
 
 syscall log(message const_array u8, level u64)

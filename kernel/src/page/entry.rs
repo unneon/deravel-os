@@ -10,6 +10,7 @@ pub struct PageFlags(usize);
 #[repr(transparent)]
 pub struct PageTableEntry<const LEVEL: usize>(pub usize);
 
+#[derive(Debug)]
 pub enum PageTableEntryUnpacked<const LEVEL: usize> {
     // This variant could have a u63 for kernel use.
     Invalid,

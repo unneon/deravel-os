@@ -9,7 +9,7 @@ pub trait Interface {
     const NAME: &'static str;
 }
 
-pub trait ProcessArgs: Debug + for<'a> Deserialize<'a> {
+pub trait ProcessArgs: Debug + for<'a> Deserialize<'a> + Send + Sync {
     type Process: ProcessTag<Args = Self>;
 
     fn for_all(&self, f: impl FnMut(RawCapability));

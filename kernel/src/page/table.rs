@@ -4,6 +4,7 @@ use crate::page::{
     virt_to_phys,
 };
 use alloc::boxed::Box;
+use core::assert_matches;
 use core::ops::Range;
 use deravel_types::PAGE_SIZE;
 use log::*;
@@ -74,10 +75,65 @@ impl<const LEVEL: usize> PageTable<LEVEL> {
         }
     }
 
+    fn unmap_range(
+        &mut self,
+        virt: usize,
+        phys: usize,
+        size: usize,
+        recurse: impl Fn(&'static mut PageTable<{ LEVEL - 1 }>, usize, usize, usize) + 'static,
+    ) {
+        let (prefix, aligned, suffix) = align_by(virt..virt + size, Self::LEVEL_PAGE_SIZE);
+
+        if !prefix.is_empty() {
+            recurse(
+                self.unwrap_indirect(prefix.start),
+                prefix.start,
+                phys + (prefix.start - virt),
+                prefix.end - prefix.start,
+            );
+        }
+
+        if !aligned.is_empty()
+            && !(phys + (aligned.start - virt)).is_multiple_of(Self::LEVEL_PAGE_SIZE)
+        {
+            // Sv39 supports 2 MiB megapages and 1 GiB gigapages, each of which must be virtually
+            // and physically aligned to a boundary equal to its size. (RISC-V Privileged 12.4.1).
+            warn!("physical address {phys:#x} not superpage-aligned with {virt:#x}");
+
+            for v in aligned.step_by(Self::LEVEL_PAGE_SIZE) {
+                recurse(
+                    self.unwrap_indirect(v),
+                    v,
+                    phys + (v - virt),
+                    Self::LEVEL_PAGE_SIZE,
+                );
+            }
+        } else {
+            for v in aligned.step_by(Self::LEVEL_PAGE_SIZE) {
+                self.unmap_leaf(v, phys + (v - virt));
+            }
+        }
+
+        if !suffix.is_empty() {
+            recurse(
+                self.unwrap_indirect(suffix.start),
+                suffix.start,
+                phys + (suffix.start - virt),
+                suffix.end - suffix.start,
+            );
+        }
+    }
+
     fn map_leaf(&mut self, virt: usize, phys: usize, flags: PageFlags) {
         let vpn_segment = vpn_segment::<LEVEL>(virt);
         assert!(!self.0[vpn_segment].is_valid());
         self.0[vpn_segment] = PageTableEntry::leaf(phys, flags);
+    }
+
+    fn unmap_leaf(&mut self, virt: usize, phys: usize) {
+        let vpn_segment = vpn_segment::<LEVEL>(virt);
+        assert_matches!(self.0[vpn_segment].unpack(), PageTableEntryUnpacked::Leaf { phys_ptr, .. } if phys_ptr as usize == phys);
+        self.0[vpn_segment] = PageTableEntry::invalid();
     }
 
     fn map_indirect(&mut self, virt: usize) -> &'static mut PageTable<{ LEVEL - 1 }> {
@@ -94,6 +150,14 @@ impl<const LEVEL: usize> PageTable<LEVEL> {
             PageTableEntryUnpacked::Leaf { .. } => unreachable!(),
         }
     }
+
+    fn unwrap_indirect(&mut self, virt: usize) -> &'static mut PageTable<{ LEVEL - 1 }> {
+        let vpn_segment = vpn_segment::<LEVEL>(virt);
+        let PageTableEntryUnpacked::Indirect { phys_ptr } = self.0[vpn_segment].unpack() else {
+            unreachable!()
+        };
+        unsafe { &mut *phys_to_virt(phys_ptr as *mut PageTable<{ LEVEL - 1 }>) }
+    }
 }
 
 impl TopPageTable {
@@ -108,11 +172,27 @@ impl TopPageTable {
         assert!(size.is_multiple_of(PAGE_SIZE));
         self.map_range(virt, phys, size, flags, PageTable::<1>::map_pages);
     }
+
+    #[track_caller]
+    pub fn unmap_pages(&mut self, virt: usize, phys: usize, size: usize) {
+        assert!(virt.is_multiple_of(PAGE_SIZE));
+        assert!(virt < MAX_VIRTUAL_ADDR);
+        assert!(virt + size <= MAX_VIRTUAL_ADDR);
+        assert!(phys.is_multiple_of(PAGE_SIZE));
+        assert!(phys < MAX_PHYSICAL_ADDR);
+        assert!(phys + size <= MAX_PHYSICAL_ADDR);
+        assert!(size.is_multiple_of(PAGE_SIZE));
+        self.unmap_range(virt, phys, size, PageTable::<1>::unmap_pages);
+    }
 }
 
 impl PageTable<1> {
     fn map_pages(&mut self, virt: usize, phys: usize, size: usize, flags: PageFlags) {
         self.map_range(virt, phys, size, flags, PageTable::<0>::map_pages);
+    }
+
+    fn unmap_pages(&mut self, virt: usize, phys: usize, size: usize) {
+        self.unmap_range(virt, phys, size, PageTable::<0>::unmap_pages);
     }
 }
 
@@ -120,6 +200,12 @@ impl PageTable<0> {
     fn map_pages(&mut self, virt: usize, phys: usize, size: usize, flags: PageFlags) {
         for v in (virt..virt + size).step_by(PAGE_SIZE) {
             self.map_leaf(v, phys + (v - virt), flags);
+        }
+    }
+
+    fn unmap_pages(&mut self, virt: usize, phys: usize, size: usize) {
+        for v in (virt..virt + size).step_by(PAGE_SIZE) {
+            self.unmap_leaf(v, phys + (v - virt));
         }
     }
 }

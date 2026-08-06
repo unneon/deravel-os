@@ -112,6 +112,7 @@ impl Type<'_> {
             (Isize, _) => "isize".into(),
             (Never, _) => "!".into(),
             (Option(inner), _) => format!("Option<{}>", inner.rust(ctx)).into(),
+            (Ptr(inner), SyscallKernelArg) => format!("UserPtr<{}>", inner.rust(ctx)).into(),
             (Ptr(inner), _) => format!("*mut {}", inner.rust(ctx)).into(),
             (ProcessId, SyscallRet) => "ProcessId".into(),
             (ProcessSpawner(name), _) => format!("Capability<{}Spawner>", camel_case(name)).into(),

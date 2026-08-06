@@ -2,18 +2,19 @@ mod types;
 
 use crate::capability::grant_kernel_capability;
 use crate::drvli::DisplayServer;
-use crate::heap::BuddyHeap;
+use crate::heap::granularity::page_granular_vec;
 use crate::interrupt::InterruptHandler;
 use crate::page::virt_to_phys;
+use crate::shared_memory;
 use crate::sync::Mutex;
+use crate::util::untyped_box::UntypedBox;
 use crate::util::volatile::volatile_struct;
 use crate::virtio::gpu::types::*;
 use crate::virtio::queue::Queue;
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, features};
 use crate::virtio::{Capabilities, Isr};
 use alloc::boxed::Box;
-use alloc::vec;
-use alloc::vec::Vec;
+use alloc::sync::Arc;
 use deravel_types::{Capability, ProcessId, SharedMemory};
 use log::*;
 
@@ -38,8 +39,8 @@ pub struct VirtioGpu {
     cursorq: Queue<1>,
     width: u32,
     height: u32,
-    framebuffer: Vec<u8, BuddyHeap>,
-    cursor_image: Vec<u8>,
+    framebuffer: Option<shared_memory::SharedMemory>,
+    cursor_image: shared_memory::SharedMemory,
     cursor_updated: bool,
 }
 
@@ -59,8 +60,12 @@ impl VirtioGpu {
             cursorq,
             width: 0,
             height: 0,
-            framebuffer: Vec::new_in(BuddyHeap),
-            cursor_image: vec![0; 64 * 64 * 4],
+            framebuffer: None,
+            cursor_image: shared_memory::SharedMemory {
+                backing: Arc::new(UntypedBox::new(
+                    page_granular_vec![0u8; 64 * 64 * 4].into_boxed_slice(),
+                )),
+            },
             cursor_updated: true,
         };
 
@@ -76,8 +81,11 @@ impl VirtioGpu {
         let height = r.height;
         gpu.width = width;
         gpu.height = height;
-        gpu.framebuffer
-            .resize(width as usize * height as usize * 4, 0);
+        gpu.framebuffer = Some(shared_memory::SharedMemory {
+            backing: Arc::new(UntypedBox::new(
+                page_granular_vec![0u8; width as usize * height as usize * 4].into_boxed_slice(),
+            )),
+        });
         info!("detected a {width}x{height} display");
 
         let req = ResourceCreate2D {
@@ -95,9 +103,10 @@ impl VirtioGpu {
             resouce_id: 1,
             nr_entries: 1,
         };
+        // TODO: Include this in reference count?
         let mem_entry = MemEntry {
-            addr: virt_to_phys(gpu.framebuffer.as_mut_ptr()) as u64,
-            length: gpu.framebuffer.len() as u32,
+            addr: virt_to_phys(gpu.framebuffer.as_ref().unwrap().backing.as_untyped_ptr()) as u64,
+            length: gpu.framebuffer.as_ref().unwrap().backing.byte_size() as u32,
             padding: 0,
         };
         gpu.controlq.descriptor_readonly(0, &req, Some(1));
@@ -135,8 +144,9 @@ impl VirtioGpu {
             resouce_id: 2,
             nr_entries: 1,
         };
+        // TODO: Include this in reference count?
         let mem_entry = MemEntry {
-            addr: virt_to_phys(self.cursor_image.as_ptr()) as u64,
+            addr: virt_to_phys(self.cursor_image.backing.as_untyped_ptr()) as u64,
             length: 64 * 64 * 4,
             padding: 0,
         };
@@ -162,13 +172,10 @@ impl DisplayServer for Mutex<VirtioGpu> {
     }
 
     fn framebuffer(&self, sender: ProcessId) -> Capability<SharedMemory> {
-        let mut self_ = self.lock();
+        let self_ = self.lock();
         grant_kernel_capability(
             sender,
-            Box::leak(Box::new(crate::shared_memory::SharedMemory {
-                physical_address: virt_to_phys(self_.framebuffer.as_mut_ptr()) as usize,
-                size: (self_.width * self_.height * 4) as usize,
-            })),
+            Box::leak(Box::new(self_.framebuffer.as_ref().unwrap().clone())),
         )
     }
 
@@ -202,14 +209,8 @@ impl DisplayServer for Mutex<VirtioGpu> {
     }
 
     fn cursor_image_buffer(&self, sender: ProcessId) -> Capability<SharedMemory> {
-        let mut self_ = self.lock();
-        grant_kernel_capability(
-            sender,
-            Box::leak(Box::new(crate::shared_memory::SharedMemory {
-                physical_address: virt_to_phys(self_.cursor_image.as_mut_ptr()) as usize,
-                size: 64 * 64 * 4,
-            })),
-        )
+        let self_ = self.lock();
+        grant_kernel_capability(sender, Box::leak(Box::new(self_.cursor_image.clone())))
     }
 
     fn cursor_image_modified(&self, _: ProcessId) {

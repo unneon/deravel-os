@@ -1,5 +1,8 @@
-use crate::page::{PageFlags, virt_to_phys};
+use crate::heap::granularity::page_granular_vec;
+use crate::page::PageFlags;
 use crate::process::Process;
+use crate::util::untyped_box::UntypedBox;
+use alloc::sync::Arc;
 use deravel_types::PAGE_SIZE;
 use elf::ElfBytes;
 use elf::abi::{EM_RISCV, ET_EXEC, PF_R, PF_W, PF_X, PT_LOAD};
@@ -48,16 +51,10 @@ pub fn load_elf(elf_bytes: &[u8], proc: &mut Process) {
         if flags.is_writable() {
             let size = (segment.p_memsz as usize).next_multiple_of(PAGE_SIZE);
 
-            let pages = proc.alloc_array(size, 0u8);
+            let mut pages = page_granular_vec![0u8; size];
             pages[..segment.p_filesz as usize].copy_from_slice(data);
-
-            let pages = pages.as_ptr();
-            proc.page_table.map_pages(
-                segment.p_vaddr as usize,
-                virt_to_phys(pages) as usize,
-                size,
-                flags,
-            );
+            let pages = Arc::new(UntypedBox::new(pages.into_boxed_slice()));
+            proc.alloc_at(segment.p_vaddr as usize, pages, flags);
         } else {
             assert!((data.as_ptr() as usize).is_multiple_of(PAGE_SIZE));
             assert!(elf_data_is_zero_padded(&segment, elf_bytes));

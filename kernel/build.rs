@@ -193,6 +193,9 @@ fn generate_syscall_dispatch(drvli: &Drvli, out: &mut String) {
                     let as_ = format!("registers.a{}", used_arg_registers + 1);
                     format!("UserPtr::from_slice({ap} as *mut u8, {as_})?")
                 }
+                Type::Ptr(inner) if **inner == Type::U8 => {
+                    format!("UserPtr::from_ptr(registers.a{used_arg_registers} as *mut u8)?")
+                }
                 _ => unimplemented!("syscall argument {arg_name:?} {arg_type:?}"),
             };
             used_arg_registers += split_syscall_arg(arg_type).count();
