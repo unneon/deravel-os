@@ -91,6 +91,7 @@ impl<const LEVEL: usize> PageTable<LEVEL> {
                 phys + (prefix.start - virt),
                 prefix.end - prefix.start,
             );
+            self.check_unmap_indirect(prefix.start);
         }
 
         if !aligned.is_empty()
@@ -107,6 +108,7 @@ impl<const LEVEL: usize> PageTable<LEVEL> {
                     phys + (v - virt),
                     Self::LEVEL_PAGE_SIZE,
                 );
+                self.check_unmap_indirect(v);
             }
         } else {
             for v in aligned.step_by(Self::LEVEL_PAGE_SIZE) {
@@ -121,12 +123,17 @@ impl<const LEVEL: usize> PageTable<LEVEL> {
                 phys + (suffix.start - virt),
                 suffix.end - suffix.start,
             );
+            self.check_unmap_indirect(suffix.start);
         }
     }
 
     fn map_leaf(&mut self, virt: usize, phys: usize, flags: PageFlags) {
         let vpn_segment = vpn_segment::<LEVEL>(virt);
-        assert!(!self.0[vpn_segment].is_valid());
+        assert!(
+            !self.0[vpn_segment].is_valid(),
+            "leaf {virt:#x} (level {LEVEL}) already contains {:?}",
+            self.0[vpn_segment].unpack()
+        );
         self.0[vpn_segment] = PageTableEntry::leaf(phys, flags);
     }
 
@@ -157,6 +164,27 @@ impl<const LEVEL: usize> PageTable<LEVEL> {
             unreachable!()
         };
         unsafe { &mut *phys_to_virt(phys_ptr as *mut PageTable<{ LEVEL - 1 }>) }
+    }
+
+    fn check_unmap_indirect(&mut self, virt: usize)
+    where
+        PageTable<{ LEVEL - 1 }>:,
+    {
+        if self.unwrap_indirect(virt).is_completely_unmapped() {
+            self.unmap_indirect(virt);
+        }
+    }
+
+    fn unmap_indirect(&mut self, virt: usize) {
+        let vpn_segment = vpn_segment::<LEVEL>(virt);
+        let PageTableEntryUnpacked::Indirect { phys_ptr } = self.0[vpn_segment].unpack() else {
+            unreachable!()
+        };
+        let _ = unsafe { Box::from_raw(phys_to_virt(phys_ptr as *mut PageTable<0>)) };
+    }
+
+    fn is_completely_unmapped(&self) -> bool {
+        !self.0.iter().any(PageTableEntry::is_valid)
     }
 }
 
