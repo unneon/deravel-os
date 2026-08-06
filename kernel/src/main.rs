@@ -31,7 +31,6 @@ mod page;
 mod pci;
 mod plic;
 mod process;
-mod process_spawner;
 mod sbi;
 mod shared_memory;
 mod stack;
@@ -52,10 +51,10 @@ use crate::log::{initialize_log, log_userspace};
 use crate::page::{PageFlags, initialize_memory_mapping, phys_to_virt, virt_to_phys};
 use crate::pci::initialize_all_pci;
 use crate::plic::{initialize_plic, plic_claim, plic_complete};
+use crate::process::spawner::ProcessSpawnerService;
 use crate::process::{
     Message, ProcessState, get_process, kill, reserve_process, schedule_and_switch_to_userspace,
 };
-use crate::process_spawner::ProcessSpawnerService;
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use crate::stack::{UserCtx, initialize_kernel_stack};
 use crate::user::UserPtr;

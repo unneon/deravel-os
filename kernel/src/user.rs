@@ -80,6 +80,8 @@ impl<T: SafeUserType> UserPtr<[T]> {
 
 unsafe impl SafeUserType for u8 {}
 
+unsafe impl<T: Send + ?Sized> Send for UserPtr<T> {}
+
 impl<T: ?Sized> Clone for UserPtr<T> {
     fn clone(&self) -> Self {
         Self(self.0)

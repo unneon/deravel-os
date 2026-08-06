@@ -1,3 +1,5 @@
+pub mod spawner;
+
 use crate::arch::{RiscvRegisters, switch_to_user};
 use crate::buddy::BuddyAllocator;
 use crate::capability::{capability_certificate, capability_pages_physical_address};
@@ -72,14 +74,12 @@ pub struct Process {
     pub virtual_memory: BuddyAllocator,
     pub messages: VecDeque<Message, BuddyHeap>,
     pub currently_serving: Option<ProcessId>,
-    pub allocated: Vec<(*mut u8, Arc<UntypedBox<PageGranular>>)>,
+    allocated: Vec<(usize, Arc<UntypedBox<PageGranular>>)>,
 }
-unsafe impl Send for Process {}
 
 pub struct ProcessReservation<T: ProcessTag> {
-    pub id: ProcessId,
-    pub elf: &'static [u8],
-    #[allow(dead_code)]
+    id: ProcessId,
+    elf: &'static [u8],
     pub export: Capability<T::Export>,
 }
 
@@ -111,7 +111,7 @@ impl Process {
         let size = backing.layout().size();
         let phys = virt_to_phys(backing.as_untyped_ptr().addr());
         self.page_table.map_pages(virt, phys, size, flags);
-        self.allocated.push((virt as *mut u8, backing));
+        self.allocated.push((virt, backing));
     }
 
     pub fn dealloc(&mut self, ptr: *mut u8) -> Result<(), ()> {
@@ -119,15 +119,15 @@ impl Process {
             .allocated
             .iter()
             .enumerate()
-            .find(|a| a.1.0 == ptr)
+            .find(|a| a.1.0 == ptr as usize)
             .ok_or(())?;
         let (virt, backing) = self.allocated.swap_remove(slot.0);
         self.page_table.unmap_pages(
-            virt as usize,
+            virt,
             virt_to_phys(backing.as_untyped_ptr()) as usize,
             backing.byte_size(),
         );
-        self.virtual_memory.dealloc(virt as usize, backing.layout());
+        self.virtual_memory.dealloc(virt, backing.layout());
         Ok(())
     }
 }
@@ -152,7 +152,7 @@ impl<T: ProcessTag> ProcessReservation<T> {
         )
     }
 
-    pub fn spawn_with_ready_caps(self, args: T::Args) {
+    fn spawn_with_ready_caps(self, args: T::Args) {
         create_process::<T>(
             T::NAME,
             self.elf,
@@ -178,7 +178,7 @@ pub fn reserve_process<T: ProcessTag>(elf: &'static [u8]) -> ProcessReservation<
     }
 }
 
-pub fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: ProcessInputs<T>) {
+fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: ProcessInputs<T>) {
     let mut proc = Process {
         id: inputs.id,
         name,
@@ -253,7 +253,7 @@ pub fn schedule_and_switch_to_userspace(user: &mut UserCtx) -> ! {
     kill!(user, "{err}");
 }
 
-pub fn find_runnable_process(user: Option<&UserCtx>) -> Option<MutexGuard<'static, Process>> {
+fn find_runnable_process(user: Option<&UserCtx>) -> Option<MutexGuard<'static, Process>> {
     let scan_start = match user {
         Some(hart) => hart.pid().as_u16() + 1,
         None => 0,
@@ -282,7 +282,7 @@ pub fn find_runnable_process(user: Option<&UserCtx>) -> Option<MutexGuard<'stati
     None
 }
 
-pub fn inspect_can_progress(proc: &mut Process) {
+fn inspect_can_progress(proc: &mut Process) {
     if let ProcessState::WaitingForReply { from, .. } | ProcessState::WaitingForStreamMap { from } =
         &proc.state
         && let Actor::Userspace(from) = from
