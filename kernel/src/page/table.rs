@@ -181,6 +181,7 @@ impl<const LEVEL: usize> PageTable<LEVEL> {
             unreachable!()
         };
         let _ = unsafe { Box::from_raw(phys_to_virt(phys_ptr as *mut PageTable<0>)) };
+        self.0[vpn_segment] = PageTableEntry::invalid();
     }
 
     fn is_completely_unmapped(&self) -> bool {
