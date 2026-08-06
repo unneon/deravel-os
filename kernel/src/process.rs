@@ -108,10 +108,27 @@ impl Process {
         backing: Arc<UntypedBox<PageGranular>>,
         flags: PageFlags,
     ) {
-        let layout = backing.layout().size();
+        let size = backing.layout().size();
         let phys = virt_to_phys(backing.as_untyped_ptr().addr());
-        self.page_table.map_pages(virt, phys, layout, flags);
+        self.page_table.map_pages(virt, phys, size, flags);
         self.allocated.push((virt as *mut u8, backing));
+    }
+
+    pub fn dealloc(&mut self, ptr: *mut u8) -> Result<(), ()> {
+        let slot = self
+            .allocated
+            .iter()
+            .enumerate()
+            .find(|a| a.1.0 == ptr)
+            .ok_or(())?;
+        let (virt, backing) = self.allocated.swap_remove(slot.0);
+        self.page_table.unmap_pages(
+            virt as usize,
+            virt_to_phys(backing.as_untyped_ptr()) as usize,
+            backing.byte_size(),
+        );
+        self.virtual_memory.dealloc(virt as usize, backing.layout());
+        Ok(())
     }
 }
 

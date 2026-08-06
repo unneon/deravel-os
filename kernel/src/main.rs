@@ -410,20 +410,9 @@ impl SyscallHandler for () {
 
     fn free(user: &mut UserCtx, ptr: UserPtr<u8>) {
         let mut proc = user.process();
-        let Some((i, _)) = proc
-            .allocated
-            .iter()
-            .enumerate()
-            .find(|a| a.1.0 == ptr.as_ptr())
-        else {
+        if proc.dealloc(ptr.as_ptr()).is_err() {
             kill!(user, proc, "free of unallocated pointer")
-        };
-        let (virt, backing) = proc.allocated.swap_remove(i);
-        proc.page_table.unmap_pages(
-            virt as usize,
-            virt_to_phys(backing.as_untyped_ptr()) as usize,
-            backing.byte_size(),
-        );
+        }
     }
 
     fn yield_(user: &mut UserCtx) {
