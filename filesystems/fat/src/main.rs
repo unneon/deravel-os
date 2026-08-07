@@ -14,6 +14,7 @@ use crate::directory_entry::{DirectoryEntry, coalesce_long_names, to_short_name}
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::marker::ConstParamTy;
+use core::ops::Range;
 use deravel_kernel_api::*;
 use log::*;
 
@@ -86,7 +87,7 @@ impl<const TYPE: Type> Fat<TYPE> {
         let rdr_sectors_count = self.bpb.root_ent_cnt as u32 * 32 / self.bpb.byts_per_sec as u32;
         let mut entries = Vec::new();
         for i in 0..rdr_sectors_count {
-            let bytes = self.read_sector(self.root_directory_sectors_start() + i);
+            let bytes = self.read_sector(self.root_directory_sectors().start + i);
             entries.extend_from_slice(&directory_bytes_to_entries(bytes));
         }
         entries
@@ -120,16 +121,16 @@ impl<const TYPE: Type> Fat<TYPE> {
                 let fat_sector_index = global_byte_index / self.bpb.byts_per_sec as u32;
                 let fat_entry_byte_index = global_byte_index % self.bpb.byts_per_sec as u32;
                 let bytes = if fat_entry_byte_index + 1 < self.bpb.byts_per_sec as u32 {
-                    let sector = self.read_sector(self.fat_sectors_start() + fat_sector_index);
+                    let sector = self.read_sector(self.fat_sectors().start + fat_sector_index);
                     [
                         sector[fat_entry_byte_index as usize],
                         sector[fat_entry_byte_index as usize + 1],
                     ]
                 } else {
                     let first_sector =
-                        self.read_sector(self.fat_sectors_start() + fat_sector_index);
+                        self.read_sector(self.fat_sectors().start + fat_sector_index);
                     let second_sector =
-                        self.read_sector(self.fat_sectors_start() + fat_sector_index + 1);
+                        self.read_sector(self.fat_sectors().start + fat_sector_index + 1);
                     [
                         first_sector[fat_entry_byte_index as usize],
                         second_sector[0],
@@ -146,7 +147,7 @@ impl<const TYPE: Type> Fat<TYPE> {
                 let entries_per_sector = self.bpb.byts_per_sec as u32 / 2;
                 let fat_sector_index = cluster / entries_per_sector;
                 let fat_entry_index = cluster % entries_per_sector;
-                let sector = self.read_sector(self.fat_sectors_start() + fat_sector_index);
+                let sector = self.read_sector(self.fat_sectors().start + fat_sector_index);
                 let entry = sector.as_chunks().0[fat_entry_index as usize];
                 u16::from_le_bytes(entry) as u32
             }
@@ -154,7 +155,7 @@ impl<const TYPE: Type> Fat<TYPE> {
                 let entries_per_sector = self.bpb.byts_per_sec as u32 / 4;
                 let fat_sector_index = cluster / entries_per_sector;
                 let fat_entry_index = cluster % entries_per_sector;
-                let sector = self.read_sector(self.fat_sectors_start() + fat_sector_index);
+                let sector = self.read_sector(self.fat_sectors().start + fat_sector_index);
                 let entry = sector.as_chunks().0[fat_entry_index as usize];
                 u32::from_le_bytes(entry)
             }
@@ -163,7 +164,7 @@ impl<const TYPE: Type> Fat<TYPE> {
 
     fn read_data(&self, cluster: u32) -> Vec<u8> {
         let cluster_sectors_start =
-            self.data_sectors_start() + (cluster - 2) * self.bpb.sec_per_clus as u32;
+            self.data_sectors().start + (cluster - 2) * self.bpb.sec_per_clus as u32;
         let mut data = Vec::new();
         for i in 0..self.bpb.sec_per_clus as u32 {
             data.extend_from_slice(&self.read_sector(cluster_sectors_start + i));
@@ -185,27 +186,26 @@ impl<const TYPE: Type> Fat<TYPE> {
         bytes
     }
 
-    fn fat_sectors_size(&self) -> u32 {
-        match TYPE {
+    fn fat_sectors(&self) -> Range<u32> {
+        let start = self.bpb.rsvd_sec_cnt as u32;
+        let single_size = match TYPE {
             Fat12 | Fat16 => self.bpb.fat_sz_16 as u32,
             Fat32 => self.bpb.as_extended_32().fat_sz_32,
-        }
+        };
+        let total_size = self.bpb.num_fats as u32 * single_size;
+        start..start + total_size
     }
 
-    fn fat_sectors_start(&self) -> u32 {
-        self.bpb.rsvd_sec_cnt as u32
+    fn root_directory_sectors(&self) -> Range<u32> {
+        let start = self.fat_sectors().end;
+        let size = self.bpb.root_ent_cnt as u32 * 32 / self.bpb.byts_per_sec as u32;
+        start..start + size
     }
 
-    fn root_directory_sectors_start(&self) -> u32 {
-        self.fat_sectors_start() + self.bpb.num_fats as u32 * self.fat_sectors_size()
-    }
-
-    fn root_directory_sectors_count(&self) -> u32 {
-        self.bpb.root_ent_cnt as u32 * 32 / self.bpb.byts_per_sec as u32
-    }
-
-    fn data_sectors_start(&self) -> u32 {
-        self.root_directory_sectors_start() + self.root_directory_sectors_count()
+    fn data_sectors(&self) -> Range<u32> {
+        let start = self.root_directory_sectors().end;
+        let end = self.total_sectors_count();
+        start..end
     }
 
     fn total_sectors_count(&self) -> u32 {
@@ -222,7 +222,7 @@ impl<const TYPE: Type> Fat<TYPE> {
     }
 
     fn count_of_clusters(&self) -> u32 {
-        (self.total_sectors_count() - self.data_sectors_start()) / self.bpb.sec_per_clus as u32
+        (self.total_sectors_count() - self.data_sectors().start) / self.bpb.sec_per_clus as u32
     }
 
     fn max_cluster(&self) -> u32 {
