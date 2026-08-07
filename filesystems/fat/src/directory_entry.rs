@@ -120,8 +120,10 @@ fn copy_long_cps(long: &LongNameDirectoryEntry, out: &mut [u16; MAX_LONG_NAME_EN
 
 fn compute_checksum(short_name: &[u8; 11]) -> u8 {
     let mut sum = 0;
-    for byte in short_name {
-        sum = if sum & 1 != 0 { 0x80 } else { 0 } + (sum >> 1) + byte;
+    for &byte in short_name {
+        sum = (if sum & 1 != 0 { 0x80u8 } else { 0 })
+            .wrapping_add(sum >> 1)
+            .wrapping_add(byte);
     }
     sum
 }
