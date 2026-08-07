@@ -18,24 +18,24 @@ pub struct ShortNameDirectoryEntry {
     pub crt_time: u16,
     pub crt_date: u16,
     pub lst_acc_date: u16,
-    pub fst_clus_hi: u16,
+    fst_clus_hi: u16,
     pub wrt_time: u16,
     pub wrt_date: u16,
-    pub fst_clus_lo: u16,
+    fst_clus_lo: u16,
     pub file_size: u32,
 }
 
 #[derive(Clone, Copy, Debug)]
 #[repr(C, packed)]
 pub struct LongNameDirectoryEntry {
-    pub ord: u8,
-    pub name1: [u16; 5],
-    pub attr: u8,
-    pub type_: u8,
-    pub chksum: u8,
-    pub name2: [u16; 6],
-    pub fst_clus_lo: u16,
-    pub name3: [u16; 2],
+    ord: u8,
+    name1: [u16; 5],
+    attr: u8,
+    type_: u8,
+    chksum: u8,
+    name2: [u16; 6],
+    fst_clus_lo: u16,
+    name3: [u16; 2],
 }
 
 const _: () = assert!(size_of::<DirectoryEntry>() == 32);
@@ -63,6 +63,12 @@ const MAX_LONG_NAME_ENTRIES: usize =
 
 const UTF16_PERIOD: u16 = b'.' as u16;
 const UTF16_SPACE: u16 = b' ' as u16;
+
+impl ShortNameDirectoryEntry {
+    pub fn fst_clus(&self) -> u32 {
+        ((self.fst_clus_hi as u32) << 16) | self.fst_clus_lo as u32
+    }
+}
 
 pub fn coalesce_long_names<'a>(
     mut entries: impl Iterator<Item = DirectoryEntry> + 'a,

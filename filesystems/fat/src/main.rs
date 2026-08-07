@@ -57,7 +57,7 @@ impl<const TYPE: Type> Fat<TYPE> {
                     short_needle == Some(de.name)
                 };
                 if name_matches {
-                    let de_cluster = (de.fst_clus_hi as u32) << 16 | de.fst_clus_lo as u32;
+                    let de_cluster = de.fst_clus();
                     let Some(path_tail) = path_tail else {
                         return (de_cluster, de.file_size as usize);
                     };
