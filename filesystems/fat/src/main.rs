@@ -26,7 +26,6 @@ enum Directory {
 struct Fat<const TYPE: Type> {
     drive: Capability<Drive>,
     bpb: Bpb,
-    max_cluster: u32,
 }
 
 #[derive(Clone, ConstParamTy, Copy, Debug, Eq, PartialEq)]
@@ -84,7 +83,7 @@ impl<const TYPE: Type> Fat<TYPE> {
     }
 
     fn read_root_directory_region(&self) -> Vec<DirectoryEntry> {
-        let rdr_sectors_count = self.bpb.root_ent_cnt as u64 * 32 / self.bpb.byts_per_sec as u64;
+        let rdr_sectors_count = self.bpb.root_ent_cnt as u32 * 32 / self.bpb.byts_per_sec as u32;
         let mut entries = Vec::new();
         for i in 0..rdr_sectors_count {
             let bytes = self.read_sector(self.root_directory_sectors_start() + i);
@@ -102,7 +101,7 @@ impl<const TYPE: Type> Fat<TYPE> {
                 (Fat12, next_cluster @ 0x002..)
                 | (Fat16, next_cluster @ 0x0002..)
                 | (Fat32, next_cluster @ 0x000_0002..)
-                    if next_cluster <= self.max_cluster =>
+                    if next_cluster <= self.max_cluster() =>
                 {
                     cluster = next_cluster;
                 }
@@ -118,22 +117,23 @@ impl<const TYPE: Type> Fat<TYPE> {
         match TYPE {
             Fat12 => {
                 let global_byte_index = cluster + cluster / 2;
-                let fat_sector_index = global_byte_index as u64 / self.bpb.byts_per_sec as u64;
-                let fat_entry_byte_index =
-                    global_byte_index as usize % self.bpb.byts_per_sec as usize;
-                let bytes = if fat_entry_byte_index + 1 < self.bpb.byts_per_sec as usize {
+                let fat_sector_index = global_byte_index / self.bpb.byts_per_sec as u32;
+                let fat_entry_byte_index = global_byte_index % self.bpb.byts_per_sec as u32;
+                let bytes = if fat_entry_byte_index + 1 < self.bpb.byts_per_sec as u32 {
                     let sector = self.read_sector(self.fat_sectors_start() + fat_sector_index);
                     [
-                        sector[fat_entry_byte_index],
-                        sector[fat_entry_byte_index + 1],
+                        sector[fat_entry_byte_index as usize],
+                        sector[fat_entry_byte_index as usize + 1],
                     ]
                 } else {
                     let first_sector =
                         self.read_sector(self.fat_sectors_start() + fat_sector_index);
-                    let second_sector = self
-                        .drive
-                        .read(self.fat_sectors_start() + fat_sector_index + 1);
-                    [first_sector[fat_entry_byte_index], second_sector[0]]
+                    let second_sector =
+                        self.read_sector(self.fat_sectors_start() + fat_sector_index + 1);
+                    [
+                        first_sector[fat_entry_byte_index as usize],
+                        second_sector[0],
+                    ]
                 };
                 let value = u16::from_le_bytes(bytes) as u32;
                 if cluster.is_multiple_of(2) {
@@ -144,7 +144,7 @@ impl<const TYPE: Type> Fat<TYPE> {
             }
             Fat16 => {
                 let entries_per_sector = self.bpb.byts_per_sec as u32 / 2;
-                let fat_sector_index = (cluster / entries_per_sector) as u64;
+                let fat_sector_index = cluster / entries_per_sector;
                 let fat_entry_index = cluster % entries_per_sector;
                 let sector = self.read_sector(self.fat_sectors_start() + fat_sector_index);
                 let entry = sector.as_chunks().0[fat_entry_index as usize];
@@ -152,7 +152,7 @@ impl<const TYPE: Type> Fat<TYPE> {
             }
             Fat32 => {
                 let entries_per_sector = self.bpb.byts_per_sec as u32 / 4;
-                let fat_sector_index = (cluster / entries_per_sector) as u64;
+                let fat_sector_index = cluster / entries_per_sector;
                 let fat_entry_index = cluster % entries_per_sector;
                 let sector = self.read_sector(self.fat_sectors_start() + fat_sector_index);
                 let entry = sector.as_chunks().0[fat_entry_index as usize];
@@ -163,20 +163,24 @@ impl<const TYPE: Type> Fat<TYPE> {
 
     fn read_data(&self, cluster: u32) -> Vec<u8> {
         let cluster_sectors_start =
-            self.data_sectors_start() + (cluster - 2) as u64 * self.bpb.sec_per_clus as u64;
+            self.data_sectors_start() + (cluster - 2) * self.bpb.sec_per_clus as u32;
         let mut data = Vec::new();
-        for i in 0..self.bpb.sec_per_clus as u64 {
+        for i in 0..self.bpb.sec_per_clus as u32 {
             data.extend_from_slice(&self.read_sector(cluster_sectors_start + i));
         }
         data
     }
 
-    fn read_sector(&self, sector: u64) -> Vec<u8> {
+    fn read_sector(&self, sector: u32) -> Vec<u8> {
         const DISK_SECTOR_SIZE: usize = 512;
         let disk_sector_per_fat_sector = self.bpb.byts_per_sec as u64 / DISK_SECTOR_SIZE as u64;
         let mut bytes = Vec::with_capacity(self.bpb.byts_per_sec as usize);
         for i in 0..disk_sector_per_fat_sector {
-            bytes.extend_from_slice(&self.drive.read(disk_sector_per_fat_sector * sector + i));
+            bytes.extend_from_slice(
+                &self
+                    .drive
+                    .read(disk_sector_per_fat_sector * sector as u64 + i),
+            );
         }
         bytes
     }
@@ -188,17 +192,41 @@ impl<const TYPE: Type> Fat<TYPE> {
         }
     }
 
-    fn fat_sectors_start(&self) -> u64 {
-        self.bpb.rsvd_sec_cnt as u64
+    fn fat_sectors_start(&self) -> u32 {
+        self.bpb.rsvd_sec_cnt as u32
     }
 
-    fn root_directory_sectors_start(&self) -> u64 {
-        self.fat_sectors_start() + self.bpb.num_fats as u64 * self.fat_sectors_size() as u64
+    fn root_directory_sectors_start(&self) -> u32 {
+        self.fat_sectors_start() + self.bpb.num_fats as u32 * self.fat_sectors_size()
     }
 
-    fn data_sectors_start(&self) -> u64 {
-        self.root_directory_sectors_start()
-            + self.bpb.root_ent_cnt as u64 * 32 / self.bpb.byts_per_sec as u64
+    fn root_directory_sectors_count(&self) -> u32 {
+        self.bpb.root_ent_cnt as u32 * 32 / self.bpb.byts_per_sec as u32
+    }
+
+    fn data_sectors_start(&self) -> u32 {
+        self.root_directory_sectors_start() + self.root_directory_sectors_count()
+    }
+
+    fn total_sectors_count(&self) -> u32 {
+        match TYPE {
+            Fat12 | Fat16 => {
+                if self.bpb.tot_sec_16 != 0 {
+                    self.bpb.tot_sec_16 as u32
+                } else {
+                    self.bpb.tot_sec_32
+                }
+            }
+            Fat32 => self.bpb.tot_sec_32,
+        }
+    }
+
+    fn count_of_clusters(&self) -> u32 {
+        (self.total_sectors_count() - self.data_sectors_start()) / self.bpb.sec_per_clus as u32
+    }
+
+    fn max_cluster(&self) -> u32 {
+        self.count_of_clusters() + 1
     }
 
     fn volume_label(&self) -> Option<[u8; 11]> {
@@ -254,21 +282,16 @@ fn main(args: TarFsArgs) {
     let bpb = Bpb {
         bytes: *Box::try_from(args.drive.read(0)).unwrap(),
     };
-    let (type_, count_of_clusters) = determine_type(&bpb);
+    let type_ = bpb.determine_type();
     match type_ {
-        Fat12 => run::<{ Fat12 }>(args.drive, bpb, count_of_clusters),
-        Fat16 => run::<{ Fat16 }>(args.drive, bpb, count_of_clusters),
-        Fat32 => run::<{ Fat32 }>(args.drive, bpb, count_of_clusters),
+        Fat12 => run::<{ Fat12 }>(args.drive, bpb),
+        Fat16 => run::<{ Fat16 }>(args.drive, bpb),
+        Fat32 => run::<{ Fat32 }>(args.drive, bpb),
     }
 }
 
-fn run<const TYPE: Type>(drive: Capability<Drive>, bpb: Bpb, count_of_clusters: u32) {
-    bpb.validate_bpb(TYPE);
-    let server = Fat::<{ TYPE }> {
-        drive,
-        bpb,
-        max_cluster: count_of_clusters + 1,
-    };
+fn run<const TYPE: Type>(drive: Capability<Drive>, bpb: Bpb) {
+    let server = Fat::<{ TYPE }> { drive, bpb };
 
     if let Some(volume_label) = server.volume_label() {
         info!("mounting FAT volume {volume_label:?}");
@@ -285,35 +308,6 @@ fn run<const TYPE: Type>(drive: Capability<Drive>, bpb: Bpb, count_of_clusters: 
 
     let mut dispatch = Dispatch::new_object(server, root_directory);
     dispatch.run();
-}
-
-fn determine_type(bpb: &Bpb) -> (Type, u32) {
-    let root_dir_sectors = (bpb.root_ent_cnt as u32 * 32).div_ceil(bpb.byts_per_sec as u32);
-    let fat_sz = if bpb.fat_sz_16 != 0 {
-        bpb.fat_sz_16 as u32
-    } else {
-        bpb.as_extended_32().fat_sz_32
-    };
-
-    let tot_sec = if bpb.tot_sec_16 != 0 {
-        bpb.tot_sec_16 as u32
-    } else {
-        bpb.tot_sec_32
-    };
-
-    let data_sec =
-        tot_sec - (bpb.rsvd_sec_cnt as u32 + bpb.num_fats as u32 * fat_sz) + root_dir_sectors;
-
-    let count_of_clusters = data_sec / bpb.sec_per_clus as u32;
-
-    let type_ = if count_of_clusters < 4085 {
-        Fat12
-    } else if count_of_clusters < 65525 {
-        Fat16
-    } else {
-        Fat32
-    };
-    (type_, count_of_clusters)
 }
 
 fn directory_bytes_to_entries(bytes: Vec<u8>) -> Vec<DirectoryEntry> {

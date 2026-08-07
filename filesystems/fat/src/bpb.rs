@@ -71,7 +71,37 @@ const _: () = assert!(size_of::<BpbExtended1216>() == 512);
 const _: () = assert!(size_of::<BpbExtended32>() == 512);
 
 impl Bpb {
-    pub fn validate_bpb(&self, type_: Type) {
+    pub fn determine_type(&self) -> Type {
+        let root_dir_sectors = (self.root_ent_cnt as u32 * 32).div_ceil(self.byts_per_sec as u32);
+        let fat_sz = if self.fat_sz_16 != 0 {
+            self.fat_sz_16 as u32
+        } else {
+            self.as_extended_32().fat_sz_32
+        };
+
+        let tot_sec = if self.tot_sec_16 != 0 {
+            self.tot_sec_16 as u32
+        } else {
+            self.tot_sec_32
+        };
+
+        let data_sec =
+            tot_sec - (self.rsvd_sec_cnt as u32 + self.num_fats as u32 * fat_sz) + root_dir_sectors;
+
+        let count_of_clusters = data_sec / self.sec_per_clus as u32;
+
+        let type_ = if count_of_clusters < 4085 {
+            Fat12
+        } else if count_of_clusters < 65525 {
+            Fat16
+        } else {
+            Fat32
+        };
+        self.validate_bpb(type_);
+        type_
+    }
+
+    fn validate_bpb(&self, type_: Type) {
         assert_matches!(self.bs_jmp_boot, [0xEB, _, 0x90] | [0xE9, _, _]);
         assert_matches!({ self.byts_per_sec }, 512 | 1024 | 2048 | 4096);
         assert!(self.sec_per_clus.is_power_of_two() && self.sec_per_clus > 0);
