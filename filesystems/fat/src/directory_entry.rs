@@ -1,4 +1,3 @@
-use crate::util::{ArrayCStr, Padding};
 use alloc::string::String;
 use core::mem::MaybeUninit;
 
@@ -12,9 +11,9 @@ pub union DirectoryEntry {
 #[derive(Clone, Copy, Debug)]
 #[repr(C, packed)]
 pub struct ShortNameDirectoryEntry {
-    pub name: ArrayCStr<11>,
+    pub name: [u8; 11],
     pub attr: u8,
-    pub nt_res: Padding<1>,
+    nt_res: [u8; 1],
     pub crt_time_tenth: u8,
     pub crt_time: u16,
     pub crt_date: u16,
@@ -119,9 +118,9 @@ fn copy_long_cps(long: &LongNameDirectoryEntry, out: &mut [u16; MAX_LONG_NAME_EN
     }
 }
 
-fn compute_checksum(short_name: &ArrayCStr<11>) -> u8 {
+fn compute_checksum(short_name: &[u8; 11]) -> u8 {
     let mut sum = 0;
-    for byte in short_name.0 {
+    for byte in short_name {
         sum = if sum & 1 != 0 { 0x80 } else { 0 } + (sum >> 1) + byte;
     }
     sum
@@ -140,7 +139,7 @@ fn trim_long_name(long_name: &mut &[u16]) {
     }
 }
 
-pub fn to_short_name(s: &str) -> Option<ArrayCStr<11>> {
+pub fn to_short_name(s: &str) -> Option<[u8; 11]> {
     let (main_part, extension) = s.split_once('.').unwrap_or((s, ""));
     if main_part.len() > 8 {
         return None;
@@ -149,20 +148,20 @@ pub fn to_short_name(s: &str) -> Option<ArrayCStr<11>> {
         return None;
     }
 
-    let mut name = ArrayCStr([b' '; _]);
+    let mut name = [b' '; _];
     for (i, byte) in main_part.bytes().enumerate() {
         let byte = byte.to_ascii_uppercase();
         if !is_valid_short_char(byte) {
             return None;
         }
-        name.0[i] = byte;
+        name[i] = byte;
     }
     for (i, byte) in extension.bytes().enumerate() {
         let byte = byte.to_ascii_uppercase();
         if !is_valid_short_char(byte) {
             return None;
         }
-        name.0[8 + i] = byte;
+        name[8 + i] = byte;
     }
     Some(name)
 }

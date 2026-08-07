@@ -1,6 +1,5 @@
 use crate::Type;
 use crate::Type::*;
-use crate::util::{ArrayCStr, Padding};
 use core::assert_matches;
 use core::ops::Deref;
 
@@ -16,7 +15,7 @@ pub union Bpb {
 #[repr(C, packed)]
 pub struct BpbCommon {
     pub bs_jmp_boot: [u8; 3],
-    pub bs_oem_name: ArrayCStr<8>,
+    pub bs_oem_name: [u8; 8],
     pub byts_per_sec: u16,
     pub sec_per_clus: u8,
     pub rsvd_sec_cnt: u16,
@@ -36,12 +35,12 @@ pub struct BpbCommon {
 pub struct BpbExtended1216 {
     common: BpbCommon,
     pub bs_drv_num: u8,
-    bs_reserved1: Padding<1>,
+    bs_reserved1: [u8; 1],
     pub bs_boot_sig: u8,
     pub bs_vol_id: u32,
-    pub bs_vol_lab: ArrayCStr<11>,
-    pub bs_fil_sys_type: ArrayCStr<8>,
-    _0: Padding<448>,
+    pub bs_vol_lab: [u8; 11],
+    pub bs_fil_sys_type: [u8; 8],
+    _0: [u8; 448],
     pub signature_word: u16,
 }
 
@@ -55,14 +54,14 @@ pub struct BpbExtended32 {
     pub root_clus: u32,
     pub fs_info: u16,
     pub bk_boot_sec: u16,
-    reserved: Padding<12>,
+    reserved: [u8; 12],
     pub bs_drv_num: u8,
-    bs_reserved1: Padding<1>,
+    bs_reserved1: [u8; 1],
     pub bs_boot_sig: u8,
     pub bs_vol_id: u32,
-    pub bs_vol_lab: ArrayCStr<11>,
-    pub bs_fil_sys_type: ArrayCStr<8>,
-    _0: Padding<420>,
+    pub bs_vol_lab: [u8; 11],
+    pub bs_fil_sys_type: [u8; 8],
+    _0: [u8; 420],
     pub bs_signature_word: u16,
 }
 

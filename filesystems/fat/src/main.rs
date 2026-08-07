@@ -7,12 +7,10 @@ extern crate alloc;
 
 mod bpb;
 mod directory_entry;
-mod util;
 
 use crate::Type::*;
 use crate::bpb::Bpb;
 use crate::directory_entry::{DirectoryEntry, coalesce_long_names, to_short_name};
-use crate::util::ArrayCStr;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::marker::ConstParamTy;
@@ -47,10 +45,10 @@ impl<const TYPE: Type> Fat<TYPE> {
             };
             let short_needle = to_short_name(path_seg);
             for (de, long_name) in coalesce_long_names(self.read_directory(dir).into_iter()) {
-                if de.name.0[0] == 0xE5 {
+                if de.name[0] == 0xE5 {
                     continue;
                 }
-                if de.name.0[0] == 0x00 {
+                if de.name[0] == 0x00 {
                     break;
                 }
                 let name_matches = if let Some(long_name) = long_name {
@@ -203,12 +201,12 @@ impl<const TYPE: Type> Fat<TYPE> {
             + self.bpb.root_ent_cnt as u64 * 32 / self.bpb.byts_per_sec as u64
     }
 
-    fn volume_label(&self) -> Option<ArrayCStr<11>> {
+    fn volume_label(&self) -> Option<[u8; 11]> {
         let name = match TYPE {
             Fat12 | Fat16 => self.bpb.as_extended_12_16().bs_vol_lab,
             Fat32 => self.bpb.as_extended_32().bs_vol_lab,
         };
-        if &name.0 == b"NO NAME    " {
+        if &name == b"NO NAME    " {
             return None;
         };
         Some(name)
