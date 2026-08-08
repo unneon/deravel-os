@@ -10,6 +10,10 @@ pub trait VirtualMemoryLoader {
     fn load_page(&self, page_index: usize) -> Box<Page>;
 }
 
+pub trait VirtualMemoryRawMapping {
+    fn load_page(&self, virt_base: usize, page_index: usize, page_table: &mut TopPageTable);
+}
+
 pub struct VirtualMemoryMapping<T> {
     loader: T,
     size: usize,
@@ -40,7 +44,7 @@ impl<T: VirtualMemoryLoader + Sync + 'static> Handler<SharedMemory> for VirtualM
         &self,
         virt: usize,
         page_table: &mut TopPageTable,
-        vmms: &mut Vec<(Range<usize>, &'static (dyn Handler<SharedMemory> + Sync))>,
+        vmms: &mut Vec<(Range<usize>, &'static (dyn VirtualMemoryRawMapping + Sync))>,
     ) {
         let backed_pages = self.backed_pages.lock();
         for (page_index, page) in &*backed_pages {
@@ -54,13 +58,10 @@ impl<T: VirtualMemoryLoader + Sync + 'static> Handler<SharedMemory> for VirtualM
     fn shared_memory_size(&self) -> usize {
         self.size
     }
+}
 
-    fn virtual_memory_load(
-        &self,
-        virt_base: usize,
-        page_index: usize,
-        page_table: &mut TopPageTable,
-    ) {
+impl<T: VirtualMemoryLoader + Sync + 'static> VirtualMemoryRawMapping for VirtualMemoryMapping<T> {
+    fn load_page(&self, virt_base: usize, page_index: usize, page_table: &mut TopPageTable) {
         let virt = virt_base + PAGE_SIZE * page_index;
         let page = self.loader.load_page(page_index);
         let phys = virt_to_phys(page.as_ref() as *const _) as usize;

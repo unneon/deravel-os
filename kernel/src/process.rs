@@ -2,7 +2,7 @@ pub mod spawner;
 
 use crate::arch::{RiscvRegisters, switch_to_user};
 use crate::buddy::BuddyAllocator;
-use crate::capability::{Handler, capability_certificate, capability_pages_physical_address};
+use crate::capability::{capability_certificate, capability_pages_physical_address};
 use crate::device_tree::timebase_frequency;
 use crate::elf::load_elf;
 use crate::heap::BuddyHeap;
@@ -15,6 +15,7 @@ use crate::stack::UserCtx;
 use crate::sync::{Mutex, MutexGuard};
 use crate::user::UserPtr;
 use crate::util::untyped_box::UntypedBox;
+use crate::virtual_memory::VirtualMemoryRawMapping;
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
@@ -76,7 +77,7 @@ pub struct Process {
     pub messages: VecDeque<Message, BuddyHeap>,
     pub currently_serving: Option<ProcessId>,
     allocated: Vec<(usize, Arc<UntypedBox<PageGranular>>)>,
-    pub virtual_memory_mappings: Vec<(Range<usize>, &'static (dyn Handler<SharedMemory> + Sync))>,
+    pub virtual_memory_mappings: Vec<(Range<usize>, &'static (dyn VirtualMemoryRawMapping + Sync))>,
 }
 
 pub struct ProcessReservation<T: ProcessTag> {

@@ -7,6 +7,7 @@ use crate::capability::Handler;
 use crate::page::TopPageTable;
 use crate::stack::UserCtx;
 use crate::user::{UserPtr, UserSyscallError};
+use crate::virtual_memory::VirtualMemoryRawMapping;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;

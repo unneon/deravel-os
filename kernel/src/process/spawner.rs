@@ -1,14 +1,14 @@
 use crate::capability::{Handler, capability_certificate};
 use crate::page::TopPageTable;
 use crate::process::reserve_process;
+use crate::virtual_memory::VirtualMemoryRawMapping;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 use core::ops::Range;
 use core::sync::atomic::Ordering;
 use deravel_types::{
-    Actor, CapabilityCertificateValue, ProcessArgs, ProcessId, ProcessTag, SharedMemory,
-    UntypedRingBuffer,
+    Actor, CapabilityCertificateValue, ProcessArgs, ProcessId, ProcessTag, UntypedRingBuffer,
 };
 
 pub struct ProcessSpawnerService<T> {
@@ -56,16 +56,12 @@ impl<T: ProcessTag> Handler<T::Spawner> for ProcessSpawnerService<T> {
         &self,
         _: usize,
         _: &mut TopPageTable,
-        _: &mut Vec<(Range<usize>, &'static (dyn Handler<SharedMemory> + Sync))>,
+        _: &mut Vec<(Range<usize>, &'static (dyn VirtualMemoryRawMapping + Sync))>,
     ) {
         unreachable!()
     }
 
     fn shared_memory_size(&self) -> usize {
-        unreachable!()
-    }
-
-    fn virtual_memory_load(&self, _: usize, _: usize, _: &mut TopPageTable) {
         unreachable!()
     }
 }

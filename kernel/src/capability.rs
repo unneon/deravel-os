@@ -1,6 +1,7 @@
 use crate::page::TopPageTable;
 use crate::process::PROCESS_COUNT;
 use crate::sync::Mutex;
+use crate::virtual_memory::VirtualMemoryRawMapping;
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 use core::ops::Range;
@@ -16,17 +17,10 @@ pub trait Handler<T> {
         &self,
         virt: usize,
         page_table: &mut TopPageTable,
-        vmms: &mut Vec<(Range<usize>, &'static (dyn Handler<SharedMemory> + Sync))>,
+        vmms: &mut Vec<(Range<usize>, &'static (dyn VirtualMemoryRawMapping + Sync))>,
     );
 
     fn shared_memory_size(&self) -> usize;
-
-    fn virtual_memory_load(
-        &self,
-        virt_base: usize,
-        page_index: usize,
-        page_table: &mut TopPageTable,
-    );
 }
 
 pub trait RawHandler {
@@ -38,7 +32,7 @@ pub trait RawHandler {
         &self,
         virt: usize,
         page_table: &mut TopPageTable,
-        vmms: &mut Vec<(Range<usize>, &'static (dyn Handler<SharedMemory> + Sync))>,
+        vmms: &mut Vec<(Range<usize>, &'static (dyn VirtualMemoryRawMapping + Sync))>,
     );
 
     fn shared_memory_size(&self) -> usize;
@@ -68,7 +62,7 @@ impl<T, H: Handler<T>> RawHandler for TypedHandler<T, H> {
         &self,
         virt: usize,
         page_table: &mut TopPageTable,
-        vmms: &mut Vec<(Range<usize>, &'static (dyn Handler<SharedMemory> + Sync))>,
+        vmms: &mut Vec<(Range<usize>, &'static (dyn VirtualMemoryRawMapping + Sync))>,
     ) {
         self.0.shared_memory_map(virt, page_table, vmms)
     }

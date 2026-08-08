@@ -199,7 +199,7 @@ fn handle_user_trap(user: &mut UserCtx) -> ! {
         {
             let page_index = (stval - vmm.0.start) / PAGE_SIZE;
             vmm.1
-                .virtual_memory_load(vmm.0.start, page_index, &mut proc.page_table);
+                .load_page(vmm.0.start, page_index, &mut proc.page_table);
             drop(proc);
             riscv::asm::sfence_vma_all();
             return_to_user(&registers)
