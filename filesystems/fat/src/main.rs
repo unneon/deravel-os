@@ -11,6 +11,7 @@ mod directory;
 use crate::Type::*;
 use crate::bpb::Bpb;
 use crate::directory::{DirectoryEntry, coalesce_long_names, to_short_name};
+use alloc::borrow::Cow;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::marker::ConstParamTy;
@@ -28,6 +29,7 @@ struct Fat<const TYPE: Type> {
     drive: Capability<Drive>,
     bpb: Bpb,
     fat: &'static [u8],
+    rdr: &'static [DirectoryEntry],
 }
 
 #[derive(Clone, ConstParamTy, Copy, Debug, Eq, PartialEq)]
@@ -40,7 +42,7 @@ enum Type {
 const DISK_SECTOR_SIZE: usize = 512;
 
 impl<const TYPE: Type> Fat<TYPE> {
-    fn traverse_path(&self, mut dir: Directory, mut path: &str) -> (u32, usize) {
+    fn traverse_path(&self, mut dir: Directory, mut path: &str) -> (u32, u32) {
         'segments: loop {
             let (path_seg, path_tail) = match path.split_once('/') {
                 Some((path_seg, path_tail)) => (path_seg, Some(path_tail)),
@@ -62,7 +64,7 @@ impl<const TYPE: Type> Fat<TYPE> {
                 if name_matches {
                     let de_cluster = de.fst_clus();
                     let Some(path_tail) = path_tail else {
-                        return (de_cluster, de.file_size as usize);
+                        return (de_cluster, de.file_size);
                     };
                     dir = Directory::Normal {
                         cluster: de_cluster,
@@ -75,31 +77,46 @@ impl<const TYPE: Type> Fat<TYPE> {
         }
     }
 
-    fn read_directory(&self, dir: Directory) -> Vec<DirectoryEntry> {
+    fn read_directory(&self, dir: Directory) -> Cow<'_, [DirectoryEntry]> {
         match dir {
-            Directory::Normal { cluster } => self.read_normal_directory(cluster),
-            Directory::RootDirectoryRegion => self.read_root_directory_region(),
+            Directory::Normal { cluster } => Cow::Owned(self.read_normal_directory(cluster)),
+            Directory::RootDirectoryRegion => Cow::Borrowed(self.read_root_directory_region()),
         }
     }
 
     fn read_normal_directory(&self, cluster: u32) -> Vec<DirectoryEntry> {
-        directory_bytes_to_entries(self.read_file(cluster))
+        directory_bytes_to_entries(self.read_file(cluster, None))
     }
 
-    fn read_root_directory_region(&self) -> Vec<DirectoryEntry> {
-        let rdr_sectors_count = self.bpb.root_ent_cnt as u32 * 32 / self.bpb.byts_per_sec as u32;
-        let mut entries = Vec::new();
-        for i in 0..rdr_sectors_count {
-            let bytes = self.read_sector(self.root_directory_sectors().start + i);
-            entries.extend_from_slice(&directory_bytes_to_entries(bytes));
-        }
-        entries
+    fn read_root_directory_region(&self) -> &[DirectoryEntry] {
+        self.rdr
     }
 
-    fn read_file(&self, mut cluster: u32) -> Vec<u8> {
+    fn read_file(&self, cluster: u32, size: Option<usize>) -> Vec<u8> {
         let mut data = Vec::new();
-        loop {
-            data.extend_from_slice(&self.read_data(cluster));
+        if let Some(size) = size {
+            data.reserve_exact(size.next_multiple_of(DISK_SECTOR_SIZE));
+        }
+        'walk: for cluster in self.walk_clusters(cluster) {
+            for sector in self.sectors_of_cluster(cluster) {
+                for disk_sector in self.drive_sectors_of_sector(sector) {
+                    data.extend_from_slice(&self.drive.read(disk_sector));
+                    if let Some(size) = size
+                        && data.len() >= size
+                    {
+                        break 'walk;
+                    }
+                }
+            }
+        }
+        if let Some(size) = size {
+            data.resize(size, 0);
+        }
+        data
+    }
+
+    fn walk_clusters(&self, cluster: u32) -> impl Iterator<Item = u32> {
+        core::iter::successors(Some(cluster), move |&cluster| {
             let fat_entry = self.read_fat_entry(cluster);
             match (TYPE, fat_entry & ((!0) >> 4)) {
                 (Fat12, next_cluster @ 0x002..)
@@ -107,14 +124,14 @@ impl<const TYPE: Type> Fat<TYPE> {
                 | (Fat32, next_cluster @ 0x000_0002..)
                     if next_cluster <= self.max_cluster() =>
                 {
-                    cluster = next_cluster;
+                    Some(next_cluster)
                 }
                 (Fat12, 0xFF8..=0xFFF)
                 | (Fat16, 0xFFF8..=0xFFFF)
-                | (Fat32, 0xFFF_FFF8..=0xFFF_FFFF) => break data,
+                | (Fat32, 0xFFF_FFF8..=0xFFF_FFFF) => None,
                 _ => unimplemented!("{:?} {:#x}", TYPE, fat_entry),
             }
-        }
+        })
     }
 
     fn read_fat_entry(&self, cluster: u32) -> u32 {
@@ -168,27 +185,15 @@ impl<const TYPE: Type> Fat<TYPE> {
         &self.fat[start..start + self.bpb.byts_per_sec as usize]
     }
 
-    fn read_data(&self, cluster: u32) -> Vec<u8> {
-        let cluster_sectors_start =
-            self.data_sectors().start + (cluster - 2) * self.bpb.sec_per_clus as u32;
-        let mut data = Vec::new();
-        for i in 0..self.bpb.sec_per_clus as u32 {
-            data.extend_from_slice(&self.read_sector(cluster_sectors_start + i));
-        }
-        data
+    fn sectors_of_cluster(&self, cluster: u32) -> impl Iterator<Item = u32> {
+        (0..self.bpb.sec_per_clus as u32).map(move |i| {
+            self.data_sectors().start + (cluster - 2) * self.bpb.sec_per_clus as u32 + i
+        })
     }
 
-    fn read_sector(&self, sector: u32) -> Vec<u8> {
-        let disk_sector_per_fat_sector = self.bpb.byts_per_sec as u64 / DISK_SECTOR_SIZE as u64;
-        let mut bytes = Vec::with_capacity(self.bpb.byts_per_sec as usize);
-        for i in 0..disk_sector_per_fat_sector {
-            bytes.extend_from_slice(
-                &self
-                    .drive
-                    .read(disk_sector_per_fat_sector * sector as u64 + i),
-            );
-        }
-        bytes
+    fn drive_sectors_of_sector(&self, sector: u32) -> impl Iterator<Item = u64> {
+        let ratio = self.bpb.byts_per_sec as u64 / DISK_SECTOR_SIZE as u64;
+        (0..ratio).map(move |i| ratio * sector as u64 + i)
     }
 
     fn fat_sectors(&self) -> Range<u32> {
@@ -249,9 +254,7 @@ impl<const TYPE: Type> Fat<TYPE> {
 impl<const TYPE: Type> FilesystemServer<Directory> for Fat<TYPE> {
     fn read(&mut self, _: &mut Ctx<Self>, dir: Directory, path: &str) -> Vec<u8> {
         let (file, file_size) = self.traverse_path(dir, path);
-        let mut data = self.read_file(file);
-        data.resize(file_size, 0);
-        data
+        self.read_file(file, Some(file_size as usize))
     }
 
     fn read_large(
@@ -261,9 +264,9 @@ impl<const TYPE: Type> FilesystemServer<Directory> for Fat<TYPE> {
         path: &str,
     ) -> Capability<SharedMemory> {
         let (file, file_size) = self.traverse_path(dir, path);
-        let data = self.read_file(file);
-        let (shared, shared_cap) = alloc_shared(file_size);
-        unsafe { &mut *shared }.copy_from_slice(&data[..file_size]);
+        let data = self.read_file(file, Some(file_size as usize));
+        let (shared, shared_cap) = alloc_shared(file_size as usize);
+        unsafe { &mut *shared }.copy_from_slice(&data);
         ctx.forward_to_sender(shared_cap)
     }
 
@@ -300,6 +303,7 @@ fn run<const TYPE: Type>(drive: Capability<Drive>, bpb: Bpb) {
         drive,
         bpb,
         fat: &[],
+        rdr: &[],
     };
 
     let disk_sector_offset = (server.fat_sectors().start as u64 * server.bpb.byts_per_sec as u64)
@@ -311,6 +315,25 @@ fn run<const TYPE: Type>(drive: Capability<Drive>, bpb: Bpb) {
         .unwrap();
     let fat = map_shared(drive.read_mapped(disk_sector_offset, disk_sector_count));
     server.fat = unsafe { &*fat };
+
+    if TYPE == Fat12 || TYPE == Fat16 {
+        let disk_sector_offset = (server.root_directory_sectors().start as u64
+            * server.bpb.byts_per_sec as u64)
+            .div_exact(DISK_SECTOR_SIZE as u64)
+            .unwrap();
+        let disk_sector_count = ((server.root_directory_sectors().end
+            - server.root_directory_sectors().start) as u64
+            * server.bpb.byts_per_sec as u64)
+            .div_exact(DISK_SECTOR_SIZE as u64)
+            .unwrap();
+        let rdr = map_shared(drive.read_mapped(disk_sector_offset, disk_sector_count));
+        server.rdr = unsafe {
+            core::slice::from_raw_parts(
+                rdr as *const u8 as *const DirectoryEntry,
+                rdr.len() / size_of::<DirectoryEntry>(),
+            )
+        };
+    }
 
     if let Some(volume_label) = server.volume_label() {
         info!("mounting FAT volume {volume_label:?}");
