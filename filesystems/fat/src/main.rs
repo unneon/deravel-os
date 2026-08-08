@@ -1,4 +1,3 @@
-#![feature(maybe_uninit_fill)]
 #![feature(min_adt_const_params)]
 #![no_std]
 #![no_main]
@@ -6,11 +5,11 @@
 extern crate alloc;
 
 mod bpb;
-mod directory_entry;
+mod directory;
 
 use crate::Type::*;
 use crate::bpb::Bpb;
-use crate::directory_entry::{DirectoryEntry, coalesce_long_names, to_short_name};
+use crate::directory::{DirectoryEntry, coalesce_long_names, to_short_name};
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::marker::ConstParamTy;
@@ -44,7 +43,7 @@ impl<const TYPE: Type> Fat<TYPE> {
                 None => (path, None),
             };
             let short_needle = to_short_name(path_seg);
-            for (de, long_name) in coalesce_long_names(self.read_directory(dir).into_iter()) {
+            for (de, long_name) in coalesce_long_names(&self.read_directory(dir)) {
                 if de.name[0] == 0xE5 {
                     continue;
                 }
