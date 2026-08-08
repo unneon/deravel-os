@@ -5,7 +5,6 @@ pub mod stats;
 use crate::buddy::BuddyMemoryAllocator;
 use crate::bump::BumpMemoryAllocator;
 use crate::heap::available::{collect_available, collect_reserved};
-use crate::page::phys_to_drmp;
 use crate::sync::Mutex;
 use crate::util::fmt::memory::fmt_memory;
 use core::alloc::{AllocError, Allocator, GlobalAlloc, Layout};
@@ -83,9 +82,9 @@ pub fn initialize_heap(dt: &Fdt, dt_ptr: *const u8) {
     let available = available[0].clone();
     info!("found RAM {}", fmt_memory(&available));
 
-    let mut buddy = unsafe { BuddyMemoryAllocator::new(phys_to_drmp(available), EarlyBumpHeap) };
+    let mut buddy = unsafe { BuddyMemoryAllocator::new(available, EarlyBumpHeap) };
     for reserved in collect_reserved(dt, dt_ptr) {
-        buddy.reserve_range(phys_to_drmp(reserved));
+        buddy.reserve_range(reserved);
     }
     *BUDDY.lock() = Some(buddy);
 }

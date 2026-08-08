@@ -1,11 +1,11 @@
 mod entry;
 mod table;
 
-use core::ops::Range;
 pub use entry::PageFlags;
 pub use table::PageTable;
 
 use crate::util::address::Address;
+use core::ops::Range;
 use deravel_types::PAGE_SIZE;
 use deravel_types::memory::{DIRECT_MAPPING, PHYSICAL_ADDRESSES, VIRTUAL_ADDRESSES};
 use riscv::register::satp::{Mode, Satp};
@@ -21,21 +21,34 @@ unsafe extern "C" {
 
 static mut KERNEL_PAGE_TABLE: PageTable = PageTable::new();
 
-pub fn initialize_memory_mapping() {
+pub extern "C" fn initialize_early_memory_mapping() {
     let table = unsafe { &mut *&raw mut KERNEL_PAGE_TABLE };
-    map_direct_mapping(table);
-    map_kernel_image(table);
-
-    // No need for SFENCE.VMA when changing from Bare mode (RISC-V Privileged 12.2.1).
-    debug_assert_eq!(riscv::register::satp::read().mode(), Mode::Bare);
+    map_lh_direct_mapping(table);
+    map_hh_direct_mapping(table);
 
     unsafe { riscv::register::satp::write(satp(table)) }
 }
 
-pub fn map_direct_mapping(table: &mut PageTable) {
+fn map_lh_direct_mapping(table: &mut PageTable) {
+    let virt = 0;
+    let size = DIRECT_MAPPING.end - DIRECT_MAPPING.start;
+    table.map(virt, 0, size, PageFlags::read_write_execute());
+}
+
+pub fn map_hh_direct_mapping(table: &mut PageTable) {
     let virt = DIRECT_MAPPING.start;
     let size = DIRECT_MAPPING.end - DIRECT_MAPPING.start;
-    table.map(virt, 0, size, PageFlags::readwrite());
+    table.map(virt, 0, size, PageFlags::read_write_execute());
+}
+
+pub fn initialize_late_memory_mapping() {
+    let table = unsafe { &mut *&raw mut KERNEL_PAGE_TABLE };
+    unmap_lh_direct_mapping(table);
+    riscv::asm::sfence_vma_all();
+}
+
+fn unmap_lh_direct_mapping(table: &mut PageTable) {
+    table.unmap(0, 0, DIRECT_MAPPING.end - DIRECT_MAPPING.start);
 }
 
 pub fn map_kernel_image(table: &mut PageTable) {
@@ -52,7 +65,7 @@ pub fn map_kernel_image(table: &mut PageTable) {
     let readwrite = &raw const readwrite_start..&raw const readwrite_end;
     map_kernel_image_section(table, text, PageFlags::executable());
     map_kernel_image_section(table, rodata, PageFlags::readonly());
-    map_kernel_image_section(table, readwrite, PageFlags::readwrite());
+    map_kernel_image_section(table, readwrite, PageFlags::read_write());
 }
 
 fn map_kernel_image_section(table: &mut PageTable, range: Range<*const u8>, flags: PageFlags) {
@@ -94,7 +107,7 @@ pub fn virt_to_phys<T: Address>(virt: T) -> T {
     })
 }
 
-fn sign_extend(addr: usize) -> usize {
+pub const fn sign_extend(addr: usize) -> usize {
     (!(((addr & (VIRTUAL_ADDRESSES.end >> 1)) << 1) - 1)) | addr
 }
 

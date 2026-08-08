@@ -1,5 +1,5 @@
 use crate::heap::granularity::page_granular_vec;
-use crate::page::PageFlags;
+use crate::page::{PageFlags, virt_to_phys};
 use crate::process::Process;
 use crate::util::untyped_box::UntypedBox;
 use alloc::sync::Arc;
@@ -59,7 +59,7 @@ pub fn load_elf(elf_bytes: &[u8], proc: &mut Process) {
 
             proc.page_table.map(
                 segment.p_vaddr as usize,
-                data.as_ptr() as usize,
+                virt_to_phys(data.as_ptr() as usize),
                 data.len().next_multiple_of(PAGE_SIZE),
                 flags,
             );
@@ -76,7 +76,7 @@ fn paging_flags(segment: &ProgramHeader) -> PageFlags {
     assert!(readable);
     assert!(!(writable && executable));
     if writable {
-        PageFlags::readwrite().user()
+        PageFlags::read_write().user()
     } else if executable {
         PageFlags::executable().user()
     } else {

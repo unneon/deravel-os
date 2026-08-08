@@ -7,7 +7,7 @@ use crate::device_tree::timebase_frequency;
 use crate::elf::load_elf;
 use crate::heap::BuddyHeap;
 use crate::heap::granularity::{PageGranular, page_granular_vec};
-use crate::page::{PageFlags, PageTable, map_direct_mapping, map_kernel_image, virt_to_phys};
+use crate::page::{PageFlags, PageTable, map_hh_direct_mapping, map_kernel_image, virt_to_phys};
 use crate::shutdown::shutdown;
 use crate::stack::UserCtx;
 use crate::sync::{Mutex, MutexGuard};
@@ -196,7 +196,7 @@ fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: Process
         allocated: Vec::new(),
         virtual_memory_mappings: Vec::new(),
     };
-    map_direct_mapping(&mut proc.page_table);
+    map_hh_direct_mapping(&mut proc.page_table);
     map_kernel_image(&mut proc.page_table);
     load_elf(elf, &mut proc);
     map_capability_memory(&mut proc.page_table, proc.id);
@@ -221,7 +221,7 @@ fn map_capability_memory(table: &mut PageTable, pid: ProcessId) {
         (pid.as_u16() as usize) * PAGE_SIZE,
         PageFlags::readonly().user(),
     );
-    table.map(own_v, own_p, PAGE_SIZE, PageFlags::readwrite().user());
+    table.map(own_v, own_p, PAGE_SIZE, PageFlags::read_write().user());
     table.map(
         suf_v,
         suf_p,
@@ -242,7 +242,7 @@ fn map_user_stack(proc: &mut Process) {
     let pages = Arc::new(UntypedBox::new(
         page_granular_vec![0u8; stack_size].into_boxed_slice(),
     ));
-    proc.alloc_at(USER_STACK.start, pages, PageFlags::readwrite().user());
+    proc.alloc_at(USER_STACK.start, pages, PageFlags::read_write().user());
 }
 
 pub fn schedule_and_switch_to_userspace(user: &mut UserCtx) -> ! {

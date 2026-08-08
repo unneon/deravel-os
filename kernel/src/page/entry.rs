@@ -45,12 +45,16 @@ impl PageFlags {
         PageFlags(PAGE_R)
     }
 
-    pub fn readwrite() -> PageFlags {
+    pub fn read_write() -> PageFlags {
         PageFlags(PAGE_R | PAGE_W)
     }
 
     pub fn executable() -> PageFlags {
         PageFlags(PAGE_R | PAGE_X)
+    }
+
+    pub fn read_write_execute() -> PageFlags {
+        PageFlags(PAGE_R | PAGE_W | PAGE_X)
     }
 
     pub fn user(self) -> PageFlags {

@@ -1,4 +1,4 @@
-use crate::page::PageTable;
+use crate::page::{PageTable, virt_to_phys};
 use crate::process::PROCESS_COUNT;
 use crate::sync::Mutex;
 use crate::virtual_memory::VirtualMemoryRawMapping;
@@ -114,5 +114,5 @@ fn kernel_capability_page() -> &'static CapabilityPage {
 }
 
 pub fn capability_pages_physical_address() -> usize {
-    &CAPABILITY_PAGES as *const _ as usize
+    virt_to_phys(&CAPABILITY_PAGES as *const _ as usize)
 }

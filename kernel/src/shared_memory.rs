@@ -33,7 +33,7 @@ impl Handler<deravel_types::SharedMemory> for SharedMemory {
             virt,
             phys,
             self.backing.byte_size(),
-            PageFlags::readwrite().user(),
+            PageFlags::read_write().user(),
         );
     }
 

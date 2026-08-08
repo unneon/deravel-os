@@ -52,7 +52,7 @@ use crate::heap::granularity::page_granular_vec;
 use crate::heap::{initialize_early_heap, initialize_heap};
 use crate::interrupt::INTERRUPTS;
 use crate::log::{initialize_log, log_userspace};
-use crate::page::{PageFlags, initialize_memory_mapping, phys_to_virt, virt_to_phys};
+use crate::page::{PageFlags, initialize_late_memory_mapping, virt_to_phys};
 use crate::pci::initialize_all_pci;
 use crate::plic::{initialize_plic, plic_claim, plic_complete};
 use crate::process::spawner::ProcessSpawnerService;
@@ -78,14 +78,12 @@ use fdt::Fdt;
 use riscv::interrupt::Trap;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
 
-fn main(_hart_id: u64, dt_ptr: *const u8) -> ! {
-    clear_bss();
-
+extern "C" fn main(_hart_id: u64, dt_ptr: *const u8) -> ! {
     initialize_log();
     enable_kernel_trap_handler();
+    // initialize_late_memory_mapping();
     initialize_early_heap();
-    initialize_memory_mapping();
-    let dt = unsafe { Fdt::from_ptr(phys_to_virt(dt_ptr)) }.unwrap();
+    let dt = unsafe { Fdt::from_ptr(dt_ptr) }.unwrap();
     initialize_timebase_frequency(&dt);
     log_sbi_metadata();
     initialize_heap(&dt, dt_ptr);
@@ -124,15 +122,6 @@ fn main(_hart_id: u64, dt_ptr: *const u8) -> ! {
     // TODO: initialize_hart_stack should take a callback and pass this with the correct lifetime.
     let hart = unsafe { &mut *(riscv::register::sscratch::read() as *mut UserCtx) };
     schedule_and_switch_to_userspace(hart);
-}
-
-fn clear_bss() {
-    unsafe extern "C" {
-        static mut bss_start: u8;
-        static mut bss_end: u8;
-    }
-    let bss = unsafe { core::slice::from_mut_ptr_range(&raw mut bss_start..&raw mut bss_end) };
-    bss.fill(0);
 }
 
 fn handle_kernel_trap(_: &mut RiscvRegisters) -> ! {
@@ -362,7 +351,7 @@ impl SyscallHandler for () {
                     virt,
                     virt_to_phys(ring_buffer as *const _ as *const u8) as usize,
                     PAGE_SIZE,
-                    PageFlags::readwrite().user(),
+                    PageFlags::read_write().user(),
                 );
                 riscv::asm::sfence_vma_all();
                 (virt as *mut (), ring_buffer.0.data.0.len())
@@ -375,7 +364,7 @@ impl SyscallHandler for () {
         let pages = Arc::new(UntypedBox::new(
             page_granular_vec![0u8; size].into_boxed_slice(),
         ));
-        let virt = user.process().alloc(pages, PageFlags::readwrite().user());
+        let virt = user.process().alloc(pages, PageFlags::read_write().user());
         riscv::asm::sfence_vma_all();
         virt
     }
@@ -387,7 +376,7 @@ impl SyscallHandler for () {
         ));
         let virt = user
             .process()
-            .alloc(pages.clone(), PageFlags::readwrite().user());
+            .alloc(pages.clone(), PageFlags::read_write().user());
         riscv::asm::sfence_vma_all();
         let cap = grant_kernel_capability(
             user.pid(),

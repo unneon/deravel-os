@@ -1,4 +1,4 @@
-use crate::page::satp;
+use crate::page::{initialize_early_memory_mapping, satp, sign_extend};
 use crate::process::{Process, ProcessState};
 use crate::stack::UserCtx;
 use crate::sync::MutexGuard;
@@ -8,6 +8,7 @@ use core::alloc::Layout;
 use core::arch::{asm, naked_asm};
 use core::ops::DerefMut;
 use deravel_types::PAGE_SIZE;
+use deravel_types::memory::DIRECT_MAPPING;
 use riscv::interrupt::Trap;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
 use riscv::register::mtvec::TrapMode;
@@ -63,10 +64,37 @@ unsafe extern "C" fn _start() -> ! {
     }
     naked_asm!(
         "la sp, {early_stack_top}",
+        "mv s0, a0",
+        "mv s1, a1",
+        "call {clear_bss}",
+        "call {initialize_early_memory_mapping}",
+        "mv fp, x0",
+
+        "li a1, {hh}",
+        "auipc a0, 0",
+        "add a0, a0, a1",
+        "add s1, s1, a1",
+        "add sp, sp, a1",
+        "jr a0, 14",
+
+        "mv a0, s0",
+        "mv a1, s1",
         "j {main}",
         early_stack_top = sym early_stack_top,
+        clear_bss = sym clear_bss,
+        initialize_early_memory_mapping = sym initialize_early_memory_mapping,
+        hh = const sign_extend(DIRECT_MAPPING.start),
         main = sym main,
     )
+}
+
+extern "C" fn clear_bss() {
+    unsafe extern "C" {
+        static mut bss_start: u8;
+        static mut bss_end: u8;
+    }
+    let bss = unsafe { core::slice::from_mut_ptr_range(&raw mut bss_start..&raw mut bss_end) };
+    bss.fill(0);
 }
 
 pub fn enable_kernel_trap_handler() {
