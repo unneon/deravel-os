@@ -277,7 +277,7 @@ impl<const TYPE: Type> FilesystemServer<Directory> for Fat<TYPE> {
     }
 }
 
-fn main(args: TarFsArgs) {
+fn main(args: FatFsArgs) {
     let bpb = Bpb {
         bytes: *Box::try_from(args.drive.read(0)).unwrap(),
     };
