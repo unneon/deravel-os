@@ -17,6 +17,7 @@ interface filesystem
 
 interface drive
     func read(sector u64) bytes
+    func read_mapped(first_sector u64, sector_count u64) shared_memory
     func write(sector u64, data bytes)
     func capacity() u64
 

@@ -1,7 +1,9 @@
+use crate::page::TopPageTable;
 use crate::process::PROCESS_COUNT;
 use crate::sync::Mutex;
 use alloc::vec::Vec;
 use core::marker::PhantomData;
+use core::ops::Range;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use deravel_types::*;
 
@@ -10,7 +12,21 @@ pub trait Handler<T> {
 
     fn map_stream(&self, stream: usize) -> &'static UntypedRingBuffer;
 
-    fn shared_memory(&self) -> (usize, usize);
+    fn shared_memory_map(
+        &self,
+        virt: usize,
+        page_table: &mut TopPageTable,
+        vmms: &mut Vec<(Range<usize>, &'static (dyn Handler<SharedMemory> + Sync))>,
+    );
+
+    fn shared_memory_size(&self) -> usize;
+
+    fn virtual_memory_load(
+        &self,
+        virt_base: usize,
+        page_index: usize,
+        page_table: &mut TopPageTable,
+    );
 }
 
 pub trait RawHandler {
@@ -18,7 +34,14 @@ pub trait RawHandler {
 
     fn map_stream(&self, stream: usize) -> &'static UntypedRingBuffer;
 
-    fn shared_memory(&self) -> (usize, usize);
+    fn shared_memory_map(
+        &self,
+        virt: usize,
+        page_table: &mut TopPageTable,
+        vmms: &mut Vec<(Range<usize>, &'static (dyn Handler<SharedMemory> + Sync))>,
+    );
+
+    fn shared_memory_size(&self) -> usize;
 }
 
 #[repr(transparent)]
@@ -41,8 +64,17 @@ impl<T, H: Handler<T>> RawHandler for TypedHandler<T, H> {
         self.0.map_stream(stream)
     }
 
-    fn shared_memory(&self) -> (usize, usize) {
-        self.0.shared_memory()
+    fn shared_memory_map(
+        &self,
+        virt: usize,
+        page_table: &mut TopPageTable,
+        vmms: &mut Vec<(Range<usize>, &'static (dyn Handler<SharedMemory> + Sync))>,
+    ) {
+        self.0.shared_memory_map(virt, page_table, vmms)
+    }
+
+    fn shared_memory_size(&self) -> usize {
+        self.0.shared_memory_size()
     }
 }
 

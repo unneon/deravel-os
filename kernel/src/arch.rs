@@ -1,4 +1,4 @@
-use crate::page::{PageFlags, satp};
+use crate::page::satp;
 use crate::process::{Process, ProcessState};
 use crate::stack::UserCtx;
 use crate::sync::MutexGuard;
@@ -6,6 +6,7 @@ use crate::user::UserSyscallError;
 use crate::{capability, handle_kernel_trap, handle_user_trap, main};
 use core::alloc::Layout;
 use core::arch::{asm, naked_asm};
+use core::ops::DerefMut;
 use deravel_types::PAGE_SIZE;
 use riscv::register::mtvec::TrapMode;
 use riscv::register::stvec::Stvec;
@@ -99,11 +100,15 @@ pub fn switch_to_user(mut next: MutexGuard<Process>) -> Result<!, UserSyscallErr
             let ring = *ring;
             let declared_size = *declared_size;
             let handler = capability::get_handler(ring.local_index());
-            let (phys, length) = handler.shared_memory();
+            let length = handler.shared_memory_size();
             let layout = Layout::from_size_align(length, PAGE_SIZE).unwrap();
             let virt = next.virtual_memory.alloc(layout).unwrap();
-            let table = &mut next.page_table;
-            table.map_pages(virt, phys, length, PageFlags::readwrite().user());
+            let next = next.deref_mut();
+            handler.shared_memory_map(
+                virt,
+                &mut next.page_table,
+                &mut next.virtual_memory_mappings,
+            );
             riscv::asm::sfence_vma_all();
             next.registers.a0 = virt;
             next.registers.a1 = declared_size;

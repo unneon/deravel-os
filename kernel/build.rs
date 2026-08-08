@@ -125,7 +125,21 @@ fn generate_handler_impl(interface: &Interface, out: &mut String) {
     writeln!(out, "            _ => unreachable!(),").unwrap();
     writeln!(out, "        }}").unwrap();
     writeln!(out, "    }}").unwrap();
-    writeln!(out, "    fn shared_memory(&self) -> (usize, usize) {{").unwrap();
+    writeln!(
+        out,
+        "    fn shared_memory_map(&self, _: usize, _: &mut TopPageTable, _: &mut Vec<(Range<usize>, &'static (dyn Handler<SharedMemory> + Sync))>) {{"
+    )
+    .unwrap();
+    writeln!(out, "        unreachable!()").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out, "    fn shared_memory_size(&self) -> usize {{").unwrap();
+    writeln!(out, "        unreachable!()").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(
+        out,
+        "    fn virtual_memory_load(&self, _: usize, _: usize, _: &mut TopPageTable) {{"
+    )
+    .unwrap();
     writeln!(out, "        unreachable!()").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out, "}}").unwrap();

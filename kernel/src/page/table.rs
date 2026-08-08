@@ -127,6 +127,22 @@ impl<const LEVEL: usize> PageTable<LEVEL> {
         }
     }
 
+    fn is_mapped_impl(
+        &self,
+        virt: usize,
+        recurse: impl Fn(&PageTable<{ LEVEL - 1 }>, usize) -> bool,
+    ) -> bool {
+        let vpn_segment = vpn_segment::<LEVEL>(virt);
+        match self.0[vpn_segment].unpack() {
+            PageTableEntryUnpacked::Invalid => false,
+            PageTableEntryUnpacked::Indirect { phys_ptr } => recurse(
+                unsafe { &mut *phys_to_virt(phys_ptr as *mut PageTable<{ LEVEL - 1 }>) },
+                virt,
+            ),
+            PageTableEntryUnpacked::Leaf { .. } => true,
+        }
+    }
+
     fn map_leaf(&mut self, virt: usize, phys: usize, flags: PageFlags) {
         let vpn_segment = vpn_segment::<LEVEL>(virt);
         assert!(
@@ -141,6 +157,15 @@ impl<const LEVEL: usize> PageTable<LEVEL> {
         let vpn_segment = vpn_segment::<LEVEL>(virt);
         assert_matches!(self.0[vpn_segment].unpack(), PageTableEntryUnpacked::Leaf { phys_ptr, .. } if phys_ptr as usize == phys);
         self.0[vpn_segment] = PageTableEntry::invalid();
+    }
+
+    fn is_mapped_leaf(&self, virt: usize) -> bool {
+        let vpn_segment = vpn_segment::<LEVEL>(virt);
+        match self.0[vpn_segment].unpack() {
+            PageTableEntryUnpacked::Invalid => false,
+            PageTableEntryUnpacked::Indirect { .. } => unreachable!(),
+            PageTableEntryUnpacked::Leaf { .. } => true,
+        }
     }
 
     fn map_indirect(&mut self, virt: usize) -> &'static mut PageTable<{ LEVEL - 1 }> {
@@ -213,6 +238,10 @@ impl TopPageTable {
         assert!(size.is_multiple_of(PAGE_SIZE));
         self.unmap_range(virt, phys, size, PageTable::<1>::unmap_pages);
     }
+
+    pub fn is_mapped(&self, virt: usize) -> bool {
+        self.is_mapped_impl(virt, PageTable::<1>::is_mapped)
+    }
 }
 
 impl PageTable<1> {
@@ -222,6 +251,10 @@ impl PageTable<1> {
 
     fn unmap_pages(&mut self, virt: usize, phys: usize, size: usize) {
         self.unmap_range(virt, phys, size, PageTable::<0>::unmap_pages);
+    }
+
+    pub fn is_mapped(&self, virt: usize) -> bool {
+        self.is_mapped_impl(virt, PageTable::<0>::is_mapped)
     }
 }
 
@@ -236,6 +269,10 @@ impl PageTable<0> {
         for v in (virt..virt + size).step_by(PAGE_SIZE) {
             self.unmap_leaf(v, phys + (v - virt));
         }
+    }
+
+    pub fn is_mapped(&self, virt: usize) -> bool {
+        self.is_mapped_leaf(virt)
     }
 }
 

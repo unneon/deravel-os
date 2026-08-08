@@ -1,3 +1,4 @@
+#![feature(exact_div)]
 #![feature(min_adt_const_params)]
 #![no_std]
 #![no_main]
@@ -26,6 +27,7 @@ enum Directory {
 struct Fat<const TYPE: Type> {
     drive: Capability<Drive>,
     bpb: Bpb,
+    fat: &'static [u8],
 }
 
 #[derive(Clone, ConstParamTy, Copy, Debug, Eq, PartialEq)]
@@ -34,6 +36,8 @@ enum Type {
     Fat16,
     Fat32,
 }
+
+const DISK_SECTOR_SIZE: usize = 512;
 
 impl<const TYPE: Type> Fat<TYPE> {
     fn traverse_path(&self, mut dir: Directory, mut path: &str) -> (u32, usize) {
@@ -120,16 +124,14 @@ impl<const TYPE: Type> Fat<TYPE> {
                 let fat_sector_index = global_byte_index / self.bpb.byts_per_sec as u32;
                 let fat_entry_byte_index = global_byte_index % self.bpb.byts_per_sec as u32;
                 let bytes = if fat_entry_byte_index + 1 < self.bpb.byts_per_sec as u32 {
-                    let sector = self.read_sector(self.fat_sectors().start + fat_sector_index);
+                    let sector = self.read_fat_sector(fat_sector_index);
                     [
                         sector[fat_entry_byte_index as usize],
                         sector[fat_entry_byte_index as usize + 1],
                     ]
                 } else {
-                    let first_sector =
-                        self.read_sector(self.fat_sectors().start + fat_sector_index);
-                    let second_sector =
-                        self.read_sector(self.fat_sectors().start + fat_sector_index + 1);
+                    let first_sector = self.read_fat_sector(fat_sector_index);
+                    let second_sector = self.read_fat_sector(fat_sector_index + 1);
                     [
                         first_sector[fat_entry_byte_index as usize],
                         second_sector[0],
@@ -146,7 +148,7 @@ impl<const TYPE: Type> Fat<TYPE> {
                 let entries_per_sector = self.bpb.byts_per_sec as u32 / 2;
                 let fat_sector_index = cluster / entries_per_sector;
                 let fat_entry_index = cluster % entries_per_sector;
-                let sector = self.read_sector(self.fat_sectors().start + fat_sector_index);
+                let sector = self.read_fat_sector(fat_sector_index);
                 let entry = sector.as_chunks().0[fat_entry_index as usize];
                 u16::from_le_bytes(entry) as u32
             }
@@ -154,11 +156,16 @@ impl<const TYPE: Type> Fat<TYPE> {
                 let entries_per_sector = self.bpb.byts_per_sec as u32 / 4;
                 let fat_sector_index = cluster / entries_per_sector;
                 let fat_entry_index = cluster % entries_per_sector;
-                let sector = self.read_sector(self.fat_sectors().start + fat_sector_index);
+                let sector = self.read_fat_sector(fat_sector_index);
                 let entry = sector.as_chunks().0[fat_entry_index as usize];
                 u32::from_le_bytes(entry)
             }
         }
+    }
+
+    fn read_fat_sector(&self, fat_sector_index: u32) -> &[u8] {
+        let start = fat_sector_index as usize * self.bpb.byts_per_sec as usize;
+        &self.fat[start..start + self.bpb.byts_per_sec as usize]
     }
 
     fn read_data(&self, cluster: u32) -> Vec<u8> {
@@ -172,7 +179,6 @@ impl<const TYPE: Type> Fat<TYPE> {
     }
 
     fn read_sector(&self, sector: u32) -> Vec<u8> {
-        const DISK_SECTOR_SIZE: usize = 512;
         let disk_sector_per_fat_sector = self.bpb.byts_per_sec as u64 / DISK_SECTOR_SIZE as u64;
         let mut bytes = Vec::with_capacity(self.bpb.byts_per_sec as usize);
         for i in 0..disk_sector_per_fat_sector {
@@ -290,7 +296,21 @@ fn main(args: FatFsArgs) {
 }
 
 fn run<const TYPE: Type>(drive: Capability<Drive>, bpb: Bpb) {
-    let server = Fat::<{ TYPE }> { drive, bpb };
+    let mut server = Fat::<{ TYPE }> {
+        drive,
+        bpb,
+        fat: &[],
+    };
+
+    let disk_sector_offset = (server.fat_sectors().start as u64 * server.bpb.byts_per_sec as u64)
+        .div_exact(DISK_SECTOR_SIZE as u64)
+        .unwrap();
+    let disk_sector_count = ((server.fat_sectors().end - server.fat_sectors().start) as u64
+        * server.bpb.byts_per_sec as u64)
+        .div_exact(DISK_SECTOR_SIZE as u64)
+        .unwrap();
+    let fat = map_shared(drive.read_mapped(disk_sector_offset, disk_sector_count));
+    server.fat = unsafe { &*fat };
 
     if let Some(volume_label) = server.volume_label() {
         info!("mounting FAT volume {volume_label:?}");

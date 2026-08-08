@@ -2,7 +2,7 @@ pub mod spawner;
 
 use crate::arch::{RiscvRegisters, switch_to_user};
 use crate::buddy::BuddyAllocator;
-use crate::capability::{capability_certificate, capability_pages_physical_address};
+use crate::capability::{Handler, capability_certificate, capability_pages_physical_address};
 use crate::device_tree::timebase_frequency;
 use crate::elf::load_elf;
 use crate::heap::BuddyHeap;
@@ -20,6 +20,7 @@ use alloc::collections::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::num::NonZeroUsize;
+use core::ops::Range;
 use core::sync::atomic::{AtomicU16, Ordering};
 use deravel_types::memory::{USER_INPUTS, USER_STACK};
 use deravel_types::*;
@@ -75,6 +76,7 @@ pub struct Process {
     pub messages: VecDeque<Message, BuddyHeap>,
     pub currently_serving: Option<ProcessId>,
     allocated: Vec<(usize, Arc<UntypedBox<PageGranular>>)>,
+    pub virtual_memory_mappings: Vec<(Range<usize>, &'static (dyn Handler<SharedMemory> + Sync))>,
 }
 
 pub struct ProcessReservation<T: ProcessTag> {
@@ -193,6 +195,7 @@ fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: Process
         messages: VecDeque::new_in(BuddyHeap),
         currently_serving: None,
         allocated: Vec::new(),
+        virtual_memory_mappings: Vec::new(),
     };
     map_direct_mapping(&mut proc.page_table);
     map_kernel_image(&mut proc.page_table);

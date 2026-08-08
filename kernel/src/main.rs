@@ -38,6 +38,7 @@ mod sync;
 mod user;
 mod util;
 mod virtio;
+mod virtual_memory;
 
 use crate::arch::{RiscvRegisters, enable_kernel_trap_handler, return_to_user};
 use crate::capability::{grant_kernel_capability, reserve_kernel_capability};
@@ -65,6 +66,7 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::alloc::Layout;
+use core::ops::DerefMut;
 use core::panic::PanicInfo;
 use deravel_types::memory::USER_STACK_GUARD;
 use deravel_types::*;
@@ -185,10 +187,26 @@ fn handle_user_trap(user: &mut UserCtx) -> ! {
         }
         plic_complete(irq);
         return_to_user(&registers)
-    } else if USER_STACK_GUARD.contains(&stval) {
-        kill!(user, "stack overflow")
+    } else if is_page_fault(scause) {
+        if USER_STACK_GUARD.contains(&stval) {
+            kill!(user, "stack overflow")
+        }
+        let mut proc = user.process();
+        if let Some(vmm) = proc
+            .virtual_memory_mappings
+            .iter()
+            .find(|vmm| vmm.0.contains(&stval) && !proc.page_table.is_mapped(stval))
+        {
+            let page_index = (stval - vmm.0.start) / PAGE_SIZE;
+            vmm.1
+                .virtual_memory_load(vmm.0.start, page_index, &mut proc.page_table);
+            drop(proc);
+            riscv::asm::sfence_vma_all();
+            return_to_user(&registers)
+        }
+        kill!(user, proc, "forbidden access to {stval:#x}")
     } else {
-        panic!("unexpected trap scause={scause:?} stval={stval:#x} user_pc={user_pc:#x}");
+        panic!("unexpected trap, scause {scause:?}, stval {stval:#x}, user pc {user_pc:#x}");
     }
 }
 
@@ -304,7 +322,7 @@ impl SyscallHandler for () {
                 kill!(user, proc, "shared memory must be granted by the kernel");
             }
             let handler = capability::get_handler(ring.local_index());
-            let (_, length) = handler.shared_memory();
+            let length = handler.shared_memory_size();
             if !length.is_multiple_of(PAGE_SIZE) {
                 kill!(user, proc, "stream size must be a multiple of page size")
             }
@@ -400,13 +418,17 @@ impl SyscallHandler for () {
         }
 
         let handler = capability::get_handler(cap.local_index());
-        let (phys, length) = handler.shared_memory();
+        let length = handler.shared_memory_size();
         let padded_length = length.next_multiple_of(PAGE_SIZE);
         let layout = Layout::from_size_align(padded_length, PAGE_SIZE).unwrap();
 
         let virt = proc.virtual_memory.alloc(layout).unwrap();
-        proc.page_table
-            .map_pages(virt, phys, padded_length, PageFlags::readwrite().user());
+        let proc = proc.deref_mut();
+        handler.shared_memory_map(
+            virt,
+            &mut proc.page_table,
+            &mut proc.virtual_memory_mappings,
+        );
         riscv::asm::sfence_vma_all();
 
         (virt as *mut u8, length)
@@ -442,6 +464,15 @@ impl SyscallHandler for () {
 fn shutdown() -> ! {
     log_heap_usage();
     sbi::system_reset(ResetType::Shutdown, ResetReason::NoReason).unwrap()
+}
+
+fn is_page_fault(r: riscv::result::Result<Trap<Interrupt, Exception>>) -> bool {
+    matches!(
+        r,
+        Ok(Trap::Exception(
+            Exception::LoadPageFault | Exception::StorePageFault | Exception::InstructionPageFault
+        ))
+    )
 }
 
 #[panic_handler]
