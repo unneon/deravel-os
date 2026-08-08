@@ -138,51 +138,31 @@ impl<const TYPE: Type> Fat<TYPE> {
         match TYPE {
             Fat12 => {
                 let global_byte_index = cluster + cluster / 2;
-                let fat_sector_index = global_byte_index / self.bpb.byts_per_sec as u32;
-                let fat_entry_byte_index = global_byte_index % self.bpb.byts_per_sec as u32;
-                let bytes = if fat_entry_byte_index + 1 < self.bpb.byts_per_sec as u32 {
-                    let sector = self.read_fat_sector(fat_sector_index);
-                    [
-                        sector[fat_entry_byte_index as usize],
-                        sector[fat_entry_byte_index as usize + 1],
-                    ]
-                } else {
-                    let first_sector = self.read_fat_sector(fat_sector_index);
-                    let second_sector = self.read_fat_sector(fat_sector_index + 1);
-                    [
-                        first_sector[fat_entry_byte_index as usize],
-                        second_sector[0],
-                    ]
-                };
-                let value = u16::from_le_bytes(bytes) as u32;
+                let bytes: &[u8; 2] = self.fat[global_byte_index as usize..][..2]
+                    .try_into()
+                    .unwrap();
+                let value = u16::from_le_bytes(*bytes) as u32;
                 if cluster.is_multiple_of(2) {
                     value & 0x0FFF
                 } else {
                     value >> 4
                 }
             }
-            Fat16 => {
-                let entries_per_sector = self.bpb.byts_per_sec as u32 / 2;
-                let fat_sector_index = cluster / entries_per_sector;
-                let fat_entry_index = cluster % entries_per_sector;
-                let sector = self.read_fat_sector(fat_sector_index);
-                let entry = sector.as_chunks().0[fat_entry_index as usize];
-                u16::from_le_bytes(entry) as u32
-            }
-            Fat32 => {
-                let entries_per_sector = self.bpb.byts_per_sec as u32 / 4;
-                let fat_sector_index = cluster / entries_per_sector;
-                let fat_entry_index = cluster % entries_per_sector;
-                let sector = self.read_fat_sector(fat_sector_index);
-                let entry = sector.as_chunks().0[fat_entry_index as usize];
-                u32::from_le_bytes(entry)
-            }
+            Fat16 => self.fat_16()[cluster as usize] as u32,
+            Fat32 => self.fat_32()[cluster as usize],
         }
     }
 
-    fn read_fat_sector(&self, fat_sector_index: u32) -> &[u8] {
-        let start = fat_sector_index as usize * self.bpb.byts_per_sec as usize;
-        &self.fat[start..start + self.bpb.byts_per_sec as usize]
+    fn fat_16(&self) -> &'static [u16] {
+        unsafe {
+            core::slice::from_raw_parts(self.fat as *const _ as *const u16, self.fat.len() / 2)
+        }
+    }
+
+    fn fat_32(&self) -> &'static [u32] {
+        unsafe {
+            core::slice::from_raw_parts(self.fat as *const _ as *const u32, self.fat.len() / 4)
+        }
     }
 
     fn sectors_of_cluster(&self, cluster: u32) -> impl Iterator<Item = u32> {
