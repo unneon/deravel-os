@@ -1,4 +1,5 @@
-use crate::page::{Page, PageTable};
+use crate::page::{Page, PageTable, phys_to_virt, virt_to_phys};
+use alloc::boxed::Box;
 use core::fmt::Write;
 use deravel_types::PAGE_SIZE;
 
@@ -6,20 +7,29 @@ use deravel_types::PAGE_SIZE;
 #[derive(Clone, Copy)]
 pub struct PageFlags(usize);
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[repr(transparent)]
 pub struct PageTableEntry(pub usize);
 
 #[derive(Debug)]
-pub enum PageTableEntryUnpacked {
-    // This variant could have a u63 for kernel use.
+pub enum PageTableEntryUnpacked<'a> {
     Invalid,
-    Indirect {
-        phys_ptr: *mut PageTable,
-    },
+    Indirect(&'a PageTable),
     Leaf {
         #[allow(dead_code)]
         flags: PageFlags,
+        phys_ptr: *mut Page,
+    },
+}
+
+#[derive(Debug)]
+pub enum PageTableEntryUnpackedMut<'a> {
+    Invalid,
+    Indirect(&'a mut PageTable),
+    Leaf {
+        #[allow(dead_code)]
+        flags: PageFlags,
+        #[allow(dead_code)]
         phys_ptr: *mut Page,
     },
 }
@@ -57,25 +67,42 @@ impl PageTableEntry {
         PageTableEntry(0)
     }
 
-    pub fn indirect(table: *mut PageTable) -> PageTableEntry {
-        PageTableEntry(((table as usize / PAGE_SIZE) << 10) | PAGE_V)
+    pub fn indirect(table: Box<PageTable>) -> PageTableEntry {
+        PageTableEntry(((virt_to_phys(Box::into_raw(table)) as usize / PAGE_SIZE) << 10) | PAGE_V)
     }
 
     pub fn leaf(phys: usize, flags: PageFlags) -> PageTableEntry {
         PageTableEntry(((phys / PAGE_SIZE) << 10) | PAGE_V | flags.0)
     }
 
-    pub fn unpack(&self) -> PageTableEntryUnpacked {
+    pub fn unpack(&self) -> PageTableEntryUnpacked<'_> {
         if !self.is_valid() {
             PageTableEntryUnpacked::Invalid
         } else if self.is_indirect() {
-            let phys_ptr = self.physical_page_pointer() as *mut _;
-            PageTableEntryUnpacked::Indirect { phys_ptr }
+            let indirect = phys_to_virt(self.physical_page_pointer() as *const PageTable);
+            PageTableEntryUnpacked::Indirect(unsafe { &*indirect })
         } else {
             let flags = PageFlags(self.0 & 0b1111_1110);
             let phys_ptr = self.physical_page_pointer() as *mut _;
             PageTableEntryUnpacked::Leaf { flags, phys_ptr }
         }
+    }
+
+    pub fn unpack_mut(&mut self) -> PageTableEntryUnpackedMut<'_> {
+        if !self.is_valid() {
+            PageTableEntryUnpackedMut::Invalid
+        } else if self.is_indirect() {
+            let indirect = phys_to_virt(self.physical_page_pointer() as *mut PageTable);
+            PageTableEntryUnpackedMut::Indirect(unsafe { &mut *indirect })
+        } else {
+            let flags = PageFlags(self.0 & 0b1111_1110);
+            let phys_ptr = self.physical_page_pointer() as *mut _;
+            PageTableEntryUnpackedMut::Leaf { flags, phys_ptr }
+        }
+    }
+
+    pub fn take(&mut self) -> PageTableEntry {
+        core::mem::replace(self, PageTableEntry::invalid())
     }
 
     fn physical_page_pointer(&self) -> usize {
@@ -93,6 +120,15 @@ impl PageTableEntry {
 
     pub fn is_valid(&self) -> bool {
         self.0 & PAGE_V != 0
+    }
+}
+
+impl Drop for PageTableEntry {
+    fn drop(&mut self) {
+        if self.is_indirect() {
+            let indirect = phys_to_virt(self.physical_page_pointer() as *mut PageTable);
+            let _ = unsafe { Box::from_raw(indirect) };
+        }
     }
 }
 

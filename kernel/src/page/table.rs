@@ -1,5 +1,5 @@
-use crate::page::entry::{PageTableEntry, PageTableEntryUnpacked};
-use crate::page::{PageFlags, phys_to_virt, virt_to_phys};
+use crate::page::PageFlags;
+use crate::page::entry::{PageTableEntry, PageTableEntryUnpacked, PageTableEntryUnpackedMut};
 use alloc::boxed::Box;
 use core::assert_matches;
 use core::ops::Range;
@@ -7,6 +7,7 @@ use deravel_types::memory::{PHYSICAL_ADDRESSES, VIRTUAL_ADDRESSES};
 use deravel_types::{LEVEL_1_PAGE_SIZE, LEVEL_2_PAGE_SIZE, PAGE_SIZE, PAGE_TABLE_ENTRY_COUNT};
 use log::*;
 
+#[derive(Debug)]
 #[repr(align(4096))]
 pub struct PageTable([PageTableEntry; PAGE_TABLE_ENTRY_COUNT]);
 
@@ -14,7 +15,7 @@ const LEVEL_PAGE_SIZES: [usize; 3] = [PAGE_SIZE, LEVEL_1_PAGE_SIZE, LEVEL_2_PAGE
 
 impl PageTable {
     pub const fn new() -> PageTable {
-        PageTable([PageTableEntry(0); _])
+        PageTable([const { PageTableEntry(0) }; _])
     }
 
     #[track_caller]
@@ -135,9 +136,7 @@ impl PageTable {
         let vpn_segment = vpn_segment(virt, level);
         match self.0[vpn_segment].unpack() {
             PageTableEntryUnpacked::Invalid => false,
-            PageTableEntryUnpacked::Indirect { phys_ptr } => unsafe {
-                (*phys_to_virt(phys_ptr)).is_mapped_impl(virt, level - 1)
-            },
+            PageTableEntryUnpacked::Indirect(indirect) => indirect.is_mapped_impl(virt, level - 1),
             PageTableEntryUnpacked::Leaf { .. } => true,
         }
     }
@@ -158,58 +157,40 @@ impl PageTable {
         self.0[vpn_segment] = PageTableEntry::invalid();
     }
 
-    fn map_indirect(&mut self, virt: usize, level: usize) -> &'static mut PageTable {
+    fn map_indirect(&mut self, virt: usize, level: usize) -> &mut PageTable {
         let vpn_segment = vpn_segment(virt, level);
-        match self.0[vpn_segment].unpack() {
-            PageTableEntryUnpacked::Invalid => {
-                let indirect = Box::leak(Box::new(PageTable::new()));
-                self.0[vpn_segment] = PageTableEntry::indirect(virt_to_phys(indirect as *mut _));
-                indirect
+        match self.0[vpn_segment].unpack_mut() {
+            PageTableEntryUnpackedMut::Invalid => {
+                let indirect = Box::new(PageTable::new());
+                self.0[vpn_segment] = PageTableEntry::indirect(indirect);
             }
-            PageTableEntryUnpacked::Indirect { phys_ptr } => unsafe {
-                &mut *phys_to_virt(phys_ptr)
-            },
-            PageTableEntryUnpacked::Leaf { .. } => unreachable!(),
+            PageTableEntryUnpackedMut::Indirect(_) => {}
+            PageTableEntryUnpackedMut::Leaf { .. } => unreachable!(),
         }
+        self.unwrap_indirect(virt, level)
     }
 
-    fn unwrap_indirect(&mut self, virt: usize, level: usize) -> &'static mut PageTable {
+    fn unwrap_indirect(&mut self, virt: usize, level: usize) -> &mut PageTable {
         let vpn_segment = vpn_segment(virt, level);
-        let PageTableEntryUnpacked::Indirect { phys_ptr } = self.0[vpn_segment].unpack() else {
+        let PageTableEntryUnpackedMut::Indirect(indirect) = self.0[vpn_segment].unpack_mut() else {
             unreachable!()
         };
-        unsafe { &mut *phys_to_virt(phys_ptr) }
+        indirect
     }
 
     fn check_unmap_indirect(&mut self, virt: usize, level: usize) {
         if self.unwrap_indirect(virt, level).is_completely_unmapped() {
-            self.unmap_indirect(virt, level);
+            self.unmap_entry(virt, level);
         }
     }
 
-    fn unmap_indirect(&mut self, virt: usize, level: usize) {
+    fn unmap_entry(&mut self, virt: usize, level: usize) {
         let vpn_segment = vpn_segment(virt, level);
-        let PageTableEntryUnpacked::Indirect { phys_ptr } = self.0[vpn_segment].unpack() else {
-            unreachable!()
-        };
-        let _ = unsafe { Box::from_raw(phys_to_virt(phys_ptr)) };
-        self.0[vpn_segment] = PageTableEntry::invalid();
+        let _ = self.0[vpn_segment].take();
     }
 
     fn is_completely_unmapped(&self) -> bool {
         !self.0.iter().any(PageTableEntry::is_valid)
-    }
-}
-
-impl Drop for PageTable {
-    fn drop(&mut self) {
-        for entry in &mut self.0 {
-            if let PageTableEntryUnpacked::Indirect { phys_ptr } = entry.unpack() {
-                let ptr = phys_to_virt(phys_ptr);
-                drop(unsafe { Box::from_raw(ptr) });
-                *entry = PageTableEntry::invalid();
-            }
-        }
     }
 }
 
