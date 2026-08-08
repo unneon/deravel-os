@@ -33,6 +33,7 @@ mod plic;
 mod process;
 mod sbi;
 mod shared_memory;
+mod shutdown;
 mod stack;
 mod sync;
 mod user;
@@ -40,13 +41,15 @@ mod util;
 mod virtio;
 mod virtual_memory;
 
-use crate::arch::{RiscvRegisters, enable_kernel_trap_handler, return_to_user};
+use crate::arch::{
+    RiscvRegisters, enable_interrupts, enable_kernel_trap_handler, is_page_fault, return_to_user,
+};
 use crate::capability::{grant_kernel_capability, reserve_kernel_capability};
 use crate::device_tree::initialize_timebase_frequency;
-use crate::drvli::{ShutdownServer, SyscallHandler, dispatch_syscall};
+use crate::drvli::{SyscallHandler, dispatch_syscall};
 use crate::elf::elf;
 use crate::heap::granularity::page_granular_vec;
-use crate::heap::{initialize_early_heap, initialize_heap, log_heap_usage};
+use crate::heap::{initialize_early_heap, initialize_heap};
 use crate::interrupt::INTERRUPTS;
 use crate::log::{initialize_log, log_userspace};
 use crate::page::{PageFlags, initialize_memory_mapping, phys_to_virt, virt_to_phys};
@@ -57,6 +60,7 @@ use crate::process::{
     Message, ProcessState, get_process, kill, reserve_process, schedule_and_switch_to_userspace,
 };
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
+use crate::shutdown::KernelShutdown;
 use crate::stack::{UserCtx, initialize_kernel_stack};
 use crate::user::UserPtr;
 use crate::util::untyped_box::UntypedBox;
@@ -73,14 +77,6 @@ use deravel_types::*;
 use fdt::Fdt;
 use riscv::interrupt::Trap;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
-
-struct KernelShutdown;
-
-impl ShutdownServer for KernelShutdown {
-    fn shutdown(&self, _: ProcessId) -> ! {
-        shutdown()
-    }
-}
 
 fn main(_hart_id: u64, dt_ptr: *const u8) -> ! {
     clear_bss();
@@ -137,13 +133,6 @@ fn clear_bss() {
     }
     let bss = unsafe { core::slice::from_mut_ptr_range(&raw mut bss_start..&raw mut bss_end) };
     bss.fill(0);
-}
-
-fn enable_interrupts() {
-    let mut sie = riscv::register::sie::read();
-    sie.set_sext(true);
-    sie.set_stimer(true);
-    unsafe { riscv::register::sie::write(sie) }
 }
 
 fn handle_kernel_trap(_: &mut RiscvRegisters) -> ! {
@@ -459,20 +448,6 @@ impl SyscallHandler for () {
         };
         log_userspace(level, &user.process(), &text);
     }
-}
-
-fn shutdown() -> ! {
-    log_heap_usage();
-    sbi::system_reset(ResetType::Shutdown, ResetReason::NoReason).unwrap()
-}
-
-fn is_page_fault(r: riscv::result::Result<Trap<Interrupt, Exception>>) -> bool {
-    matches!(
-        r,
-        Ok(Trap::Exception(
-            Exception::LoadPageFault | Exception::StorePageFault | Exception::InstructionPageFault
-        ))
-    )
 }
 
 #[panic_handler]

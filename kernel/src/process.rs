@@ -10,7 +10,7 @@ use crate::heap::granularity::{PageGranular, page_granular_vec};
 use crate::page::{
     PageFlags, PageTable, TopPageTable, map_direct_mapping, map_kernel_image, virt_to_phys,
 };
-use crate::shutdown;
+use crate::shutdown::shutdown;
 use crate::stack::UserCtx;
 use crate::sync::{Mutex, MutexGuard};
 use crate::user::UserPtr;

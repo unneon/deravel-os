@@ -8,6 +8,8 @@ use core::alloc::Layout;
 use core::arch::{asm, naked_asm};
 use core::ops::DerefMut;
 use deravel_types::PAGE_SIZE;
+use riscv::interrupt::Trap;
+use riscv::interrupt::supervisor::{Exception, Interrupt};
 use riscv::register::mtvec::TrapMode;
 use riscv::register::stvec::Stvec;
 
@@ -75,6 +77,13 @@ pub fn enable_kernel_trap_handler() {
 pub fn enable_user_trap_handler() {
     let address = user_trap_entry as *const () as usize;
     unsafe { riscv::register::stvec::write(Stvec::new(address, TrapMode::Direct)) }
+}
+
+pub fn enable_interrupts() {
+    let mut sie = riscv::register::sie::read();
+    sie.set_sext(true);
+    sie.set_stimer(true);
+    unsafe { riscv::register::sie::write(sie) }
 }
 
 pub fn switch_to_user(mut next: MutexGuard<Process>) -> Result<!, UserSyscallError> {
@@ -293,5 +302,14 @@ unsafe extern "C" fn user_trap_entry() -> ! {
         "j {handle_user_trap}",
 
         handle_user_trap = sym handle_user_trap,
+    )
+}
+
+pub fn is_page_fault(r: riscv::result::Result<Trap<Interrupt, Exception>>) -> bool {
+    matches!(
+        r,
+        Ok(Trap::Exception(
+            Exception::LoadPageFault | Exception::StorePageFault | Exception::InstructionPageFault
+        ))
     )
 }
