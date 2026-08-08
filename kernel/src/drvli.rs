@@ -4,7 +4,7 @@
 
 use crate::RiscvRegisters;
 use crate::capability::Handler;
-use crate::page::TopPageTable;
+use crate::page::PageTable;
 use crate::stack::UserCtx;
 use crate::user::{UserPtr, UserSyscallError};
 use crate::virtual_memory::VirtualMemoryRawMapping;

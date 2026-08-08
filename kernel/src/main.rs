@@ -358,7 +358,7 @@ impl SyscallHandler for () {
                     Layout::from_size_align(ring_buffer_size, PAGE_SIZE).unwrap();
 
                 let virt = proc.heap.alloc(ring_buffer_layout).unwrap();
-                proc.page_table.map_pages(
+                proc.page_table.map(
                     virt,
                     virt_to_phys(ring_buffer as *const _ as *const u8) as usize,
                     PAGE_SIZE,

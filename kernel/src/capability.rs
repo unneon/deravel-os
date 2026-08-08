@@ -1,4 +1,4 @@
-use crate::page::TopPageTable;
+use crate::page::PageTable;
 use crate::process::PROCESS_COUNT;
 use crate::sync::Mutex;
 use crate::virtual_memory::VirtualMemoryRawMapping;
@@ -16,7 +16,7 @@ pub trait Handler<T> {
     fn shared_memory_map(
         &self,
         virt: usize,
-        page_table: &mut TopPageTable,
+        page_table: &mut PageTable,
         vmms: &mut Vec<(Range<usize>, &'static (dyn VirtualMemoryRawMapping + Sync))>,
     );
 
@@ -31,7 +31,7 @@ pub trait RawHandler {
     fn shared_memory_map(
         &self,
         virt: usize,
-        page_table: &mut TopPageTable,
+        page_table: &mut PageTable,
         vmms: &mut Vec<(Range<usize>, &'static (dyn VirtualMemoryRawMapping + Sync))>,
     );
 
@@ -61,7 +61,7 @@ impl<T, H: Handler<T>> RawHandler for TypedHandler<T, H> {
     fn shared_memory_map(
         &self,
         virt: usize,
-        page_table: &mut TopPageTable,
+        page_table: &mut PageTable,
         vmms: &mut Vec<(Range<usize>, &'static (dyn VirtualMemoryRawMapping + Sync))>,
     ) {
         self.0.shared_memory_map(virt, page_table, vmms)

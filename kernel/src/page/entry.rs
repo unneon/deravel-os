@@ -8,18 +8,17 @@ pub struct PageFlags(usize);
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[repr(transparent)]
-pub struct PageTableEntry<const LEVEL: usize>(pub usize);
+pub struct PageTableEntry(pub usize);
 
 #[derive(Debug)]
-pub enum PageTableEntryUnpacked<const LEVEL: usize> {
+pub enum PageTableEntryUnpacked {
     // This variant could have a u63 for kernel use.
     Invalid,
     Indirect {
-        // TODO: *mut PageTable<{ LEVEL - 1 }> once const generics are usable.
-        phys_ptr: *mut (),
+        phys_ptr: *mut PageTable,
     },
-    #[allow(dead_code)]
     Leaf {
+        #[allow(dead_code)]
         flags: PageFlags,
         phys_ptr: *mut Page,
     },
@@ -53,20 +52,20 @@ impl PageFlags {
     }
 }
 
-impl<const LEVEL: usize> PageTableEntry<LEVEL> {
-    pub fn invalid() -> PageTableEntry<LEVEL> {
+impl PageTableEntry {
+    pub fn invalid() -> PageTableEntry {
         PageTableEntry(0)
     }
 
-    pub fn indirect(table: *mut PageTable<{ LEVEL - 1 }>) -> PageTableEntry<LEVEL> {
+    pub fn indirect(table: *mut PageTable) -> PageTableEntry {
         PageTableEntry(((table as usize / PAGE_SIZE) << 10) | PAGE_V)
     }
 
-    pub fn leaf(phys: usize, flags: PageFlags) -> PageTableEntry<LEVEL> {
+    pub fn leaf(phys: usize, flags: PageFlags) -> PageTableEntry {
         PageTableEntry(((phys / PAGE_SIZE) << 10) | PAGE_V | flags.0)
     }
 
-    pub fn unpack(&self) -> PageTableEntryUnpacked<LEVEL> {
+    pub fn unpack(&self) -> PageTableEntryUnpacked {
         if !self.is_valid() {
             PageTableEntryUnpacked::Invalid
         } else if self.is_indirect() {

@@ -1,6 +1,6 @@
 use crate::capability::Handler;
 use crate::heap::granularity::PageGranular;
-use crate::page::{PageFlags, TopPageTable, virt_to_phys};
+use crate::page::{PageFlags, PageTable, virt_to_phys};
 use crate::util::untyped_box::UntypedBox;
 use crate::virtual_memory::VirtualMemoryRawMapping;
 use alloc::sync::Arc;
@@ -25,11 +25,11 @@ impl Handler<deravel_types::SharedMemory> for SharedMemory {
     fn shared_memory_map(
         &self,
         virt: usize,
-        page_table: &mut TopPageTable,
+        page_table: &mut PageTable,
         _: &mut Vec<(Range<usize>, &'static (dyn VirtualMemoryRawMapping + Sync))>,
     ) {
         let phys = virt_to_phys(Arc::deref(&self.backing).as_untyped_ptr().addr());
-        page_table.map_pages(
+        page_table.map(
             virt,
             phys,
             self.backing.byte_size(),

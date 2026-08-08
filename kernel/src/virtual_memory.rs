@@ -1,5 +1,5 @@
 use crate::capability::Handler;
-use crate::page::{Page, PageFlags, TopPageTable, virt_to_phys};
+use crate::page::{Page, PageFlags, PageTable, virt_to_phys};
 use crate::sync::Mutex;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -11,7 +11,7 @@ pub trait VirtualMemoryLoader {
 }
 
 pub trait VirtualMemoryRawMapping {
-    fn load_page(&self, virt_base: usize, page_index: usize, page_table: &mut TopPageTable);
+    fn load_page(&self, virt_base: usize, page_index: usize, page_table: &mut PageTable);
 }
 
 pub struct VirtualMemoryMapping<T> {
@@ -43,14 +43,14 @@ impl<T: VirtualMemoryLoader + Sync + 'static> Handler<SharedMemory> for VirtualM
     fn shared_memory_map(
         &self,
         virt: usize,
-        page_table: &mut TopPageTable,
+        page_table: &mut PageTable,
         vmms: &mut Vec<(Range<usize>, &'static (dyn VirtualMemoryRawMapping + Sync))>,
     ) {
         let backed_pages = self.backed_pages.lock();
         for (page_index, page) in &*backed_pages {
             let virt = virt + PAGE_SIZE * page_index;
             let phys = virt_to_phys(page.as_ref() as *const _) as usize;
-            page_table.map_pages(virt, phys, PAGE_SIZE, PageFlags::readonly().user());
+            page_table.map(virt, phys, PAGE_SIZE, PageFlags::readonly().user());
         }
         vmms.push((virt..virt + self.size, unsafe { &*(self as *const _) }));
     }
@@ -61,11 +61,11 @@ impl<T: VirtualMemoryLoader + Sync + 'static> Handler<SharedMemory> for VirtualM
 }
 
 impl<T: VirtualMemoryLoader + Sync + 'static> VirtualMemoryRawMapping for VirtualMemoryMapping<T> {
-    fn load_page(&self, virt_base: usize, page_index: usize, page_table: &mut TopPageTable) {
+    fn load_page(&self, virt_base: usize, page_index: usize, page_table: &mut PageTable) {
         let virt = virt_base + PAGE_SIZE * page_index;
         let page = self.loader.load_page(page_index);
         let phys = virt_to_phys(page.as_ref() as *const _) as usize;
-        page_table.map_pages(virt, phys, PAGE_SIZE, PageFlags::readonly().user());
+        page_table.map(virt, phys, PAGE_SIZE, PageFlags::readonly().user());
         self.backed_pages.lock().push((page_index, page));
     }
 }

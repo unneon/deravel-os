@@ -57,7 +57,7 @@ pub fn load_elf(elf_bytes: &[u8], proc: &mut Process) {
             assert!((data.as_ptr() as usize).is_multiple_of(PAGE_SIZE));
             assert!(elf_data_is_zero_padded(&segment, elf_bytes));
 
-            proc.page_table.map_pages(
+            proc.page_table.map(
                 segment.p_vaddr as usize,
                 data.as_ptr() as usize,
                 data.len().next_multiple_of(PAGE_SIZE),

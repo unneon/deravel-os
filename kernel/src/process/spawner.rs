@@ -1,5 +1,5 @@
 use crate::capability::{Handler, capability_certificate};
-use crate::page::TopPageTable;
+use crate::page::PageTable;
 use crate::process::reserve_process;
 use crate::virtual_memory::VirtualMemoryRawMapping;
 use alloc::vec;
@@ -55,7 +55,7 @@ impl<T: ProcessTag> Handler<T::Spawner> for ProcessSpawnerService<T> {
     fn shared_memory_map(
         &self,
         _: usize,
-        _: &mut TopPageTable,
+        _: &mut PageTable,
         _: &mut Vec<(Range<usize>, &'static (dyn VirtualMemoryRawMapping + Sync))>,
     ) {
         unreachable!()

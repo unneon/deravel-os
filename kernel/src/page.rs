@@ -3,7 +3,7 @@ mod table;
 
 use core::ops::Range;
 pub use entry::PageFlags;
-pub use table::{PageTable, TopPageTable};
+pub use table::PageTable;
 
 use crate::util::address::Address;
 use deravel_types::PAGE_SIZE;
@@ -19,7 +19,7 @@ unsafe extern "C" {
     static image_end: u8;
 }
 
-static mut KERNEL_PAGE_TABLE: TopPageTable = PageTable::new();
+static mut KERNEL_PAGE_TABLE: PageTable = PageTable::new();
 
 pub fn initialize_memory_mapping() {
     let table = unsafe { &mut *&raw mut KERNEL_PAGE_TABLE };
@@ -32,13 +32,13 @@ pub fn initialize_memory_mapping() {
     unsafe { riscv::register::satp::write(satp(table)) }
 }
 
-pub fn map_direct_mapping(table: &mut TopPageTable) {
+pub fn map_direct_mapping(table: &mut PageTable) {
     let virt = DIRECT_MAPPING.start;
     let size = DIRECT_MAPPING.end - DIRECT_MAPPING.start;
-    table.map_pages(virt, 0, size, PageFlags::readwrite());
+    table.map(virt, 0, size, PageFlags::readwrite());
 }
 
-pub fn map_kernel_image(table: &mut TopPageTable) {
+pub fn map_kernel_image(table: &mut PageTable) {
     unsafe extern "C" {
         static text_start: u8;
         static text_end: u8;
@@ -55,11 +55,11 @@ pub fn map_kernel_image(table: &mut TopPageTable) {
     map_kernel_image_section(table, readwrite, PageFlags::readwrite());
 }
 
-fn map_kernel_image_section(table: &mut TopPageTable, range: Range<*const u8>, flags: PageFlags) {
+fn map_kernel_image_section(table: &mut PageTable, range: Range<*const u8>, flags: PageFlags) {
     let start = range.start as usize;
     let size = (range.end as usize - start).next_multiple_of(PAGE_SIZE);
     assert!(start.is_multiple_of(PAGE_SIZE));
-    table.map_pages(start, start, size, flags);
+    table.map(start, start, size, flags);
 }
 
 pub fn phys_to_virt<T: Address>(phys: T) -> T {
@@ -102,7 +102,7 @@ fn sign_unextend(addr: usize) -> usize {
     addr & (VIRTUAL_ADDRESSES.end - 1)
 }
 
-pub fn satp(table: &TopPageTable) -> Satp {
+pub fn satp(table: &PageTable) -> Satp {
     let mut satp = Satp::from_bits(0);
     satp.set_mode(Mode::Sv39);
     satp.set_ppn(virt_to_phys(table as *const _) as usize / PAGE_SIZE);

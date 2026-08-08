@@ -7,9 +7,7 @@ use crate::device_tree::timebase_frequency;
 use crate::elf::load_elf;
 use crate::heap::BuddyHeap;
 use crate::heap::granularity::{PageGranular, page_granular_vec};
-use crate::page::{
-    PageFlags, PageTable, TopPageTable, map_direct_mapping, map_kernel_image, virt_to_phys,
-};
+use crate::page::{PageFlags, PageTable, map_direct_mapping, map_kernel_image, virt_to_phys};
 use crate::shutdown::shutdown;
 use crate::stack::UserCtx;
 use crate::sync::{Mutex, MutexGuard};
@@ -72,7 +70,7 @@ pub struct Process {
     // TODO: This gets overwritten on user trap, should have a wrapper type.
     pub registers: RiscvRegisters,
     pub pc: usize,
-    pub page_table: Box<TopPageTable>,
+    pub page_table: Box<PageTable>,
     pub heap: BuddyAllocator,
     pub messages: VecDeque<Message, BuddyHeap>,
     pub currently_serving: Option<ProcessId>,
@@ -113,7 +111,7 @@ impl Process {
     ) {
         let size = backing.layout().size();
         let phys = virt_to_phys(backing.as_untyped_ptr().addr());
-        self.page_table.map_pages(virt, phys, size, flags);
+        self.page_table.map(virt, phys, size, flags);
         self.allocated.push((virt, backing));
     }
 
@@ -125,7 +123,7 @@ impl Process {
             .find(|a| a.1.0 == ptr as usize)
             .ok_or(())?;
         let (virt, backing) = self.allocated.swap_remove(slot.0);
-        self.page_table.unmap_pages(
+        self.page_table.unmap(
             virt,
             virt_to_phys(backing.as_untyped_ptr()) as usize,
             backing.byte_size(),
@@ -209,7 +207,7 @@ fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: Process
     *get_process(pid).lock() = Some(proc);
 }
 
-fn map_capability_memory(table: &mut TopPageTable, pid: ProcessId) {
+fn map_capability_memory(table: &mut PageTable, pid: ProcessId) {
     let pre_v = USER_CAPABILITIES.start;
     let pre_p = capability_pages_physical_address();
     let own_v = pre_v + pid.as_u16() as usize * PAGE_SIZE;
@@ -217,14 +215,14 @@ fn map_capability_memory(table: &mut TopPageTable, pid: ProcessId) {
     let suf_v = own_v + PAGE_SIZE;
     let suf_p = own_p + PAGE_SIZE;
     let suf_l = PROCESS_COUNT - pid.as_u16() as usize - 1;
-    table.map_pages(
+    table.map(
         pre_v,
         pre_p,
         (pid.as_u16() as usize) * PAGE_SIZE,
         PageFlags::readonly().user(),
     );
-    table.map_pages(own_v, own_p, PAGE_SIZE, PageFlags::readwrite().user());
-    table.map_pages(
+    table.map(own_v, own_p, PAGE_SIZE, PageFlags::readwrite().user());
+    table.map(
         suf_v,
         suf_p,
         suf_l * PAGE_SIZE,
