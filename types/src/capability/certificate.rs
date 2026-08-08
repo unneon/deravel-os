@@ -56,9 +56,12 @@ impl CapabilityCertificateValue {
         }
     }
 
-    pub fn forwarded(forwardee: Actor, capability: RawCapability) -> CapabilityCertificateValue {
+    pub fn forwarded(
+        forwardee: impl Into<Actor>,
+        capability: RawCapability,
+    ) -> CapabilityCertificateValue {
         CapabilityCertificateValue {
-            grantee: match forwardee {
+            grantee: match forwardee.into() {
                 Actor::Userspace(pid) => pid.as_u16() as u32,
                 Actor::Kernel => 0,
             },
@@ -67,20 +70,27 @@ impl CapabilityCertificateValue {
     }
 
     pub fn unpack(self) -> CapabilityCertificateUnpacked {
-        let grantee_or_forwardee = if self.grantee == 0 {
+        let recipient = if self.grantee == 0 {
             Actor::Kernel
         } else {
             Actor::Userspace(ProcessId::new(self.grantee as u16))
         };
         if self.payload == 0 {
-            CapabilityCertificateUnpacked::Granted {
-                grantee: grantee_or_forwardee,
-            }
+            CapabilityCertificateUnpacked::Granted { grantee: recipient }
         } else {
             CapabilityCertificateUnpacked::Forwarded {
-                forwardee: grantee_or_forwardee,
+                forwardee: recipient,
                 inner: RawCapability::try_from(self.payload as *const CapabilityCertificate)
                     .unwrap(),
+            }
+        }
+    }
+
+    pub fn replace_recipient(self, recipient: impl Into<Actor>) -> CapabilityCertificateValue {
+        match self.unpack() {
+            CapabilityCertificateUnpacked::Granted { .. } => Self::granted(recipient),
+            CapabilityCertificateUnpacked::Forwarded { inner, .. } => {
+                Self::forwarded(recipient, inner)
             }
         }
     }
