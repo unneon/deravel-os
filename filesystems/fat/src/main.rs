@@ -154,11 +154,11 @@ impl<const TYPE: Type> Fat<TYPE> {
     }
 
     fn fat_16(&self) -> &'static [u16] {
-        unsafe { &*PageAligned::transmute_ptr(self.fat) }
+        unsafe { &*PageAligned::cast(self.fat) }
     }
 
     fn fat_32(&self) -> &'static [u32] {
-        unsafe { &*PageAligned::transmute_ptr(self.fat) }
+        unsafe { &*PageAligned::cast(self.fat) }
     }
 
     fn sectors_of_cluster(&self, cluster: u32) -> impl Iterator<Item = u32> {
@@ -242,7 +242,7 @@ impl<const TYPE: Type> FilesystemServer<Directory> for Fat<TYPE> {
         let (file, file_size) = self.traverse_path(dir, path);
         let data = self.read_file(file, Some(file_size as usize));
         let (shared, shared_cap) = alloc_shared(file_size as usize);
-        unsafe { &mut *shared }.copy_from_slice(&data);
+        unsafe { &mut (*shared).0 }.copy_from_slice(&data);
         ctx.forward_to_sender(shared_cap)
     }
 
@@ -303,7 +303,7 @@ fn run<const TYPE: Type>(drive: Capability<Drive>, bpb: Bpb) {
             .div_exact(DISK_SECTOR_SIZE as u64)
             .unwrap();
         let rdr = map_shared(drive.read_mapped(disk_sector_offset, disk_sector_count));
-        server.rdr = unsafe { &*PageAligned::transmute_ptr(rdr) };
+        server.rdr = unsafe { &*PageAligned::cast(rdr) };
     }
 
     if let Some(volume_label) = server.volume_label() {

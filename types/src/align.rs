@@ -9,14 +9,14 @@ pub const CACHE_LINE_SIZE: usize = 64;
 pub const PAGE_SIZE: usize = 4096;
 
 impl PageAligned<[u8]> {
-    pub fn transmute_ptr<T>(ptr: *const PageAligned<[u8]>) -> *const [T] {
+    pub fn cast<T>(ptr: *const PageAligned<[u8]>) -> *const [T] {
         assert!(PAGE_SIZE.is_multiple_of(size_of::<T>()));
         assert!(align_of::<T>() <= PAGE_SIZE);
         let (ptr, size) = ptr.to_raw_parts();
         core::ptr::from_raw_parts(ptr, size / size_of::<T>())
     }
 
-    pub fn transmute_ptr_mut<T>(ptr: *mut PageAligned<[u8]>) -> *mut [T] {
+    pub fn cast_mut<T>(ptr: *mut PageAligned<[u8]>) -> *mut [T] {
         assert!(PAGE_SIZE.is_multiple_of(size_of::<T>()));
         assert!(align_of::<T>() <= PAGE_SIZE);
         let (ptr, size) = ptr.to_raw_parts();

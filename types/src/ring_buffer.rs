@@ -1,5 +1,5 @@
 use crate::align::CACHE_LINE_SIZE;
-use crate::{CacheLineAligned, PAGE_SIZE};
+use crate::{CacheLineAligned, PAGE_SIZE, PageAligned};
 use alloc::alloc::{alloc_zeroed, handle_alloc_error};
 use alloc::boxed::Box;
 use core::alloc::Layout;
@@ -46,7 +46,10 @@ impl<T: Copy + Default> RingBuffer<T> {
     /// # Safety
     ///
     /// Allocation must be valid for 'static and at least page-sized.
-    pub unsafe fn new_in_single_page(page_pointer: *mut [u8]) -> &'static RingBuffer<T> {
+    pub unsafe fn new_in_single_page(
+        page_pointer: *mut PageAligned<[u8]>,
+    ) -> &'static RingBuffer<T> {
+        let page_pointer: *mut [u8] = PageAligned::cast_mut(page_pointer);
         assert_eq!(page_pointer.len(), PAGE_SIZE);
         let element_count = (PAGE_SIZE - 2 * CACHE_LINE_SIZE) / size_of::<T>();
         unsafe { &*RingBuffer::new_in(element_count, page_pointer as *mut u8) }

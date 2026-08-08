@@ -1,7 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 #![feature(decl_macro)]
 #![feature(ptr_metadata)]
-#![feature(slice_ptr_get)]
 #![no_std]
 
 extern crate alloc;
@@ -117,10 +116,10 @@ impl Log for KernelLogger {
     fn flush(&self) {}
 }
 
-pub fn alloc_shared(size: usize) -> (*mut [u8], Capability<SharedMemory>) {
+pub fn alloc_shared(size: usize) -> (*mut PageAligned<[u8]>, Capability<SharedMemory>) {
     // TODO: This API should warn size gets rounded up to page size?
     let (ptr, cap) = unsafe { syscall::alloc_shared(size) };
-    (core::ptr::slice_from_raw_parts_mut(ptr, size), cap)
+    (core::ptr::from_raw_parts_mut(ptr, size), cap)
 }
 
 pub fn current_pid() -> ProcessId {

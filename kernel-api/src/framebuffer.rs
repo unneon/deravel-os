@@ -10,18 +10,13 @@ pub struct Framebuffer {
 impl Framebuffer {
     pub fn alloc(width: usize, height: usize) -> (Framebuffer, Capability<SharedMemory>) {
         let (ptr, cap) = alloc_shared(4 * width * height);
-        let ptr =
-            unsafe { core::slice::from_raw_parts_mut(ptr.as_mut_ptr() as *mut u32, ptr.len() / 4) };
+        let ptr = unsafe { &mut *PageAligned::cast_mut(ptr) };
         (Framebuffer { ptr, width, height }, cap)
     }
 
     pub fn map(width: usize, height: usize, cap: Capability<SharedMemory>) -> Framebuffer {
-        let ptr = PageAligned::transmute_ptr_mut(map_shared(cap));
-        Framebuffer {
-            ptr: unsafe { &mut *ptr },
-            width,
-            height,
-        }
+        let ptr = unsafe { &mut *PageAligned::cast_mut(map_shared(cap)) };
+        Framebuffer { ptr, width, height }
     }
 
     #[track_caller]
