@@ -49,7 +49,7 @@ impl Image<'_> {
 }
 
 fn main(args: ImageViewerArgs) {
-    let image = unsafe { &*map_shared(args.image) };
+    let image = unsafe { &(*map_shared(args.image)).0 };
     let image = parse_image(image);
     let min_width: usize = 400;
     let min_height: usize = 300;

@@ -12,8 +12,8 @@ use elf::segment::ProgramHeader;
 
 pub macro elf($env:literal) {{
     {
-        const ELF: crate::page::PageAligned<[u8; include_bytes!(env!($env)).len()]> =
-            crate::page::PageAligned(*include_bytes!(env!($env)));
+        const ELF: deravel_types::PageAligned<[u8; include_bytes!(env!($env)).len()]> =
+            deravel_types::PageAligned(*include_bytes!(env!($env)));
         &ELF.0
     }
 }}

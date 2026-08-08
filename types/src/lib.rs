@@ -16,7 +16,7 @@ mod process_id;
 mod ring_buffer;
 
 pub use actor::Actor;
-pub use align::{CACHE_LINE_SIZE, CacheLineAligned};
+pub use align::*;
 pub use capability::*;
 pub use drvli::*;
 pub use process_id::ProcessId;
@@ -33,8 +33,6 @@ pub struct ProcessInputs<T: ProcessTag> {
 pub struct SharedMemory;
 
 pub const MAX_PROCESSES: usize = 8;
-
-pub const PAGE_SIZE: usize = 4096;
 
 impl Interface for SharedMemory {
     const NAME: &'static str = "shared_memory";

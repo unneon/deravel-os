@@ -28,7 +28,7 @@ enum Directory {
 struct Fat<const TYPE: Type> {
     drive: Capability<Drive>,
     bpb: Bpb,
-    fat: &'static [u8],
+    fat: &'static PageAligned<[u8]>,
     rdr: &'static [DirectoryEntry],
 }
 
@@ -138,7 +138,7 @@ impl<const TYPE: Type> Fat<TYPE> {
         match TYPE {
             Fat12 => {
                 let global_byte_index = cluster + cluster / 2;
-                let bytes: &[u8; 2] = self.fat[global_byte_index as usize..][..2]
+                let bytes: &[u8; 2] = self.fat.0[global_byte_index as usize..][..2]
                     .try_into()
                     .unwrap();
                 let value = u16::from_le_bytes(*bytes) as u32;
@@ -154,15 +154,11 @@ impl<const TYPE: Type> Fat<TYPE> {
     }
 
     fn fat_16(&self) -> &'static [u16] {
-        unsafe {
-            core::slice::from_raw_parts(self.fat as *const _ as *const u16, self.fat.len() / 2)
-        }
+        unsafe { &*PageAligned::transmute_ptr(self.fat) }
     }
 
     fn fat_32(&self) -> &'static [u32] {
-        unsafe {
-            core::slice::from_raw_parts(self.fat as *const _ as *const u32, self.fat.len() / 4)
-        }
+        unsafe { &*PageAligned::transmute_ptr(self.fat) }
     }
 
     fn sectors_of_cluster(&self, cluster: u32) -> impl Iterator<Item = u32> {
@@ -282,7 +278,7 @@ fn run<const TYPE: Type>(drive: Capability<Drive>, bpb: Bpb) {
     let mut server = Fat::<{ TYPE }> {
         drive,
         bpb,
-        fat: &[],
+        fat: &PageAligned([]),
         rdr: &[],
     };
 
@@ -307,12 +303,7 @@ fn run<const TYPE: Type>(drive: Capability<Drive>, bpb: Bpb) {
             .div_exact(DISK_SECTOR_SIZE as u64)
             .unwrap();
         let rdr = map_shared(drive.read_mapped(disk_sector_offset, disk_sector_count));
-        server.rdr = unsafe {
-            core::slice::from_raw_parts(
-                rdr as *const u8 as *const DirectoryEntry,
-                rdr.len() / size_of::<DirectoryEntry>(),
-            )
-        };
+        server.rdr = unsafe { &*PageAligned::transmute_ptr(rdr) };
     }
 
     if let Some(volume_label) = server.volume_label() {

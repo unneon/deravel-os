@@ -135,7 +135,7 @@ pub fn getchar() -> u8 {
     stdio().getchar()
 }
 
-pub fn map_shared(cap: Capability<SharedMemory>) -> *mut [u8] {
+pub fn map_shared(cap: Capability<SharedMemory>) -> *mut PageAligned<[u8]> {
     let (pointer, size) = unsafe { syscall::map_shared(cap) };
     core::ptr::from_raw_parts_mut(pointer, size)
 }

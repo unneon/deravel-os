@@ -13,9 +13,6 @@ use riscv::register::satp::{Mode, Satp};
 #[repr(C, align(4096))]
 pub struct Page(pub [u8; 4096]);
 
-#[repr(C, align(4096))]
-pub struct PageAligned<T>(pub T);
-
 const PAGE_TABLE_ENTRY_COUNT: usize = PAGE_SIZE / size_of::<usize>();
 
 const LEVEL_0_PAGE_SIZE: usize = PAGE_SIZE;

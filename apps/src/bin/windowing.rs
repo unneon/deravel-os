@@ -248,7 +248,7 @@ fn main(args: WindowingArgs) {
 }
 
 fn initialize_cursor(red: u8, green: u8, blue: u8, size: usize, display: Capability<Display>) {
-    let image = unsafe { &mut *map_shared(display.cursor_image_buffer()) };
+    let image = unsafe { &mut (*map_shared(display.cursor_image_buffer())).0 };
     assert_eq!(image.len(), 4 * 64 * 64);
     for y in 0..size.min(63) {
         for x in 0..size.min(63) {
