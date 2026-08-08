@@ -7,6 +7,9 @@ pub struct PageAligned<T: ?Sized>(pub T);
 pub const CACHE_LINE_SIZE: usize = 64;
 
 pub const PAGE_SIZE: usize = 4096;
+pub const PAGE_TABLE_ENTRY_COUNT: usize = PAGE_SIZE / size_of::<usize>();
+pub const LEVEL_1_PAGE_SIZE: usize = PAGE_TABLE_ENTRY_COUNT * PAGE_SIZE;
+pub const LEVEL_2_PAGE_SIZE: usize = PAGE_TABLE_ENTRY_COUNT * LEVEL_1_PAGE_SIZE;
 
 impl PageAligned<[u8]> {
     pub fn cast<T>(ptr: *const PageAligned<[u8]>) -> *const [T] {

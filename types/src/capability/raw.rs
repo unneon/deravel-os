@@ -1,6 +1,5 @@
-use crate::capability::pages::{
-    CAPABILITIES_END, CAPABILITIES_START, get_capability_certificate_page,
-};
+use crate::capability::pages::get_capability_certificate_page;
+use crate::memory::USER_CAPABILITIES;
 use crate::{Actor, CapabilityCertificate, CapabilityCertificateUnpacked, PAGE_SIZE, ProcessId};
 use core::sync::atomic::Ordering;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -26,7 +25,7 @@ impl RawCapability {
     }
 
     pub fn certifier(self) -> Actor {
-        let page_index = (self.as_usize() - CAPABILITIES_START) / PAGE_SIZE;
+        let page_index = (self.as_usize() - USER_CAPABILITIES.start) / PAGE_SIZE;
         if page_index == 0 {
             Actor::Kernel
         } else {
@@ -142,7 +141,7 @@ impl core::fmt::Display for InvalidCapabilityError {
 }
 
 fn is_ptr_valid(maybe_cap: *const CapabilityCertificate) -> bool {
-    let in_range = (CAPABILITIES_START..CAPABILITIES_END).contains(&(maybe_cap as usize));
+    let in_range = USER_CAPABILITIES.contains(&(maybe_cap as usize));
     let aligned = maybe_cap.is_aligned();
     in_range && aligned
 }

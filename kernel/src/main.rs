@@ -368,7 +368,7 @@ impl SyscallHandler for () {
                 let ring_buffer_layout =
                     Layout::from_size_align(ring_buffer_size, PAGE_SIZE).unwrap();
 
-                let virt = proc.virtual_memory.alloc(ring_buffer_layout).unwrap();
+                let virt = proc.heap.alloc(ring_buffer_layout).unwrap();
                 proc.page_table.map_pages(
                     virt,
                     virt_to_phys(ring_buffer as *const _ as *const u8) as usize,
@@ -422,7 +422,7 @@ impl SyscallHandler for () {
         let padded_length = length.next_multiple_of(PAGE_SIZE);
         let layout = Layout::from_size_align(padded_length, PAGE_SIZE).unwrap();
 
-        let virt = proc.virtual_memory.alloc(layout).unwrap();
+        let virt = proc.heap.alloc(layout).unwrap();
         let proc = proc.deref_mut();
         handler.shared_memory_map(
             virt,

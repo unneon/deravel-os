@@ -4,6 +4,7 @@ use crate::process::Process;
 use crate::util::untyped_box::UntypedBox;
 use alloc::sync::Arc;
 use deravel_types::PAGE_SIZE;
+use deravel_types::memory::USER_ELF;
 use elf::ElfBytes;
 use elf::abi::{EM_RISCV, ET_EXEC, PF_R, PF_W, PF_X, PT_LOAD};
 use elf::endian::LittleEndian;
@@ -17,9 +18,6 @@ pub macro elf($env:literal) {{
         &ELF.0
     }
 }}
-
-const USER_START: usize = 0x1000000;
-const USER_END: usize = 0x2000000;
 
 pub fn load_elf(elf_bytes: &[u8], proc: &mut Process) {
     let elf = ElfBytes::<LittleEndian>::minimal_parse(elf_bytes).unwrap();
@@ -39,10 +37,10 @@ pub fn load_elf(elf_bytes: &[u8], proc: &mut Process) {
         }
 
         assert!(segment.p_vaddr.is_multiple_of(PAGE_SIZE as u64));
-        assert!(segment.p_vaddr as usize >= USER_START);
+        assert!(segment.p_vaddr as usize >= USER_ELF.start);
         assert!(segment.p_filesz <= segment.p_memsz);
-        assert!(segment.p_memsz as usize <= USER_END - USER_START);
-        assert!(segment.p_vaddr + segment.p_memsz <= USER_END as u64);
+        assert!(segment.p_memsz as usize <= USER_ELF.end - USER_ELF.start);
+        assert!(segment.p_vaddr + segment.p_memsz <= USER_ELF.end as u64);
         assert_eq!(segment.p_align, PAGE_SIZE as u64);
 
         let data = elf.segment_data(&segment).unwrap();

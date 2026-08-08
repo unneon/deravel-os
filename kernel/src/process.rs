@@ -22,7 +22,7 @@ use alloc::vec::Vec;
 use core::num::NonZeroUsize;
 use core::ops::Range;
 use core::sync::atomic::{AtomicU16, Ordering};
-use deravel_types::memory::{USER_INPUTS, USER_STACK};
+use deravel_types::memory::{USER_CAPABILITIES, USER_HEAP, USER_INPUTS, USER_STACK};
 use deravel_types::*;
 use log::*;
 
@@ -72,7 +72,7 @@ pub struct Process {
     pub registers: RiscvRegisters,
     pub pc: usize,
     pub page_table: Box<TopPageTable>,
-    pub virtual_memory: BuddyAllocator,
+    pub heap: BuddyAllocator,
     pub messages: VecDeque<Message, BuddyHeap>,
     pub currently_serving: Option<ProcessId>,
     allocated: Vec<(usize, Arc<UntypedBox<PageGranular>>)>,
@@ -99,7 +99,7 @@ static PROCESSES_RESERVED: AtomicU16 = AtomicU16::new(0);
 
 impl Process {
     pub fn alloc(&mut self, backing: Arc<UntypedBox<PageGranular>>, flags: PageFlags) -> *mut u8 {
-        let virt = self.virtual_memory.alloc(backing.layout()).unwrap();
+        let virt = self.heap.alloc(backing.layout()).unwrap();
         self.alloc_at(virt, backing, flags);
         virt as *mut u8
     }
@@ -129,7 +129,7 @@ impl Process {
             virt_to_phys(backing.as_untyped_ptr()) as usize,
             backing.byte_size(),
         );
-        self.virtual_memory.dealloc(virt, backing.layout());
+        self.heap.dealloc(virt, backing.layout());
         Ok(())
     }
 }
@@ -191,7 +191,7 @@ fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: Process
         },
         pc: 0,
         page_table: Box::new(PageTable::new()),
-        virtual_memory: BuddyAllocator::new(0x4000000..0x80000000),
+        heap: BuddyAllocator::new(USER_HEAP),
         messages: VecDeque::new_in(BuddyHeap),
         currently_serving: None,
         allocated: Vec::new(),
@@ -209,7 +209,7 @@ fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: Process
 }
 
 fn map_capability_memory(table: &mut TopPageTable, pid: ProcessId) {
-    let pre_v = CAPABILITIES_START;
+    let pre_v = USER_CAPABILITIES.start;
     let pre_p = capability_pages_physical_address();
     let own_v = pre_v + pid.as_u16() as usize * PAGE_SIZE;
     let own_p = pre_p + pid.as_u16() as usize * PAGE_SIZE;

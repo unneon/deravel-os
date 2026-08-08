@@ -1,12 +1,10 @@
 use crate::page::entry::{PageTableEntry, PageTableEntryUnpacked};
-use crate::page::{
-    MAX_PHYSICAL_ADDR, MAX_VIRTUAL_ADDR, PAGE_TABLE_ENTRY_COUNT, PageFlags, phys_to_virt,
-    virt_to_phys,
-};
+use crate::page::{PageFlags, phys_to_virt, virt_to_phys};
 use alloc::boxed::Box;
 use core::assert_matches;
 use core::ops::Range;
-use deravel_types::PAGE_SIZE;
+use deravel_types::memory::{PHYSICAL_ADDRESSES, VIRTUAL_ADDRESSES};
+use deravel_types::{PAGE_SIZE, PAGE_TABLE_ENTRY_COUNT};
 use log::*;
 
 #[repr(align(4096))]
@@ -218,11 +216,11 @@ impl TopPageTable {
     #[track_caller]
     pub fn map_pages(&mut self, virt: usize, phys: usize, size: usize, flags: PageFlags) {
         assert!(virt.is_multiple_of(PAGE_SIZE));
-        assert!(virt < MAX_VIRTUAL_ADDR);
-        assert!(virt + size <= MAX_VIRTUAL_ADDR);
+        assert!(virt < VIRTUAL_ADDRESSES.end);
+        assert!(virt + size <= VIRTUAL_ADDRESSES.end);
         assert!(phys.is_multiple_of(PAGE_SIZE));
-        assert!(phys < MAX_PHYSICAL_ADDR);
-        assert!(phys + size <= MAX_PHYSICAL_ADDR);
+        assert!(phys < PHYSICAL_ADDRESSES.end);
+        assert!(phys + size <= PHYSICAL_ADDRESSES.end);
         assert!(size.is_multiple_of(PAGE_SIZE));
         self.map_range(virt, phys, size, flags, PageTable::<1>::map_pages);
     }
@@ -230,11 +228,11 @@ impl TopPageTable {
     #[track_caller]
     pub fn unmap_pages(&mut self, virt: usize, phys: usize, size: usize) {
         assert!(virt.is_multiple_of(PAGE_SIZE));
-        assert!(virt < MAX_VIRTUAL_ADDR);
-        assert!(virt + size <= MAX_VIRTUAL_ADDR);
+        assert!(virt < VIRTUAL_ADDRESSES.end);
+        assert!(virt + size <= VIRTUAL_ADDRESSES.end);
         assert!(phys.is_multiple_of(PAGE_SIZE));
-        assert!(phys < MAX_PHYSICAL_ADDR);
-        assert!(phys + size <= MAX_PHYSICAL_ADDR);
+        assert!(phys < PHYSICAL_ADDRESSES.end);
+        assert!(phys + size <= PHYSICAL_ADDRESSES.end);
         assert!(size.is_multiple_of(PAGE_SIZE));
         self.unmap_range(virt, phys, size, PageTable::<1>::unmap_pages);
     }

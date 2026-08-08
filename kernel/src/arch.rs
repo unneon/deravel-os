@@ -102,7 +102,7 @@ pub fn switch_to_user(mut next: MutexGuard<Process>) -> Result<!, UserSyscallErr
             let handler = capability::get_handler(ring.local_index());
             let length = handler.shared_memory_size();
             let layout = Layout::from_size_align(length, PAGE_SIZE).unwrap();
-            let virt = next.virtual_memory.alloc(layout).unwrap();
+            let virt = next.heap.alloc(layout).unwrap();
             let next = next.deref_mut();
             handler.shared_memory_map(
                 virt,
