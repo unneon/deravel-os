@@ -18,6 +18,10 @@ SECTIONS {
     . = ALIGN(4096);
     readwrite_start = .;
 
+    .got :{
+        *(.got .got.*);
+    }
+
     .data :{
         *(.data .data.*);
     }

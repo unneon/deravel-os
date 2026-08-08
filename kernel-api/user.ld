@@ -9,6 +9,10 @@ SECTIONS {
         *(.rodata .rodata.*);
     }
 
+    .got : ALIGN(4096) {
+        *(.got .got.*);
+    }
+
     .data : ALIGN(4096) {
         *(.data .data.*);
     }
