@@ -93,9 +93,9 @@ extern "C" fn main(_hart_id: u64, dt_ptr: *const u8) -> ! {
     initialize_plic(&dt);
     enable_interrupts();
 
-    /*
-    let fat = reserve_process::<FatFs>(elf!("CARGO_BIN_FILE_DERAVEL_FILESYSTEM_FAT"));
-    let windowing = reserve_process::<Windowing>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_windowing"));
+    let fat = reserve_process::<FatFs>(elf!("deravel-filesystem-fat"));
+
+    let windowing = reserve_process::<Windowing>(elf!("windowing"));
 
     windowing.spawn(WindowingArgs {
         display: reserve_kernel_capability(virtio_gpu),
@@ -105,21 +105,20 @@ extern "C" fn main(_hart_id: u64, dt_ptr: *const u8) -> ! {
         image_viewer: reserve_kernel_capability(Box::leak(Box::new(ProcessSpawnerService::<
             ImageViewer,
         >::new(elf!(
-            "CARGO_BIN_FILE_DERAVEL_APPS_image_viewer"
+            "image_viewer"
         ))))),
         net: reserve_kernel_capability(virtio_net),
         shutdown: reserve_kernel_capability(&KernelShutdown),
         terminal: reserve_kernel_capability(Box::leak(Box::new(
-            ProcessSpawnerService::<Terminal>::new(elf!("CARGO_BIN_FILE_DERAVEL_APPS_terminal")),
+            ProcessSpawnerService::<Terminal>::new(elf!("terminal")),
         ))),
         shell: reserve_kernel_capability(Box::leak(Box::new(ProcessSpawnerService::<Shell>::new(
-            elf!("CARGO_BIN_FILE_DERAVEL_APPS_shell"),
+            elf!("shell"),
         )))),
     });
     fat.spawn(FatFsArgs {
         drive: reserve_kernel_capability(virtio_blk),
     });
-     */
 
     // TODO: initialize_hart_stack should take a callback and pass this with the correct lifetime.
     let hart = unsafe { &mut *(riscv::register::sscratch::read() as *mut UserCtx) };

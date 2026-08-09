@@ -1,9 +1,11 @@
 [unstable]
 bindeps = true
-build-std = ["alloc", "core"]
+build-std = ["alloc", "compiler_builtins", "core"]
+build-std-features = ["compiler-builtins-mem"]
+json-target-spec = true
 
-[build]
-target = "riscv64gc-unknown-none-elf"
+[target.riscv64gc-unknown-none-elf]
+runner = "kernel/qemu-wrapper.sh"
 rustflags = [
     "-C", "relocation-model=pie",
     "-C", "link-args=-pie",
@@ -11,5 +13,8 @@ rustflags = [
     "-C", "force-frame-pointers=yes",
 ]
 
-[target.riscv64gc-unknown-none-elf]
-runner = "kernel/qemu-wrapper.sh"
+[target.riscv64gc-unknown-deravel]
+rustflags = [
+    "-C", "relocation-model=static",
+    "-C", "force-frame-pointers=yes",
+]

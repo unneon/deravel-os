@@ -13,8 +13,18 @@ use elf::segment::ProgramHeader;
 
 pub macro elf($env:literal) {{
     {
-        const ELF: deravel_types::PageAligned<[u8; include_bytes!(env!($env)).len()]> =
-            deravel_types::PageAligned(*include_bytes!(env!($env)));
+        const ELF: deravel_types::PageAligned<
+            [u8; include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../target/riscv64gc-unknown-deravel/debug/",
+                $env
+            ))
+            .len()],
+        > = deravel_types::PageAligned(*include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../target/riscv64gc-unknown-deravel/debug/",
+            $env
+        )));
         &ELF.0
     }
 }}
