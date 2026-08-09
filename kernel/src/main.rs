@@ -93,6 +93,7 @@ extern "C" fn main(_hart_id: u64, dt_ptr: *const u8) -> ! {
     initialize_plic(&dt);
     enable_interrupts();
 
+    /*
     let fat = reserve_process::<FatFs>(elf!("CARGO_BIN_FILE_DERAVEL_FILESYSTEM_FAT"));
     let windowing = reserve_process::<Windowing>(elf!("CARGO_BIN_FILE_DERAVEL_APPS_windowing"));
 
@@ -118,6 +119,7 @@ extern "C" fn main(_hart_id: u64, dt_ptr: *const u8) -> ! {
     fat.spawn(FatFsArgs {
         drive: reserve_kernel_capability(virtio_blk),
     });
+     */
 
     // TODO: initialize_hart_stack should take a callback and pass this with the correct lifetime.
     let hart = unsafe { &mut *(riscv::register::sscratch::read() as *mut UserCtx) };

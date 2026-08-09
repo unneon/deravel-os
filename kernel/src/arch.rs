@@ -55,7 +55,7 @@ pub struct RiscvRegisters {
 const _: fn(&mut RiscvRegisters) -> ! = handle_kernel_trap;
 const _: fn(&mut UserCtx) -> ! = handle_user_trap;
 
-#[unsafe(link_section = ".text.boot")]
+#[unsafe(link_section = ".text.start")]
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
 unsafe extern "C" fn _start() -> ! {
@@ -63,6 +63,36 @@ unsafe extern "C" fn _start() -> ! {
         static mut early_stack_top: u8;
     }
     naked_asm!(
+        // Pointer to .rela.dyn, keep in sync with linker script.
+        "auipc t0, 0",
+        "add t0, t0, 512",
+
+        ".relocation_loop:",
+
+        // Load an Elf64_Rela.
+        "ld t1, 0(t0)", // r_offset: u64,
+        "ld t2, 8(t0)", // r_info: u64,
+        "ld t3, 16(t0)", // r_addend: i64,
+
+        // TODO: Find a sentinel value that's guaranteed to work.
+        "beqz t2, .finish_relocation_loop",
+
+        // Only do the relocation if r_info == R_RISCV_RELATIVE (3).
+        // TODO: Is masking necessary?
+        "li t4, 3",
+        "bne t2, t4, .skip_relocation",
+
+        "li t4, 0",
+        "add t5, t1, t4",
+        "add t6, t3, t4",
+        "sd t6, 0(t5)",
+
+        ".skip_relocation:",
+        "add t0, t0, 24",
+        "j .relocation_loop",
+
+        ".finish_relocation_loop:",
+
         "la sp, {early_stack_top}",
         "mv s0, a0",
         "mv s1, a1",
@@ -80,6 +110,7 @@ unsafe extern "C" fn _start() -> ! {
         "mv a0, s0",
         "mv a1, s1",
         "j {main}",
+
         early_stack_top = sym early_stack_top,
         clear_bss = sym clear_bss,
         initialize_early_memory_mapping = sym initialize_early_memory_mapping,

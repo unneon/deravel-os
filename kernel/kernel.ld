@@ -2,9 +2,20 @@ SECTIONS {
     . = 0x80200000;
     image_start = .;
 
-    .text :{
+    .text.start :{
+        KEEP(*(.text.start));
+        ASSERT(. <= image_start + 512, "_start too large");
+    }
+
+    . = image_start + 512;
+    .rela.dyn :{
+        *(.rela.dyn .rela.dyn.*);
+        FILL(0);
+        . += 24;
+    }
+
+    .text : ALIGN(4096) {
         text_start = .;
-        KEEP(*(.text.boot));
         *(.text .text.*);
         text_end = .;
     }

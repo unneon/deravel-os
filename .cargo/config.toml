@@ -1,9 +1,15 @@
 [unstable]
 bindeps = true
+build-std = ["alloc", "core"]
 
 [build]
 target = "riscv64gc-unknown-none-elf"
-rustflags = ["-C", "relocation-model=pic", "-C", "force-frame-pointers=yes"]
+rustflags = [
+    "-C", "relocation-model=pie",
+    "-C", "link-args=-pie",
+    "-C", "link-args=--no-dynamic-linker",
+    "-C", "force-frame-pointers=yes",
+]
 
 [target.riscv64gc-unknown-none-elf]
 runner = "kernel/qemu-wrapper.sh"
