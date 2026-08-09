@@ -287,14 +287,20 @@ fn find_runnable_process(user: Option<&UserCtx>) -> Option<MutexGuard<'static, P
 fn inspect_can_progress(proc: &mut Process) {
     if let ProcessState::WaitingForReply { from, .. } | ProcessState::WaitingForStreamMap { from } =
         &proc.state
-        && let Actor::Userspace(from) = from
+        && let Actor::Userspace(from) = *from
     {
-        let from = get_process(*from).lock_if_some().unwrap();
-        if matches!(from.state, ProcessState::Finished) {
+        let from_slot = get_process(from).lock_if_some();
+        if matches!(
+            from_slot.as_deref(),
+            None | Some(Process {
+                state: ProcessState::Finished,
+                ..
+            })
+        ) {
             proc.state = ProcessState::Finished;
             warn!(
-                "stopping {}{:?} waiting on finished {}{:?}",
-                proc.name, proc.id, from.name, from.id
+                "stopping {}{:?} waiting on finished {:?}",
+                proc.name, proc.id, from
             );
         }
     }
