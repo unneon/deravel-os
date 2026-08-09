@@ -19,13 +19,13 @@ enum Shortcut {
 
 struct Server {
     display: Capability<Display>,
-    display_width: usize,
-    display_height: usize,
+    display_width: u32,
+    display_height: u32,
     display_framebuffer: Framebuffer,
     windows: Vec<WindowData>,
     active_window: Option<usize>,
-    cursor_x: usize,
-    cursor_y: usize,
+    cursor_x: i32,
+    cursor_y: i32,
     fs: Capability<Filesystem>,
     image_viewer: Capability<ImageViewerSpawner>,
     net: Capability<Network>,
@@ -38,10 +38,10 @@ struct Server {
 }
 
 struct WindowData {
-    x: usize,
-    y: usize,
-    width: usize,
-    height: usize,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
     status: WindowStatus,
     framebuffer: Framebuffer,
     memory: Capability<SharedMemory>,
@@ -63,8 +63,12 @@ struct MouseTag;
 impl Server {
     fn draw_window(&mut self, window_id: usize) {
         let window = &self.windows[window_id];
-        self.display_framebuffer
-            .copy_rect(window.x, window.y, &window.framebuffer);
+        // TODO: Handle out of bounds.
+        self.display_framebuffer.copy_rect(
+            window.x as usize,
+            window.y as usize,
+            &window.framebuffer,
+        );
     }
 }
 
@@ -73,14 +77,14 @@ impl WindowingServer for Server {
         &mut self,
         ctx: &mut Ctx<Self>,
         _: (),
-        width: usize,
-        height: usize,
+        width: u32,
+        height: u32,
     ) -> Capability<Window> {
         let window_id = self.windows.len();
-        let (framebuffer, memory) = Framebuffer::alloc(width, height);
+        let (framebuffer, memory) = Framebuffer::alloc(width as usize, height as usize);
         self.windows.push(WindowData {
-            x: self.cursor_x - width / 2,
-            y: self.cursor_y - height / 2,
+            x: self.cursor_x - width as i32 / 2,
+            y: self.cursor_y - height as i32 / 2,
             width,
             height,
             status: WindowStatus::Open,
@@ -144,10 +148,16 @@ impl Observer<InputEvent, KeyboardTag> for Server {
                         let window = &mut self.windows[window_id];
                         window.status = WindowStatus::Closed;
                         self.display_framebuffer.fill_rect(
-                            window.x,
-                            window.y,
-                            window.x + window.width,
-                            window.y + window.height,
+                            window.x.max(0).min(self.display_width as i32) as usize,
+                            window.y.max(0).min(self.display_height as i32) as usize,
+                            (window.x + window.width as i32)
+                                .max(0)
+                                .min(self.display_width as i32)
+                                as usize,
+                            (window.y + window.height as i32)
+                                .max(0)
+                                .min(self.display_height as i32)
+                                as usize,
                             191,
                             215,
                             234,
@@ -175,9 +185,9 @@ impl Observer<InputEvent, MouseTag> for Server {
             if event.code == BTN_LEFT && event.value == 1 {
                 for (window_index, window) in self.windows.iter().enumerate() {
                     if self.cursor_x >= window.x
-                        && self.cursor_x < window.x + window.width
+                        && self.cursor_x < window.x + window.width as i32
                         && self.cursor_y >= window.y
-                        && self.cursor_y < window.y + window.height
+                        && self.cursor_y < window.y + window.height as i32
                         && window.status == WindowStatus::Open
                     {
                         self.active_window = Some(window_index);
@@ -185,17 +195,15 @@ impl Observer<InputEvent, MouseTag> for Server {
                 }
             }
         } else if event.type_ == EV_REL {
-            let delta = event.value as i32 as isize;
+            let delta = event.value as i32;
             if event.code == REL_X {
-                self.cursor_x = self
-                    .cursor_x
-                    .saturating_add_signed(delta)
-                    .min(self.display_width);
+                self.cursor_x = (self.cursor_x + delta)
+                    .max(0)
+                    .min(self.display_width as i32);
             } else if event.code == REL_Y {
-                self.cursor_y = self
-                    .cursor_y
-                    .saturating_add_signed(delta)
-                    .min(self.display_height);
+                self.cursor_y = (self.cursor_y + delta)
+                    .max(0)
+                    .min(self.display_height as i32);
             }
         } else if event.type_ == EV_ABS {
             if event.code == ABS_X {
@@ -211,11 +219,12 @@ impl Observer<InputEvent, MouseTag> for Server {
 }
 
 fn main(args: WindowingArgs) {
-    let width = args.display.width() as usize;
-    let height = args.display.height() as usize;
+    let width = args.display.width();
+    let height = args.display.height();
     info!("found a {width}x{height} display");
 
-    let mut framebuffer = Framebuffer::map(width, height, args.display.framebuffer());
+    let mut framebuffer =
+        Framebuffer::map(width as usize, height as usize, args.display.framebuffer());
     framebuffer.fill(191, 215, 234, 255);
     args.display.draw();
 
@@ -228,8 +237,8 @@ fn main(args: WindowingArgs) {
         display: args.display,
         windows: Vec::new(),
         active_window: None,
-        cursor_x: width / 2,
-        cursor_y: height / 2,
+        cursor_x: width as i32 / 2,
+        cursor_y: height as i32 / 2,
         fs: args.fs,
         image_viewer: args.image_viewer,
         net: args.net,
@@ -258,8 +267,8 @@ fn initialize_cursor(red: u8, green: u8, blue: u8, size: usize, display: Capabil
     display.cursor_image_modified()
 }
 
-fn from_abs(value: u32, info: &InputAbsinfo, res: usize) -> usize {
-    (((value - info.min) as u64 * res as u64) / (info.max - info.min) as u64) as usize
+fn from_abs(value: u32, info: &InputAbsinfo, res: u32) -> i32 {
+    (((value - info.min) as u64 * res as u64) / (info.max - info.min) as u64) as i32
 }
 
 app! { main }

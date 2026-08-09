@@ -58,7 +58,9 @@ fn main(args: ImageViewerArgs) {
         .min(min_height.div_ceil(image.height()));
     let window_width = image.width() * scale;
     let window_height = image.height() * scale;
-    let window = args.windowing.create_window(window_width, window_height);
+    let window = args
+        .windowing
+        .create_window(window_width as u32, window_height as u32);
     let mut framebuffer = Framebuffer::map(window_width, window_height, window.framebuffer());
     for y in 0..image.height() {
         for x in 0..image.width() {

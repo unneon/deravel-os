@@ -136,7 +136,7 @@ fn main(args: TerminalArgs) {
     let width = 400;
     let height = 300;
     let window = args.windowing.create_window(width, height);
-    let framebuffer = Framebuffer::map(width, height, window.framebuffer());
+    let framebuffer = Framebuffer::map(width as usize, height as usize, window.framebuffer());
     let mut renderer = Renderer {
         cursor_x: FONT.leftpad as i32,
         cursor_y: 0,
