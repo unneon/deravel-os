@@ -63,10 +63,9 @@ struct MouseTag;
 impl Server {
     fn draw_window(&mut self, window_id: usize) {
         let window = &self.windows[window_id];
-        // TODO: Handle out of bounds.
-        self.display_framebuffer.copy_rect(
-            window.x as usize,
-            window.y as usize,
+        self.display_framebuffer.copy_from_rect(
+            window.x as isize,
+            window.y as isize,
             &window.framebuffer,
         );
     }

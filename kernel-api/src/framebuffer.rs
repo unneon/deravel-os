@@ -58,15 +58,17 @@ impl Framebuffer {
         self.rows(y_start, y_end).fill(bgra(r, g, b, a))
     }
 
-    #[track_caller]
-    pub fn copy_rect(&mut self, offset_x: usize, offset_y: usize, rect: &Framebuffer) {
-        assert!(offset_x <= self.width);
-        assert!(offset_y <= self.height);
-        assert!(offset_x + rect.width <= self.width);
-        assert!(offset_y + rect.height <= self.height);
-        for rect_y in 0..rect.height {
-            let y = offset_y + rect_y;
-            self.row_mut(y)[offset_x..][..rect.width].copy_from_slice(rect.row(rect_y))
+    pub fn copy_from_rect(&mut self, offset_x: isize, offset_y: isize, rect: &Framebuffer) {
+        let min_rect_x = (-offset_x).max(0);
+        let min_rect_y = (-offset_y).max(0);
+        let max_rect_x = (self.width as isize - offset_x).min(rect.width as isize);
+        let max_rect_y = (self.height as isize - offset_y).min(rect.height as isize);
+        for rect_y in min_rect_y..max_rect_y {
+            self.row_mut((offset_y + rect_y) as usize)
+                [(offset_x + min_rect_x) as usize..(offset_x + max_rect_x) as usize]
+                .copy_from_slice(
+                    &rect.row(rect_y as usize)[min_rect_x as usize..max_rect_x as usize],
+                );
         }
     }
 
