@@ -34,11 +34,21 @@ pub macro kill {
             error!("killed {name}{pid:?}, {}", format_args!($($tt)*));
             proc.state = ProcessState::Finished;
             drop(proc);
-            crate::schedule_and_switch_to_userspace($user)
+            return Err(crate::syscall::SyscallAction::Yield);
         }
     },
     ($user:ident, $($tt:tt)*) => {
         kill!($user, $user.process(), $($tt)*)
+    }
+}
+
+pub macro kill_manual($user:ident, $($tt:tt)*) {
+    {
+        let mut proc = $user.process();
+        let pid = proc.id;
+        let name = proc.name;
+        error!("killed {name}{pid:?}, {}", format_args!($($tt)*));
+        proc.state = ProcessState::Finished;
     }
 }
 
@@ -247,14 +257,15 @@ fn map_user_stack(proc: &mut Process) {
     proc.alloc_at(USER_STACK.start, pages, PageFlags::read_write().user());
 }
 
-pub fn schedule_and_switch_to_userspace(user: &mut UserCtx) -> ! {
+pub unsafe fn schedule_and_switch_to_userspace(user: &mut UserCtx) -> ! {
     let Some(mut next) = find_runnable_process(Some(user)) else {
         shutdown()
     };
     user.set_process(&mut next);
-    let Err(err) = switch_to_user(next);
+    let Err(err) = unsafe { switch_to_user(next) };
     // TODO: Refactor recursion away.
-    kill!(user, "{err}");
+    kill_manual!(user, "{err}");
+    unsafe { schedule_and_switch_to_userspace(user) }
 }
 
 fn find_runnable_process(user: Option<&UserCtx>) -> Option<MutexGuard<'static, Process>> {

@@ -157,15 +157,17 @@ fn generate_syscall_trait(drvli: &Drvli, out: &mut String) {
                 == 1
             {
                 let return_type = return_type.rust(SyscallRet);
-                write!(out, " -> {return_type}").unwrap();
+                write!(out, " -> crate::syscall::Result<{return_type}>").unwrap();
             } else {
-                write!(out, " -> (").unwrap();
+                write!(out, " -> crate::syscall::Result<(").unwrap();
                 for ret_type in split_syscall_ret(return_type) {
                     let ret_type = ret_type.rust(SyscallRet);
                     write!(out, "{ret_type}, ").unwrap();
                 }
-                writeln!(out, "            )").unwrap();
+                writeln!(out, "            )>").unwrap();
             }
+        } else {
+            write!(out, " -> crate::syscall::Result<()>").unwrap();
         }
         writeln!(out, ";").unwrap();
     }
@@ -173,7 +175,7 @@ fn generate_syscall_trait(drvli: &Drvli, out: &mut String) {
 }
 
 fn generate_syscall_dispatch(drvli: &Drvli, out: &mut String) {
-    writeln!(out, "pub fn dispatch_syscall(registers: &mut RiscvRegisters, user: &mut UserCtx) -> Result<!, UserSyscallError> {{").unwrap();
+    writeln!(out, "pub fn dispatch_syscall(registers: &mut RiscvRegisters, user: &mut UserCtx) -> crate::syscall::Result<()> {{").unwrap();
     writeln!(out, "    #![allow(clippy::diverging_sub_expression)]").unwrap();
     writeln!(out, "    match registers.a6 {{").unwrap();
     for (syscall_number, syscall) in drvli.syscalls.iter().enumerate() {
@@ -208,7 +210,7 @@ fn generate_syscall_dispatch(drvli: &Drvli, out: &mut String) {
             used_arg_registers += split_syscall_arg(arg_type).count();
             write!(out, ", {value}").unwrap();
         }
-        writeln!(out, ");").unwrap();
+        writeln!(out, ")?;").unwrap();
         if let Some(return_type) = &syscall.return_type
             && return_type != &Type::Never
         {
@@ -238,10 +240,10 @@ fn generate_syscall_dispatch(drvli: &Drvli, out: &mut String) {
     }
     writeln!(
         out,
-        "        _ => return Err(UserSyscallError::InvalidSyscallNumber),"
+        "        _ => return Err(UserSyscallError::InvalidSyscallNumber.into()),"
     )
     .unwrap();
     writeln!(out, "    }}").unwrap();
-    writeln!(out, "    crate::arch::return_to_user(registers);").unwrap();
+    writeln!(out, "    Ok(())").unwrap();
     writeln!(out, "}}").unwrap();
 }

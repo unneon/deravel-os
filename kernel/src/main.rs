@@ -56,10 +56,11 @@ use crate::interrupt::INTERRUPTS;
 use crate::log::initialize_log;
 use crate::pci::initialize_all_pci;
 use crate::plic::{initialize_plic, plic_claim, plic_complete};
-use crate::process::{kill, reserve_process, schedule_and_switch_to_userspace};
+use crate::process::{kill_manual, reserve_process, schedule_and_switch_to_userspace};
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use crate::shutdown::KernelShutdown;
 use crate::stack::{UserCtx, initialize_kernel_stack};
+use crate::syscall::SyscallAction;
 use ::log::*;
 use core::panic::PanicInfo;
 use deravel_types::memory::USER_STACK_GUARD;
@@ -103,7 +104,7 @@ extern "C" fn main(_hart_id: u64, dt_ptr: *const u8) -> ! {
 
     // TODO: initialize_hart_stack should take a callback and pass this with the correct lifetime.
     let hart = unsafe { &mut *(riscv::register::sscratch::read() as *mut UserCtx) };
-    schedule_and_switch_to_userspace(hart);
+    unsafe { schedule_and_switch_to_userspace(hart) }
 }
 
 extern "C" fn handle_kernel_trap(_: &mut RiscvRegisters) -> ! {
@@ -130,11 +131,17 @@ extern "C" fn handle_user_trap(user: &mut UserCtx) -> ! {
     if scause == Ok(Trap::Exception(Exception::UserEnvCall)) {
         user.process().pc = user_pc + 4;
         unsafe { riscv::register::sepc::write(user_pc + 4) }
-        let Err(err) = dispatch_syscall(&mut registers, user);
-        kill!(user, "{err}");
+        match dispatch_syscall(&mut registers, user) {
+            Ok(()) => unsafe { return_to_user(&registers) },
+            Err(SyscallAction::UserErr(err)) => {
+                kill_manual!(user, "{err}");
+                unsafe { schedule_and_switch_to_userspace(user) }
+            }
+            Err(SyscallAction::Yield) => unsafe { schedule_and_switch_to_userspace(user) },
+        }
     } else if scause == Ok(Trap::Interrupt(Interrupt::SupervisorTimer)) {
         sbi::set_timer(u64::MAX);
-        return_to_user(&registers)
+        unsafe { return_to_user(&registers) }
     } else if scause == Ok(Trap::Interrupt(Interrupt::SupervisorExternal)) {
         let irq = plic_claim();
         for ie in &INTERRUPTS {
@@ -146,10 +153,11 @@ extern "C" fn handle_user_trap(user: &mut UserCtx) -> ! {
             }
         }
         plic_complete(irq);
-        return_to_user(&registers)
+        unsafe { return_to_user(&registers) }
     } else if is_page_fault(scause) {
         if USER_STACK_GUARD.contains(&stval) {
-            kill!(user, "stack overflow")
+            kill_manual!(user, "stack overflow");
+            unsafe { schedule_and_switch_to_userspace(user) }
         }
         let mut proc = user.process();
         if let Some(vmm) = proc
@@ -162,9 +170,11 @@ extern "C" fn handle_user_trap(user: &mut UserCtx) -> ! {
                 .load_page(vmm.0.start, page_index, &mut proc.page_table);
             drop(proc);
             riscv::asm::sfence_vma_all();
-            return_to_user(&registers)
+            unsafe { return_to_user(&registers) }
         }
-        kill!(user, proc, "forbidden access to {stval:#x}")
+        kill_manual!(user, "forbidden access to {stval:#x}");
+        drop(proc);
+        unsafe { schedule_and_switch_to_userspace(user) }
     } else {
         panic!("unexpected trap, scause {scause:?}, stval {stval:#x}, user pc {user_pc:#x}");
     }

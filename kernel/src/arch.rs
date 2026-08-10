@@ -187,7 +187,7 @@ pub fn enable_interrupts() {
     unsafe { riscv::register::sie::write(sie) }
 }
 
-pub fn switch_to_user(mut next: MutexGuard<Process>) -> Result<!, UserSyscallError> {
+pub unsafe fn switch_to_user(mut next: MutexGuard<Process>) -> Result<!, UserSyscallError> {
     unsafe { riscv::register::satp::write(satp(&next.page_table)) };
 
     // SFENCE.VMA is required after SATP write. (RISC-V Privileged 12.2.1).
@@ -235,10 +235,10 @@ pub fn switch_to_user(mut next: MutexGuard<Process>) -> Result<!, UserSyscallErr
     let registers = &next.registers as *const _;
     drop(next);
 
-    return_to_user(registers)
+    unsafe { return_to_user(registers) }
 }
 
-pub fn return_to_user(registers: *const RiscvRegisters) -> ! {
+pub unsafe fn return_to_user(registers: *const RiscvRegisters) -> ! {
     enable_user_trap_handler();
 
     unsafe {

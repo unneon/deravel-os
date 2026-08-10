@@ -3,9 +3,10 @@ use crate::drvli::SyscallHandler;
 use crate::heap::granularity::page_granular_vec;
 use crate::log::log_userspace;
 use crate::page::{PageFlags, virt_to_phys};
-use crate::process::{Message, ProcessState, get_process, kill, schedule_and_switch_to_userspace};
+use crate::process::{Message, ProcessState, get_process, kill};
 use crate::stack::UserCtx;
-use crate::user::UserPtr;
+use crate::syscall::SyscallAction::Yield;
+use crate::user::{UserPtr, UserSyscallError};
 use crate::util::untyped_box::UntypedBox;
 use crate::{capability, shared_memory};
 use alloc::boxed::Box;
@@ -19,10 +20,17 @@ use deravel_types::{
 };
 use log::Level;
 
+pub type Result<T> = core::result::Result<T, SyscallAction>;
+
+pub enum SyscallAction {
+    UserErr(UserSyscallError),
+    Yield,
+}
+
 impl SyscallHandler for () {
-    fn exit(user: &mut UserCtx) -> ! {
+    fn exit(user: &mut UserCtx) -> Result<!> {
         user.process().state = ProcessState::Finished;
-        schedule_and_switch_to_userspace(user);
+        Err(Yield)
     }
 
     fn ipc_call(
@@ -31,7 +39,7 @@ impl SyscallHandler for () {
         method: usize,
         args_buffer: UserPtr<[u8]>,
         mut result_buffer: UserPtr<[u8]>,
-    ) -> usize {
+    ) -> Result<usize> {
         let mut proc = user.process();
         let cap = match cap.validate(proc.id) {
             Ok(cap) => cap,
@@ -58,9 +66,7 @@ impl SyscallHandler for () {
                     sender: user.pid(),
                 });
 
-                drop(proc);
-                drop(dest);
-                schedule_and_switch_to_userspace(user);
+                Err(Yield)
             }
             Actor::Kernel => {
                 drop(proc);
@@ -69,7 +75,7 @@ impl SyscallHandler for () {
                 if let Err(err) = result_buffer.write_to_user(&result) {
                     kill!(user, "{err}")
                 };
-                result.len()
+                Ok(result.len())
             }
         }
     }
@@ -77,27 +83,27 @@ impl SyscallHandler for () {
     fn ipc_receive(
         user: &mut UserCtx,
         mut args: UserPtr<[u8]>,
-    ) -> (Option<RawCapability>, usize, usize, Option<ProcessId>) {
+    ) -> Result<(Option<RawCapability>, usize, usize, Option<ProcessId>)> {
         let mut proc = user.process();
         if proc.currently_serving.is_some() {
             kill!(user, proc, "ipc receive without replying to previous one")
         }
         let Some(message) = proc.messages.pop_front() else {
-            return (None, 0, 0, None);
+            return Ok((None, 0, 0, None));
         };
         if let Err(err) = args.write_to_user(&message.args) {
             kill!(user, proc, "{err}")
         };
         proc.currently_serving = Some(message.sender);
-        (
+        Ok((
             Some(message.cap),
             message.method,
             message.args.len(),
             Some(message.sender),
-        )
+        ))
     }
 
-    fn ipc_reply(user: &mut UserCtx, result: UserPtr<[u8]>) {
+    fn ipc_reply(user: &mut UserCtx, result: UserPtr<[u8]>) -> Result<()> {
         let mut proc = user.process();
         let Some(caller) = proc.currently_serving.take() else {
             kill!(user, proc, "ipc_reply called without matching ipc_serve")
@@ -115,6 +121,7 @@ impl SyscallHandler for () {
                 reply: result.copy_to_kernel(),
                 result_buffer: result_buffer.clone(),
             };
+            Ok(())
         } else if let ProcessState::WaitingForStreamMap { from } = caller.state {
             if from != Actor::Userspace(proc.id) {
                 kill!(user, proc, "replied to process waiting for someone else");
@@ -142,12 +149,17 @@ impl SyscallHandler for () {
                 ring,
                 declared_size,
             };
+            Ok(())
         } else {
             unimplemented!()
         }
     }
 
-    fn ipc_stream(user: &mut UserCtx, cap: RawCapability, stream: usize) -> (*mut (), usize) {
+    fn ipc_stream(
+        user: &mut UserCtx,
+        cap: RawCapability,
+        stream: usize,
+    ) -> Result<(*mut (), usize)> {
         let mut proc = user.process();
         let cap = match cap.validate(proc.id) {
             Ok(cap) => cap,
@@ -166,9 +178,7 @@ impl SyscallHandler for () {
                     sender: user.pid(),
                 });
 
-                drop(proc);
-                drop(dest);
-                schedule_and_switch_to_userspace(user);
+                Err(Yield)
             }
             Actor::Kernel => {
                 let handler = capability::get_handler(cap.local_index());
@@ -185,22 +195,25 @@ impl SyscallHandler for () {
                     PageFlags::read_write().user(),
                 );
                 riscv::asm::sfence_vma_all();
-                (virt as *mut (), ring_buffer.0.data.0.len())
+                Ok((virt as *mut (), ring_buffer.0.data.0.len()))
             }
         }
     }
 
-    fn alloc(user: &mut UserCtx, size: usize) -> *mut u8 {
+    fn alloc(user: &mut UserCtx, size: usize) -> Result<*mut u8> {
         let size = size.next_multiple_of(PAGE_SIZE);
         let pages = Arc::new(UntypedBox::new(
             page_granular_vec![0u8; size].into_boxed_slice(),
         ));
         let virt = user.process().alloc(pages, PageFlags::read_write().user());
         riscv::asm::sfence_vma_all();
-        virt
+        Ok(virt)
     }
 
-    fn alloc_shared(user: &mut UserCtx, size: usize) -> (*mut u8, Capability<SharedMemory>) {
+    fn alloc_shared(
+        user: &mut UserCtx,
+        size: usize,
+    ) -> Result<(*mut u8, Capability<SharedMemory>)> {
         let size = size.next_multiple_of(PAGE_SIZE);
         let pages = Arc::new(UntypedBox::new(
             page_granular_vec![0u8; size].into_boxed_slice(),
@@ -213,10 +226,10 @@ impl SyscallHandler for () {
             user.pid(),
             Box::leak(Box::new(shared_memory::SharedMemory { backing: pages })),
         );
-        (virt, cap)
+        Ok((virt, cap))
     }
 
-    fn map_shared(user: &mut UserCtx, cap: Capability<SharedMemory>) -> (*mut u8, usize) {
+    fn map_shared(user: &mut UserCtx, cap: Capability<SharedMemory>) -> Result<(*mut u8, usize)> {
         let mut proc = user.process();
         let cap = match cap.validate(proc.id) {
             Ok(cap) => cap,
@@ -240,21 +253,22 @@ impl SyscallHandler for () {
         );
         riscv::asm::sfence_vma_all();
 
-        (virt as *mut u8, length)
+        Ok((virt as *mut u8, length))
     }
 
-    fn free(user: &mut UserCtx, ptr: UserPtr<u8>) {
+    fn free(user: &mut UserCtx, ptr: UserPtr<u8>) -> Result<()> {
         let mut proc = user.process();
         if proc.dealloc(ptr.as_ptr()).is_err() {
             kill!(user, proc, "free of unallocated pointer")
         }
+        Ok(())
     }
 
-    fn yield_(user: &mut UserCtx) {
-        schedule_and_switch_to_userspace(user);
+    fn yield_(_: &mut UserCtx) -> Result<()> {
+        Err(Yield)
     }
 
-    fn log(user: &mut UserCtx, message: UserPtr<[u8]>, level: u64) {
+    fn log(user: &mut UserCtx, message: UserPtr<[u8]>, level: u64) -> Result<()> {
         let Ok(text) = String::from_utf8(message.copy_to_kernel()) else {
             kill!(user, "invalid utf-8")
         };
@@ -267,5 +281,12 @@ impl SyscallHandler for () {
             _ => kill!(user, "invalid log level"),
         };
         log_userspace(level, &user.process(), &text);
+        Ok(())
+    }
+}
+
+impl<T: Into<UserSyscallError>> From<T> for SyscallAction {
+    fn from(err: T) -> SyscallAction {
+        SyscallAction::UserErr(err.into())
     }
 }
