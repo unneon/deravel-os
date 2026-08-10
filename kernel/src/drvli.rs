@@ -2,7 +2,6 @@
 #![allow(clippy::let_unit_value)]
 #![allow(clippy::match_single_binding)]
 
-use crate::RiscvRegisters;
 use crate::capability::Handler;
 use crate::page::PageTable;
 use crate::stack::UserCtx;

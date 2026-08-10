@@ -56,10 +56,10 @@ use crate::interrupt::INTERRUPTS;
 use crate::log::initialize_log;
 use crate::pci::initialize_all_pci;
 use crate::plic::{initialize_plic, plic_claim, plic_complete};
-use crate::process::{kill_manual, reserve_process, schedule_and_switch_to_userspace};
+use crate::process::{kill, kill_manual, reserve_process, schedule_and_switch_to_userspace};
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use crate::shutdown::KernelShutdown;
-use crate::stack::{UserCtx, initialize_kernel_stack};
+use crate::stack::{UserCtx, UserStoredCtx, initialize_kernel_stack};
 use crate::syscall::SyscallAction;
 use ::log::*;
 use core::panic::PanicInfo;
@@ -103,7 +103,7 @@ extern "C" fn main(_hart_id: u64, dt_ptr: *const u8) -> ! {
     });
 
     // TODO: initialize_hart_stack should take a callback and pass this with the correct lifetime.
-    let hart = unsafe { &mut *(riscv::register::sscratch::read() as *mut UserCtx) };
+    let hart = unsafe { &mut *(riscv::register::sscratch::read() as *mut UserStoredCtx) };
     unsafe { schedule_and_switch_to_userspace(hart) }
 }
 
@@ -121,26 +121,40 @@ extern "C" fn handle_kernel_trap(_: &mut RiscvRegisters) -> ! {
 
 extern "C" fn handle_user_trap(user: &mut UserCtx) -> ! {
     enable_kernel_trap_handler();
+    match handle_user_trap_impl(user) {
+        Ok(()) => unsafe { return_to_user(&user.registers) },
+        Err(SyscallAction::UserErr(err)) => {
+            kill_manual!(user, "{err}");
+            unsafe { schedule_and_switch_to_userspace(&mut user.stored) }
+        }
+        Err(SyscallAction::Yield) => {
+            user.process().registers = user.registers;
+            unsafe { schedule_and_switch_to_userspace(&mut user.stored) }
+        }
+    }
+}
+
+fn handle_user_trap_impl(user: &mut UserCtx) -> Result<(), SyscallAction> {
     let scause = riscv::register::scause::read()
         .cause()
         .try_into::<Interrupt, Exception>();
     let stval = riscv::register::stval::read();
     let user_pc = riscv::register::sepc::read();
-    // TODO: Don't copy this to the stack.
-    let mut registers = user.process().registers.clone();
     if scause == Ok(Trap::Exception(Exception::UserEnvCall)) {
-        user.process().pc = user_pc + 4;
-        unsafe { riscv::register::sepc::write(user_pc + 4) }
-        match dispatch_syscall(&mut registers, user) {
-            Ok(()) => {}
-            Err(SyscallAction::UserErr(err)) => {
-                kill_manual!(user, "{err}");
-                unsafe { schedule_and_switch_to_userspace(user) }
+        match dispatch_syscall(user) {
+            Ok(()) => {
+                unsafe { riscv::register::sepc::write(user_pc + 4) }
+                Ok(())
             }
-            Err(SyscallAction::Yield) => unsafe { schedule_and_switch_to_userspace(user) },
+            Err(SyscallAction::UserErr(err)) => Err(err.into()),
+            Err(SyscallAction::Yield) => {
+                user.process().pc = user_pc + 4;
+                Err(SyscallAction::Yield)
+            }
         }
     } else if scause == Ok(Trap::Interrupt(Interrupt::SupervisorTimer)) {
         sbi::set_timer(u64::MAX);
+        Ok(())
     } else if scause == Ok(Trap::Interrupt(Interrupt::SupervisorExternal)) {
         let irq = plic_claim();
         for ie in &INTERRUPTS {
@@ -152,30 +166,31 @@ extern "C" fn handle_user_trap(user: &mut UserCtx) -> ! {
             }
         }
         plic_complete(irq);
+        Ok(())
     } else if is_page_fault(scause) {
-        if USER_STACK_GUARD.contains(&stval) {
-            kill_manual!(user, "stack overflow");
-            unsafe { schedule_and_switch_to_userspace(user) }
-        }
-        let mut proc = user.process();
-        let Some(vmm) = proc
-            .virtual_memory_mappings
-            .iter()
-            .find(|vmm| vmm.0.contains(&stval) && !proc.page_table.is_mapped(stval))
-        else {
-            kill_manual!(user, "forbidden access to {stval:#x}");
-            drop(proc);
-            unsafe { schedule_and_switch_to_userspace(user) }
-        };
-        let page_index = (stval - vmm.0.start) / PAGE_SIZE;
-        vmm.1
-            .load_page(vmm.0.start, page_index, &mut proc.page_table);
-        drop(proc);
-        riscv::asm::sfence_vma_all();
+        handle_page_fault(user, stval)
     } else {
         panic!("unexpected trap, scause {scause:?}, stval {stval:#x}, user pc {user_pc:#x}");
     }
-    unsafe { return_to_user(&registers) }
+}
+
+fn handle_page_fault(user: &mut UserCtx, stval: usize) -> Result<(), SyscallAction> {
+    if USER_STACK_GUARD.contains(&stval) {
+        kill!(user, "stack overflow")
+    }
+    let mut proc = user.process();
+    let Some(vmm) = proc
+        .virtual_memory_mappings
+        .iter()
+        .find(|vmm| vmm.0.contains(&stval) && !proc.page_table.is_mapped(stval))
+    else {
+        kill!(user, "forbidden access to {stval:#x}")
+    };
+    let page_index = (stval - vmm.0.start) / PAGE_SIZE;
+    vmm.1
+        .load_page(vmm.0.start, page_index, &mut proc.page_table);
+    riscv::asm::sfence_vma_all();
+    Ok(())
 }
 
 #[panic_handler]

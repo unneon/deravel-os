@@ -175,9 +175,13 @@ fn generate_syscall_trait(drvli: &Drvli, out: &mut String) {
 }
 
 fn generate_syscall_dispatch(drvli: &Drvli, out: &mut String) {
-    writeln!(out, "pub fn dispatch_syscall(registers: &mut RiscvRegisters, user: &mut UserCtx) -> crate::syscall::Result<()> {{").unwrap();
+    writeln!(
+        out,
+        "pub fn dispatch_syscall(user: &mut UserCtx) -> crate::syscall::Result<()> {{"
+    )
+    .unwrap();
     writeln!(out, "    #![allow(clippy::diverging_sub_expression)]").unwrap();
-    writeln!(out, "    match registers.a6 {{").unwrap();
+    writeln!(out, "    match user.registers.a6 {{").unwrap();
     for (syscall_number, syscall) in drvli.syscalls.iter().enumerate() {
         let syscall_name = rust_escape_name(syscall.name);
         writeln!(out, "        {syscall_number} => {{").unwrap();
@@ -190,20 +194,20 @@ fn generate_syscall_dispatch(drvli: &Drvli, out: &mut String) {
         for (arg_name, arg_type) in &syscall.args {
             let value = match arg_type {
                 Type::UntypedCapability => format!(
-                    "RawCapability::try_from(registers.a{used_arg_registers} as *const CapabilityCertificate)?"
+                    "RawCapability::try_from(user.registers.a{used_arg_registers} as *const CapabilityCertificate)?"
                 ),
                 Type::SharedMemory => format!(
-                    "unsafe {{ Capability::new(RawCapability::try_from(registers.a{used_arg_registers} as *const CapabilityCertificate)?) }}"
+                    "unsafe {{ Capability::new(RawCapability::try_from(user.registers.a{used_arg_registers} as *const CapabilityCertificate)?) }}"
                 ),
-                Type::U64 => format!("registers.a{used_arg_registers} as u64"),
-                Type::Usize => format!("registers.a{used_arg_registers}"),
+                Type::U64 => format!("user.registers.a{used_arg_registers} as u64"),
+                Type::Usize => format!("user.registers.a{used_arg_registers}"),
                 Type::Array(inner) | Type::ConstArray(inner) if **inner == Type::U8 => {
-                    let ap = format!("registers.a{used_arg_registers}");
-                    let as_ = format!("registers.a{}", used_arg_registers + 1);
+                    let ap = format!("user.registers.a{used_arg_registers}");
+                    let as_ = format!("user.registers.a{}", used_arg_registers + 1);
                     format!("UserPtr::from_slice({ap} as *mut u8, {as_})?")
                 }
                 Type::Ptr(inner) if **inner == Type::U8 => {
-                    format!("UserPtr::from_ptr(registers.a{used_arg_registers} as *mut u8)?")
+                    format!("UserPtr::from_ptr(user.registers.a{used_arg_registers} as *mut u8)?")
                 }
                 _ => unimplemented!("syscall argument {arg_name:?} {arg_type:?}"),
             };
@@ -223,14 +227,14 @@ fn generate_syscall_dispatch(drvli: &Drvli, out: &mut String) {
             {
                 writeln!(
                     out,
-                    "            registers.a0 = unsafe {{ to_reg(_result) }};"
+                    "            user.registers.a0 = unsafe {{ to_reg(_result) }};"
                 )
                 .unwrap();
             } else {
                 for (ret_register, _ret_type) in split_syscall_ret(return_type).enumerate() {
                     writeln!(
                         out,
-                        "            registers.a{ret_register} = unsafe {{ to_reg(_result.{ret_register}) }};"
+                        "            user.registers.a{ret_register} = unsafe {{ to_reg(_result.{ret_register}) }};"
                     )
                     .unwrap();
                 }

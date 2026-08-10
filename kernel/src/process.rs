@@ -9,7 +9,7 @@ use crate::heap::BuddyHeap;
 use crate::heap::granularity::{PageGranular, page_granular_vec};
 use crate::page::{PageFlags, PageTable, map_hh_direct_mapping, virt_to_phys};
 use crate::shutdown::shutdown;
-use crate::stack::UserCtx;
+use crate::stack::UserStoredCtx;
 use crate::sync::{Mutex, MutexGuard};
 use crate::user::UserPtr;
 use crate::util::untyped_box::UntypedBox;
@@ -45,6 +45,16 @@ pub macro kill {
 pub macro kill_manual($user:ident, $($tt:tt)*) {
     {
         let mut proc = $user.process();
+        let pid = proc.id;
+        let name = proc.name;
+        error!("killed {name}{pid:?}, {}", format_args!($($tt)*));
+        proc.state = ProcessState::Finished;
+    }
+}
+
+pub macro kill_by_pid($pid:expr, $($tt:tt)*) {
+    {
+        let mut proc = crate::process::get_process($pid).lock_if_some().unwrap();
         let pid = proc.id;
         let name = proc.name;
         error!("killed {name}{pid:?}, {}", format_args!($($tt)*));
@@ -257,18 +267,19 @@ fn map_user_stack(proc: &mut Process) {
     proc.alloc_at(USER_STACK.start, pages, PageFlags::read_write().user());
 }
 
-pub unsafe fn schedule_and_switch_to_userspace(user: &mut UserCtx) -> ! {
+pub unsafe fn schedule_and_switch_to_userspace(user: &mut UserStoredCtx) -> ! {
     let Some(mut next) = find_runnable_process(Some(user)) else {
         shutdown()
     };
     user.set_process(&mut next);
+    let next_pid = next.id;
     let Err(err) = unsafe { switch_to_user(next) };
     // TODO: Refactor recursion away.
-    kill_manual!(user, "{err}");
+    kill_by_pid!(next_pid, "{err}");
     unsafe { schedule_and_switch_to_userspace(user) }
 }
 
-fn find_runnable_process(user: Option<&UserCtx>) -> Option<MutexGuard<'static, Process>> {
+fn find_runnable_process(user: Option<&UserStoredCtx>) -> Option<MutexGuard<'static, Process>> {
     let scan_start = match user {
         Some(hart) => hart.pid().as_u16() + 1,
         None => 0,

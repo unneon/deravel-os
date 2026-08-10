@@ -6,30 +6,42 @@ use deravel_types::ProcessId;
 
 #[repr(C, align(4096))]
 struct KernelStack {
-    data: [u8; STACK_SIZE - size_of::<UserCtx>().next_multiple_of(16)],
-    ctx: UserCtx,
+    data: [u8; STACK_SIZE - size_of::<UserStoredCtx>().next_multiple_of(16)],
+    ctx: UserStoredCtx,
+}
+
+#[repr(C)]
+pub struct UserCtx {
+    pub registers: RiscvRegisters,
+    pub stored: UserStoredCtx,
 }
 
 #[repr(C, align(16))]
-pub struct UserCtx {
+pub struct UserStoredCtx {
     pid: ProcessId,
-    registers: *mut RiscvRegisters,
 }
+
+const _: () = assert!(size_of::<KernelStack>() == STACK_SIZE);
 
 const STACK_SIZE: usize = 32 * 1024;
 
 impl UserCtx {
     pub fn pid(&self) -> ProcessId {
-        self.pid
+        self.stored.pid
     }
 
     pub fn process(&self) -> MutexGuard<'_, Process> {
-        get_process(self.pid).lock_if_some().unwrap()
+        get_process(self.pid()).lock_if_some().unwrap()
+    }
+}
+
+impl UserStoredCtx {
+    pub fn pid(&self) -> ProcessId {
+        self.pid
     }
 
     pub fn set_process(&mut self, process: &mut Process) {
         self.pid = process.id;
-        self.registers = &raw mut process.registers;
     }
 }
 

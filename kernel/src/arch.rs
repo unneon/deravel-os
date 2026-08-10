@@ -17,7 +17,7 @@ use riscv::register::mtvec::TrapMode;
 use riscv::register::stvec::Stvec;
 
 #[repr(C)]
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct RiscvRegisters {
     pub ra: usize,
     pub sp: usize,
@@ -343,62 +343,45 @@ unsafe extern "C" fn user_trap_entry() -> ! {
 
         "csrrw sp, sscratch, sp",
 
-        // Unlike the normal implementation that saves registers to the stack, we want to save them
-        // straight to the process structure. But that means instead of just the stack pointer, we
-        // have a stack pointer and the RiscvRegisters pointer. So we temporarily store just ra and
-        // gp on the stack.
-        "addi sp, sp, -16",
+        "add sp, sp, -8 * 32",
         "sd ra, 8 * 0(sp)",
-        "sd gp, 8 * 1(sp)",
 
-        // See UserCtx definition in stack.rs. This can possibly be rewritten with offset_of for
-        // some type safety. In inline assembly... But for now, I think this is clearer. If it's
-        // wrong, nothing will work anyway.
-        "ld ra, 8 * 3(sp)",
+        "csrr ra, sscratch",
+        "sd ra, 8 * 1(sp)",
 
-        // Move ra and gp from stack to process structure.
-        "ld gp, 8 * 0(sp)",
-        "sd gp, 8 * 0(ra)",
-        "ld gp, 8 * 2(sp)",
-        "sd gp, 8 * 2(ra)",
-        "addi sp, sp, 16",
+        "sd gp, 8 * 2(sp)",
+        "sd tp, 8 * 3(sp)",
+        "sd t0, 8 * 4(sp)",
+        "sd t1, 8 * 5(sp)",
+        "sd t2, 8 * 6(sp)",
+        "sd s0, 8 * 7(sp)",
+        "sd s1, 8 * 8(sp)",
+        "sd a0, 8 * 9(sp)",
+        "sd a1, 8 * 10(sp)",
+        "sd a2, 8 * 11(sp)",
+        "sd a3, 8 * 12(sp)",
+        "sd a4, 8 * 13(sp)",
+        "sd a5, 8 * 14(sp)",
+        "sd a6, 8 * 15(sp)",
+        "sd a7, 8 * 16(sp)",
+        "sd s2, 8 * 17(sp)",
+        "sd s3, 8 * 18(sp)",
+        "sd s4, 8 * 19(sp)",
+        "sd s5, 8 * 20(sp)",
+        "sd s6, 8 * 21(sp)",
+        "sd s7, 8 * 22(sp)",
+        "sd s8, 8 * 23(sp)",
+        "sd s9, 8 * 24(sp)",
+        "sd s10, 8 * 25(sp)",
+        "sd s11, 8 * 26(sp)",
+        "sd t3, 8 * 27(sp)",
+        "sd t4, 8 * 28(sp)",
+        "sd t5, 8 * 29(sp)",
+        "sd t6, 8 * 30(sp)",
 
-        // Store the user sp.
-        "csrr gp, sscratch",
-        "sd gp, 8 * 1(ra)",
+        "add ra, sp, 8 * 32",
+        "csrw sscratch, ra",
 
-        // Store all the registers not involved in previous shenanigans.
-        "sd tp, 8 * 3(ra)",
-        "sd t0, 8 * 4(ra)",
-        "sd t1, 8 * 5(ra)",
-        "sd t2, 8 * 6(ra)",
-        "sd s0, 8 * 7(ra)",
-        "sd s1, 8 * 8(ra)",
-        "sd a0, 8 * 9(ra)",
-        "sd a1, 8 * 10(ra)",
-        "sd a2, 8 * 11(ra)",
-        "sd a3, 8 * 12(ra)",
-        "sd a4, 8 * 13(ra)",
-        "sd a5, 8 * 14(ra)",
-        "sd a6, 8 * 15(ra)",
-        "sd a7, 8 * 16(ra)",
-        "sd s2, 8 * 17(ra)",
-        "sd s3, 8 * 18(ra)",
-        "sd s4, 8 * 19(ra)",
-        "sd s5, 8 * 20(ra)",
-        "sd s6, 8 * 21(ra)",
-        "sd s7, 8 * 22(ra)",
-        "sd s8, 8 * 23(ra)",
-        "sd s9, 8 * 24(ra)",
-        "sd s10, 8 * 25(ra)",
-        "sd s11, 8 * 26(ra)",
-        "sd t3, 8 * 27(ra)",
-        "sd t4, 8 * 28(ra)",
-        "sd t5, 8 * 29(ra)",
-        "sd t6, 8 * 30(ra)",
-
-        // Restore the scratch register, and call into the handler.
-        "csrw sscratch, sp",
         "mv a0, sp",
         "j {handle_user_trap}",
 
