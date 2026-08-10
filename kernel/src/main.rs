@@ -52,10 +52,9 @@ use crate::heap::granularity::page_granular_vec;
 use crate::heap::{initialize_early_heap, initialize_heap};
 use crate::interrupt::INTERRUPTS;
 use crate::log::{initialize_log, log_userspace};
-use crate::page::{PageFlags, initialize_late_memory_mapping, virt_to_phys};
+use crate::page::{PageFlags, virt_to_phys};
 use crate::pci::initialize_all_pci;
 use crate::plic::{initialize_plic, plic_claim, plic_complete};
-use crate::process::spawner::ProcessSpawnerService;
 use crate::process::{
     Message, ProcessState, get_process, kill, reserve_process, schedule_and_switch_to_userspace,
 };
@@ -93,28 +92,20 @@ extern "C" fn main(_hart_id: u64, dt_ptr: *const u8) -> ! {
     initialize_plic(&dt);
     enable_interrupts();
 
-    let fat = reserve_process::<FatFs>(elf!("deravel-filesystem-fat"));
+    let fat = reserve_process(elf!(FatFs, "deravel-filesystem-fat"));
 
-    let windowing = reserve_process::<Windowing>(elf!("windowing"));
+    let windowing = reserve_process(elf!(Windowing, "windowing"));
 
     windowing.spawn(WindowingArgs {
         display: reserve_kernel_capability(virtio_gpu),
         keyboard: reserve_kernel_capability(virtio_keyboard),
         mouse: reserve_kernel_capability(virtio_mouse),
         fs: fat.export,
-        image_viewer: reserve_kernel_capability(Box::leak(Box::new(ProcessSpawnerService::<
-            ImageViewer,
-        >::new(elf!(
-            "image_viewer"
-        ))))),
+        image_viewer: reserve_kernel_capability(elf!(ImageViewer, "image_viewer")),
         net: reserve_kernel_capability(virtio_net),
         shutdown: reserve_kernel_capability(&KernelShutdown),
-        terminal: reserve_kernel_capability(Box::leak(Box::new(
-            ProcessSpawnerService::<Terminal>::new(elf!("terminal")),
-        ))),
-        shell: reserve_kernel_capability(Box::leak(Box::new(ProcessSpawnerService::<Shell>::new(
-            elf!("shell"),
-        )))),
+        terminal: reserve_kernel_capability(elf!(Terminal, "terminal")),
+        shell: reserve_kernel_capability(elf!(Shell, "shell")),
     });
     fat.spawn(FatFsArgs {
         drive: reserve_kernel_capability(virtio_blk),

@@ -15,7 +15,7 @@ pub trait ProcessArgs: Debug + for<'a> Deserialize<'a> + Send + Sync {
     fn for_all(&self, f: impl FnMut(RawCapability));
 }
 
-pub trait ProcessTag {
+pub trait ProcessTag: 'static {
     type Args: ProcessArgs;
 
     type Export;

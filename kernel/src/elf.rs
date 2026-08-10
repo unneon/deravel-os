@@ -3,6 +3,7 @@ use crate::page::{PageFlags, virt_to_phys};
 use crate::process::Process;
 use crate::util::untyped_box::UntypedBox;
 use alloc::sync::Arc;
+use core::marker::PhantomData;
 use deravel_types::PAGE_SIZE;
 use deravel_types::memory::USER_ELF;
 use elf::ElfBytes;
@@ -11,26 +12,33 @@ use elf::endian::LittleEndian;
 use elf::file::Class;
 use elf::segment::ProgramHeader;
 
-pub macro elf($env:literal) {{
+pub macro elf($ty:ty, $env:literal) {{
     {
-        const ELF: deravel_types::PageAligned<
+        static ELF: &Elf<
+            $ty,
             [u8; include_bytes!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/../target/riscv64gc-unknown-deravel/debug/",
                 $env
             ))
             .len()],
-        > = deravel_types::PageAligned(*include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../target/riscv64gc-unknown-deravel/debug/",
-            $env
-        )));
-        &ELF.0
+        > = &Elf(
+            PhantomData,
+            *include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../target/riscv64gc-unknown-deravel/debug/",
+                $env
+            )),
+        );
+        ELF
     }
 }}
 
-pub fn load_elf(elf_bytes: &[u8], proc: &mut Process) {
-    let elf = ElfBytes::<LittleEndian>::minimal_parse(elf_bytes).unwrap();
+#[repr(align(4096))]
+pub struct Elf<T, U: ?Sized>(pub PhantomData<T>, pub U);
+
+pub fn load_elf<T, U: AsRef<[u8]>>(elf_bytes: &'static Elf<T, U>, proc: &mut Process) {
+    let elf = ElfBytes::<LittleEndian>::minimal_parse(elf_bytes.1.as_ref()).unwrap();
     assert_eq!(elf.ehdr.class, Class::ELF64);
     assert_eq!(elf.ehdr.endianness, LittleEndian);
     assert_eq!(elf.ehdr.version, 1);
@@ -65,7 +73,7 @@ pub fn load_elf(elf_bytes: &[u8], proc: &mut Process) {
             proc.alloc_at(segment.p_vaddr as usize, pages, flags);
         } else {
             assert!((data.as_ptr() as usize).is_multiple_of(PAGE_SIZE));
-            assert!(elf_data_is_zero_padded(&segment, elf_bytes));
+            assert!(elf_data_is_zero_padded(&segment, elf_bytes.1.as_ref()));
 
             proc.page_table.map(
                 segment.p_vaddr as usize,

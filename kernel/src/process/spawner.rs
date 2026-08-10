@@ -1,33 +1,19 @@
 use crate::capability::{Handler, capability_certificate};
+use crate::elf::Elf;
 use crate::page::PageTable;
 use crate::process::reserve_process;
 use crate::virtual_memory::VirtualMemoryRawMapping;
 use alloc::vec;
 use alloc::vec::Vec;
-use core::marker::PhantomData;
 use core::ops::Range;
 use core::sync::atomic::Ordering;
 use deravel_types::{
     Actor, CapabilityCertificateValue, ProcessArgs, ProcessId, ProcessTag, UntypedRingBuffer,
 };
 
-pub struct ProcessSpawnerService<T> {
-    elf: &'static [u8],
-    _phantom: PhantomData<T>,
-}
-
-impl<T: ProcessTag> ProcessSpawnerService<T> {
-    pub fn new(elf: &'static [u8]) -> ProcessSpawnerService<T> {
-        ProcessSpawnerService {
-            elf,
-            _phantom: PhantomData,
-        }
-    }
-}
-
-impl<T: ProcessTag> Handler<T::Spawner> for ProcessSpawnerService<T> {
-    fn call_method(&self, _: usize, args: &[u8], sender: ProcessId) -> Vec<u8> {
-        let reserve = reserve_process::<T>(self.elf);
+impl<T: ProcessTag, U: AsRef<[u8]>> Handler<T::Spawner> for Elf<T, U> {
+    fn call_method(&'static self, _: usize, args: &[u8], sender: ProcessId) -> Vec<u8> {
+        let reserve = reserve_process(self);
         let export = reserve.export;
         capability_certificate(*export).store(
             CapabilityCertificateValue::granted(sender),

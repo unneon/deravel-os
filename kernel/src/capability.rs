@@ -9,7 +9,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use deravel_types::*;
 
 pub trait Handler<T> {
-    fn call_method(&self, method: usize, args: &[u8], sender: ProcessId) -> Vec<u8>;
+    fn call_method(&'static self, method: usize, args: &[u8], sender: ProcessId) -> Vec<u8>;
 
     fn map_stream(&self, stream: usize) -> &'static UntypedRingBuffer;
 
@@ -24,7 +24,7 @@ pub trait Handler<T> {
 }
 
 pub trait RawHandler {
-    fn call_method(&self, method: usize, args: &[u8], sender: ProcessId) -> Vec<u8>;
+    fn call_method(&'static self, method: usize, args: &[u8], sender: ProcessId) -> Vec<u8>;
 
     fn map_stream(&self, stream: usize) -> &'static UntypedRingBuffer;
 
@@ -39,7 +39,7 @@ pub trait RawHandler {
 }
 
 #[repr(transparent)]
-struct TypedHandler<T, H>(H, PhantomData<T>);
+struct TypedHandler<T, H: ?Sized>(PhantomData<T>, H);
 
 static CAPABILITY_PAGES: [CapabilityPage; PROCESS_COUNT + 1] =
     [const { CapabilityPage([const { CapabilityCertificate::new() }; _]) }; _];
@@ -49,13 +49,13 @@ static ALLOCATED_COUNT: AtomicUsize = AtomicUsize::new(0);
 static HANDLERS: [Mutex<Option<&'static (dyn RawHandler + Sync)>>;
     PAGE_SIZE / size_of::<CapabilityCertificateValue>()] = [const { Mutex::new(None) }; _];
 
-impl<T, H: Handler<T>> RawHandler for TypedHandler<T, H> {
-    fn call_method(&self, method: usize, args: &[u8], sender: ProcessId) -> Vec<u8> {
-        self.0.call_method(method, args, sender)
+impl<T, H: Handler<T> + ?Sized> RawHandler for TypedHandler<T, H> {
+    fn call_method(&'static self, method: usize, args: &[u8], sender: ProcessId) -> Vec<u8> {
+        self.1.call_method(method, args, sender)
     }
 
     fn map_stream(&self, stream: usize) -> &'static UntypedRingBuffer {
-        self.0.map_stream(stream)
+        self.1.map_stream(stream)
     }
 
     fn shared_memory_map(
@@ -64,11 +64,11 @@ impl<T, H: Handler<T>> RawHandler for TypedHandler<T, H> {
         page_table: &mut PageTable,
         vmms: &mut Vec<(Range<usize>, &'static (dyn VirtualMemoryRawMapping + Sync))>,
     ) {
-        self.0.shared_memory_map(virt, page_table, vmms)
+        self.1.shared_memory_map(virt, page_table, vmms)
     }
 
     fn shared_memory_size(&self) -> usize {
-        self.0.shared_memory_size()
+        self.1.shared_memory_size()
     }
 }
 

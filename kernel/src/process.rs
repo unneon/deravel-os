@@ -4,7 +4,7 @@ use crate::arch::{RiscvRegisters, switch_to_user};
 use crate::buddy::BuddyAllocator;
 use crate::capability::{capability_certificate, capability_pages_physical_address};
 use crate::device_tree::timebase_frequency;
-use crate::elf::load_elf;
+use crate::elf::{Elf, load_elf};
 use crate::heap::BuddyHeap;
 use crate::heap::granularity::{PageGranular, page_granular_vec};
 use crate::page::{PageFlags, PageTable, map_hh_direct_mapping, map_kernel_image, virt_to_phys};
@@ -78,9 +78,9 @@ pub struct Process {
     pub virtual_memory_mappings: Vec<(Range<usize>, &'static (dyn VirtualMemoryRawMapping + Sync))>,
 }
 
-pub struct ProcessReservation<T: ProcessTag> {
+pub struct ProcessReservation<T: ProcessTag, U: 'static> {
     id: ProcessId,
-    elf: &'static [u8],
+    elf: &'static Elf<T, U>,
     pub export: Capability<T::Export>,
 }
 
@@ -133,7 +133,7 @@ impl Process {
     }
 }
 
-impl<T: ProcessTag> ProcessReservation<T> {
+impl<T: ProcessTag, U: AsRef<[u8]>> ProcessReservation<T, U> {
     pub fn spawn(self, args: T::Args) {
         args.for_all(|cap: RawCapability| {
             capability_certificate(cap).store(
@@ -142,8 +142,7 @@ impl<T: ProcessTag> ProcessReservation<T> {
             )
         });
 
-        create_process::<T>(
-            T::NAME,
+        create_process(
             self.elf,
             ProcessInputs {
                 id: self.id,
@@ -154,8 +153,7 @@ impl<T: ProcessTag> ProcessReservation<T> {
     }
 
     fn spawn_with_ready_caps(self, args: T::Args) {
-        create_process::<T>(
-            T::NAME,
+        create_process(
             self.elf,
             ProcessInputs {
                 id: self.id,
@@ -170,7 +168,9 @@ pub fn get_process(pid: ProcessId) -> &'static Mutex<Option<Process>> {
     &PROCESSES[pid.as_u16() as usize]
 }
 
-pub fn reserve_process<T: ProcessTag>(elf: &'static [u8]) -> ProcessReservation<T> {
+pub fn reserve_process<T: ProcessTag, U: AsRef<[u8]>>(
+    elf: &'static Elf<T, U>,
+) -> ProcessReservation<T, U> {
     let pid = ProcessId::new(PROCESSES_RESERVED.fetch_add(1, Ordering::Relaxed) + 1);
     ProcessReservation {
         id: pid,
@@ -179,10 +179,13 @@ pub fn reserve_process<T: ProcessTag>(elf: &'static [u8]) -> ProcessReservation<
     }
 }
 
-fn create_process<T: ProcessTag>(name: &'static str, elf: &[u8], inputs: ProcessInputs<T>) {
+fn create_process<T: ProcessTag, U: AsRef<[u8]>>(
+    elf: &'static Elf<T, U>,
+    inputs: ProcessInputs<T>,
+) {
     let mut proc = Process {
         id: inputs.id,
-        name,
+        name: T::NAME,
         state: ProcessState::Runnable,
         registers: RiscvRegisters {
             sp: USER_STACK.end,
