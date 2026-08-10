@@ -232,13 +232,13 @@ pub unsafe fn switch_to_user(mut next: MutexGuard<Process>) -> Result<!, UserSys
     status.set_spie(true);
     status.set_sum(true);
     unsafe { riscv::register::sstatus::write(status) };
-    let registers = &next.registers as *const _;
+    let registers = next.registers;
     drop(next);
 
-    unsafe { return_to_user(registers) }
+    unsafe { return_to_user(&registers) }
 }
 
-pub unsafe fn return_to_user(registers: *const RiscvRegisters) -> ! {
+pub unsafe fn return_to_user(registers: &RiscvRegisters) -> ! {
     enable_user_trap_handler();
 
     unsafe {

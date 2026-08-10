@@ -87,7 +87,6 @@ pub struct Process {
     pub id: ProcessId,
     pub name: &'static str,
     pub state: ProcessState,
-    // TODO: This gets overwritten on user trap, should have a wrapper type.
     pub registers: RiscvRegisters,
     pub pc: usize,
     pub page_table: Box<PageTable>,
