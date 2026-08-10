@@ -3,7 +3,7 @@ use crate::process::{Process, ProcessState};
 use crate::stack::UserCtx;
 use crate::sync::MutexGuard;
 use crate::user::UserSyscallError;
-use crate::{capability, handle_kernel_trap, handle_user_trap, main};
+use crate::{capability, main, on_kernel_trap, on_user_trap};
 use core::alloc::Layout;
 use core::arch::{asm, naked_asm};
 use core::mem::ManuallyDrop;
@@ -54,8 +54,8 @@ pub struct RiscvRegisters {
 
 // I don't think there's a better way to type-check this.
 const _: extern "C" fn(u64, *const u8) -> ! = main;
-const _: extern "C" fn(&mut RiscvRegisters) -> ! = handle_kernel_trap;
-const _: extern "C" fn(&mut UserCtx) -> ! = handle_user_trap;
+const _: extern "C" fn(&mut UserCtx) -> ! = on_user_trap;
+const _: extern "riscv-interrupt-s" fn() = on_kernel_trap;
 
 #[unsafe(link_section = ".text.start")]
 #[unsafe(naked)]
@@ -170,13 +170,13 @@ unsafe extern "C" fn _start() -> ! {
     )
 }
 
-pub fn enable_kernel_trap_handler() {
-    let address = supervisor_trap_entry as *const () as usize;
+pub fn enable_user_trap() {
+    let address = user_trap as *const () as usize;
     unsafe { riscv::register::stvec::write(Stvec::new(address, TrapMode::Direct)) }
 }
 
-pub fn enable_user_trap_handler() {
-    let address = user_trap_entry as *const () as usize;
+pub fn enable_kernel_trap() {
+    let address = on_kernel_trap as *const () as usize;
     unsafe { riscv::register::stvec::write(Stvec::new(address, TrapMode::Direct)) }
 }
 
@@ -239,8 +239,7 @@ pub unsafe fn switch_to_user(mut next: MutexGuard<Process>) -> Result<!, UserSys
 }
 
 pub unsafe fn return_to_user(registers: &RiscvRegisters) -> ! {
-    enable_user_trap_handler();
-
+    enable_user_trap();
     unsafe {
         asm!(
             "ld ra, 8 * 0(t6)",
@@ -282,62 +281,7 @@ pub unsafe fn return_to_user(registers: &RiscvRegisters) -> ! {
 }
 
 #[unsafe(naked)]
-unsafe extern "C" fn supervisor_trap_entry() -> ! {
-    naked_asm!(
-        ".align 4",
-
-        // TODO: Handle kernel stack overflow guard pages once I add them,
-
-        // As this trap was triggered while in supervisor mode, sp is as trustworthy as sscratch so
-        // we might as well use it to avoid complexity. We can also assume it is 16-byte aligend as
-        // per the RISC-V ABI. So, let's store the registers immediately below the stack (this also
-        // assumes no red zone, which is true on this target).
-
-        "addi sp, sp, -8 * 32",
-        "sd ra, 8 * 0(sp)",
-
-        "addi ra, sp, 8 * 32",
-        "sd ra, 8 * 1(sp)",
-
-        "sd gp, 8 * 2(sp)",
-        "sd tp, 8 * 3(sp)",
-        "sd t0, 8 * 4(sp)",
-        "sd t1, 8 * 5(sp)",
-        "sd t2, 8 * 6(sp)",
-        "sd s0, 8 * 7(sp)",
-        "sd s1, 8 * 8(sp)",
-        "sd a0, 8 * 9(sp)",
-        "sd a1, 8 * 10(sp)",
-        "sd a2, 8 * 11(sp)",
-        "sd a3, 8 * 12(sp)",
-        "sd a4, 8 * 13(sp)",
-        "sd a5, 8 * 14(sp)",
-        "sd a6, 8 * 15(sp)",
-        "sd a7, 8 * 16(sp)",
-        "sd s2, 8 * 17(sp)",
-        "sd s3, 8 * 18(sp)",
-        "sd s4, 8 * 19(sp)",
-        "sd s5, 8 * 20(sp)",
-        "sd s6, 8 * 21(sp)",
-        "sd s7, 8 * 22(sp)",
-        "sd s8, 8 * 23(sp)",
-        "sd s9, 8 * 24(sp)",
-        "sd s10, 8 * 25(sp)",
-        "sd s11, 8 * 26(sp)",
-        "sd t3, 8 * 27(sp)",
-        "sd t4, 8 * 28(sp)",
-        "sd t5, 8 * 29(sp)",
-        "sd t6, 8 * 30(sp)",
-
-        "mv a0, sp",
-        "j {handle_kernel_trap}",
-
-        handle_kernel_trap = sym handle_kernel_trap,
-    )
-}
-
-#[unsafe(naked)]
-unsafe extern "C" fn user_trap_entry() -> ! {
+unsafe extern "C" fn user_trap() -> ! {
     naked_asm!(
         ".align 4",
 
@@ -385,7 +329,7 @@ unsafe extern "C" fn user_trap_entry() -> ! {
         "mv a0, sp",
         "j {handle_user_trap}",
 
-        handle_user_trap = sym handle_user_trap,
+        handle_user_trap = sym on_user_trap,
     )
 }
 

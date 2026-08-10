@@ -1,3 +1,4 @@
+#![feature(abi_riscv_interrupt)]
 #![feature(allocator_api)]
 #![feature(arbitrary_self_types)]
 #![feature(atomic_ptr_null)]
@@ -44,9 +45,7 @@ mod util;
 mod virtio;
 mod virtual_memory;
 
-use crate::arch::{
-    RiscvRegisters, enable_interrupts, enable_kernel_trap_handler, is_page_fault, return_to_user,
-};
+use crate::arch::{enable_interrupts, enable_kernel_trap, is_page_fault, return_to_user};
 use crate::capability::reserve_kernel_capability;
 use crate::device_tree::initialize_timebase_frequency;
 use crate::drvli::dispatch_syscall;
@@ -71,7 +70,7 @@ use riscv::interrupt::supervisor::{Exception, Interrupt};
 
 extern "C" fn main(_hart_id: u64, dt_ptr: *const u8) -> ! {
     initialize_log();
-    enable_kernel_trap_handler();
+    enable_kernel_trap();
     initialize_early_heap();
     let dt = unsafe { Fdt::from_ptr(dt_ptr) }.unwrap();
     initialize_timebase_frequency(&dt);
@@ -107,21 +106,9 @@ extern "C" fn main(_hart_id: u64, dt_ptr: *const u8) -> ! {
     unsafe { schedule_and_switch_to_userspace(hart) }
 }
 
-extern "C" fn handle_kernel_trap(_: &mut RiscvRegisters) -> ! {
-    let scause = riscv::register::scause::read()
-        .cause()
-        .try_into::<Interrupt, Exception>();
-    let stval = riscv::register::stval::read();
-    let pc = riscv::register::sepc::read();
-
-    // TODO: Enable handling interrupts in kernel mode again.
-
-    panic!("unexpected kernel trap, scause {scause:?} stval {stval:#x} pc {pc:#x}");
-}
-
-extern "C" fn handle_user_trap(user: &mut UserCtx) -> ! {
-    enable_kernel_trap_handler();
-    match handle_user_trap_impl(user) {
+extern "C" fn on_user_trap(user: &mut UserCtx) -> ! {
+    enable_kernel_trap();
+    match on_user_trap_impl(user) {
         Ok(()) => unsafe { return_to_user(&user.registers) },
         Err(SyscallAction::UserErr(err)) => {
             kill_manual!(user, "{err}");
@@ -134,7 +121,7 @@ extern "C" fn handle_user_trap(user: &mut UserCtx) -> ! {
     }
 }
 
-fn handle_user_trap_impl(user: &mut UserCtx) -> Result<(), SyscallAction> {
+fn on_user_trap_impl(user: &mut UserCtx) -> Result<(), SyscallAction> {
     let scause = riscv::register::scause::read()
         .cause()
         .try_into::<Interrupt, Exception>();
@@ -191,6 +178,15 @@ fn handle_page_fault(user: &mut UserCtx, stval: usize) -> Result<(), SyscallActi
         .load_page(vmm.0.start, page_index, &mut proc.page_table);
     riscv::asm::sfence_vma_all();
     Ok(())
+}
+
+extern "riscv-interrupt-s" fn on_kernel_trap() {
+    let scause = riscv::register::scause::read()
+        .cause()
+        .try_into::<Interrupt, Exception>();
+    let stval = riscv::register::stval::read();
+    let pc = riscv::register::sepc::read();
+    panic!("unexpected kernel trap, scause {scause:?} stval {stval:#x} pc {pc:#x}");
 }
 
 #[panic_handler]
