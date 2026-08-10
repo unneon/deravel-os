@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+set -e
+
+cargo build --target riscv64gc-unknown-deravel.json --all --exclude deravel-kernel --exclude deravel-codegen
+
 if [[ "${DERAVEL_QEMU}" == *"-S"* ]] ; then
     DERAVEL_FULL_SCREEN=off
 else
