@@ -4,10 +4,15 @@ SECTIONS {
 
     .text.start :{
         KEEP(*(.text.start));
-        ASSERT(. <= image_start + 512, "_start too large");
+        ASSERT(. <= image_start + 4096, "_start too large");
     }
 
-    . = image_start + 512;
+    . = image_start + 4096;
+    .initial_page_table :{
+        FILL(0);
+        . += 4096;
+    }
+
     .rela.dyn :{
         *(.rela.dyn .rela.dyn.*);
         FILL(0);

@@ -1,6 +1,8 @@
 #![feature(allocator_api)]
 #![feature(arbitrary_self_types)]
 #![feature(atomic_ptr_null)]
+#![feature(const_convert)]
+#![feature(const_trait_impl)]
 #![feature(decl_macro)]
 #![feature(generic_const_exprs)]
 #![feature(iter_intersperse)]
@@ -80,7 +82,6 @@ use riscv::interrupt::supervisor::{Exception, Interrupt};
 extern "C" fn main(_hart_id: u64, dt_ptr: *const u8) -> ! {
     initialize_log();
     enable_kernel_trap_handler();
-    // initialize_late_memory_mapping();
     initialize_early_heap();
     let dt = unsafe { Fdt::from_ptr(dt_ptr) }.unwrap();
     initialize_timebase_frequency(&dt);

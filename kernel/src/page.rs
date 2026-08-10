@@ -1,7 +1,7 @@
 mod entry;
 mod table;
 
-pub use entry::PageFlags;
+pub use entry::{PageFlags, PageTableEntry};
 pub use table::PageTable;
 
 use crate::util::address::Address;
@@ -19,36 +19,10 @@ unsafe extern "C" {
     static image_end: u8;
 }
 
-static mut KERNEL_PAGE_TABLE: PageTable = PageTable::new();
-
-pub extern "C" fn initialize_early_memory_mapping() {
-    let table = unsafe { &mut *&raw mut KERNEL_PAGE_TABLE };
-    map_lh_direct_mapping(table);
-    map_hh_direct_mapping(table);
-
-    unsafe { riscv::register::satp::write(satp(table)) }
-}
-
-fn map_lh_direct_mapping(table: &mut PageTable) {
-    let virt = 0;
-    let size = DIRECT_MAPPING.end - DIRECT_MAPPING.start;
-    table.map(virt, 0, size, PageFlags::read_write_execute());
-}
-
 pub fn map_hh_direct_mapping(table: &mut PageTable) {
     let virt = DIRECT_MAPPING.start;
     let size = DIRECT_MAPPING.end - DIRECT_MAPPING.start;
     table.map(virt, 0, size, PageFlags::read_write_execute());
-}
-
-pub fn initialize_late_memory_mapping() {
-    let table = unsafe { &mut *&raw mut KERNEL_PAGE_TABLE };
-    unmap_lh_direct_mapping(table);
-    riscv::asm::sfence_vma_all();
-}
-
-fn unmap_lh_direct_mapping(table: &mut PageTable) {
-    table.unmap(0, 0, DIRECT_MAPPING.end - DIRECT_MAPPING.start);
 }
 
 pub fn map_kernel_image(table: &mut PageTable) {

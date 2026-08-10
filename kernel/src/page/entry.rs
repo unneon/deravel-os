@@ -53,7 +53,7 @@ impl PageFlags {
         PageFlags(PAGE_R | PAGE_X)
     }
 
-    pub fn read_write_execute() -> PageFlags {
+    pub const fn read_write_execute() -> PageFlags {
         PageFlags(PAGE_R | PAGE_W | PAGE_X)
     }
 
@@ -75,7 +75,7 @@ impl PageTableEntry {
         PageTableEntry(((virt_to_phys(Box::into_raw(table)) as usize / PAGE_SIZE) << 10) | PAGE_V)
     }
 
-    pub fn leaf(phys: usize, flags: PageFlags) -> PageTableEntry {
+    pub const fn leaf(phys: usize, flags: PageFlags) -> PageTableEntry {
         PageTableEntry(((phys / PAGE_SIZE) << 10) | PAGE_V | flags.0)
     }
 

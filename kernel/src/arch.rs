@@ -1,4 +1,4 @@
-use crate::page::{initialize_early_memory_mapping, satp, sign_extend};
+use crate::page::{PageFlags, PageTableEntry, satp, sign_extend};
 use crate::process::{Process, ProcessState};
 use crate::stack::UserCtx;
 use crate::sync::MutexGuard;
@@ -6,7 +6,9 @@ use crate::user::UserSyscallError;
 use crate::{capability, handle_kernel_trap, handle_user_trap, main};
 use core::alloc::Layout;
 use core::arch::{asm, naked_asm};
+use core::mem::ManuallyDrop;
 use core::ops::DerefMut;
+use deravel_types::LEVEL_2_PAGE_SIZE;
 use deravel_types::PAGE_SIZE;
 use deravel_types::memory::DIRECT_MAPPING;
 use riscv::interrupt::Trap;
@@ -63,9 +65,56 @@ unsafe extern "C" fn _start() -> ! {
         static mut early_stack_top: u8;
     }
     naked_asm!(
-        // Pointer to .rela.dyn, keep in sync with linker script.
-        "auipc t0, 0",
-        "add t0, t0, 512",
+        // Get the pointer to .initial_page_table. The layout needs to be guaranteed by the linker
+        // script, and using Rust sym arguments always seems to result in a dynamic relocation, even
+        // though it definitely could be static.
+
+        "auipc t0, 1",
+
+        // Initialize lower half as identity mapping. This is a workaround necessary so that the
+        // instruction pointer remains valid after writing the SATP register.
+
+        "li t1, {pte_first}",
+        "li t2, {pte_diff}",
+
+        ".map_lower_half:",
+
+        "sd t1, 0(t0)",
+        "add t0, t0, 8",
+        "add t1, t1, t2",
+
+        "and t3, t0, 2047",
+        "bnez t3, .map_lower_half",
+
+        // Initialize higher half as direct mapping. This is the mapping that will be used for
+        // relocations and whole lifetime of the kernel is general.
+
+        "li t1, {pte_first}",
+
+        ".map_higher_half:",
+
+        "sd t1, 0(t0)",
+        "add t0, t0, 8",
+        "add t1, t1, t2",
+
+        "and t3, t0, 2047",
+        "bnez t3, .map_higher_half",
+
+        // Enable SATP and switch instruction pointer to the higher half. The lower half mapping
+        // will no longer be necessary after this part.
+
+        "li t1, 8 << 60", // Sv39 mode
+        "srl t2, t0, 12", // Convert from a pointer to physical page number.
+        "add t2, t2, -1", // t0 iat the end of the page table, so -1 to PPN.
+        "or t1, t1, t2",
+        "csrw satp, t1",
+
+        "li t2, {direct_mapping_addend}",
+        "auipc t1, 0",
+        "add t1, t1, t2",
+        "jr t1, 10",
+
+        // TODO: Unmap the lower half.
 
         ".relocation_loop:",
 
@@ -83,6 +132,7 @@ unsafe extern "C" fn _start() -> ! {
         "bne t2, t4, .skip_relocation",
 
         "li t4, 0",
+        // "li t4, {direct_mapping_addend} - {base_address}",
         "add t5, t1, t4",
         "add t6, t3, t4",
         "sd t6, 0(t5)",
@@ -97,24 +147,23 @@ unsafe extern "C" fn _start() -> ! {
         "mv s0, a0",
         "mv s1, a1",
         "call {clear_bss}",
-        "call {initialize_early_memory_mapping}",
         "mv fp, x0",
 
-        "li a1, {hh}",
-        "auipc a0, 0",
-        "add a0, a0, a1",
+        "li a1, {direct_mapping_addend}",
         "add s1, s1, a1",
         "add sp, sp, a1",
-        "jr a0, 14",
 
         "mv a0, s0",
         "mv a1, s1",
         "j {main}",
 
+        pte_first = const ManuallyDrop::new(PageTableEntry::leaf(0, PageFlags::read_write_execute())).0,
+        pte_diff = const ManuallyDrop::new(PageTableEntry::leaf(LEVEL_2_PAGE_SIZE, PageFlags::read_write_execute())).0
+            - ManuallyDrop::new(PageTableEntry::leaf(0, PageFlags::read_write_execute())).0,
+        direct_mapping_addend = const sign_extend(DIRECT_MAPPING.start),
+        // base_address = const 0x8020_0000u64,
         early_stack_top = sym early_stack_top,
         clear_bss = sym clear_bss,
-        initialize_early_memory_mapping = sym initialize_early_memory_mapping,
-        hh = const sign_extend(DIRECT_MAPPING.start),
         main = sym main,
     )
 }
