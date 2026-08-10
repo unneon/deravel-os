@@ -132,7 +132,7 @@ extern "C" fn handle_user_trap(user: &mut UserCtx) -> ! {
         user.process().pc = user_pc + 4;
         unsafe { riscv::register::sepc::write(user_pc + 4) }
         match dispatch_syscall(&mut registers, user) {
-            Ok(()) => unsafe { return_to_user(&registers) },
+            Ok(()) => {}
             Err(SyscallAction::UserErr(err)) => {
                 kill_manual!(user, "{err}");
                 unsafe { schedule_and_switch_to_userspace(user) }
@@ -141,7 +141,6 @@ extern "C" fn handle_user_trap(user: &mut UserCtx) -> ! {
         }
     } else if scause == Ok(Trap::Interrupt(Interrupt::SupervisorTimer)) {
         sbi::set_timer(u64::MAX);
-        unsafe { return_to_user(&registers) }
     } else if scause == Ok(Trap::Interrupt(Interrupt::SupervisorExternal)) {
         let irq = plic_claim();
         for ie in &INTERRUPTS {
@@ -153,31 +152,30 @@ extern "C" fn handle_user_trap(user: &mut UserCtx) -> ! {
             }
         }
         plic_complete(irq);
-        unsafe { return_to_user(&registers) }
     } else if is_page_fault(scause) {
         if USER_STACK_GUARD.contains(&stval) {
             kill_manual!(user, "stack overflow");
             unsafe { schedule_and_switch_to_userspace(user) }
         }
         let mut proc = user.process();
-        if let Some(vmm) = proc
+        let Some(vmm) = proc
             .virtual_memory_mappings
             .iter()
             .find(|vmm| vmm.0.contains(&stval) && !proc.page_table.is_mapped(stval))
-        {
-            let page_index = (stval - vmm.0.start) / PAGE_SIZE;
-            vmm.1
-                .load_page(vmm.0.start, page_index, &mut proc.page_table);
+        else {
+            kill_manual!(user, "forbidden access to {stval:#x}");
             drop(proc);
-            riscv::asm::sfence_vma_all();
-            unsafe { return_to_user(&registers) }
-        }
-        kill_manual!(user, "forbidden access to {stval:#x}");
+            unsafe { schedule_and_switch_to_userspace(user) }
+        };
+        let page_index = (stval - vmm.0.start) / PAGE_SIZE;
+        vmm.1
+            .load_page(vmm.0.start, page_index, &mut proc.page_table);
         drop(proc);
-        unsafe { schedule_and_switch_to_userspace(user) }
+        riscv::asm::sfence_vma_all();
     } else {
         panic!("unexpected trap, scause {scause:?}, stval {stval:#x}, user pc {user_pc:#x}");
     }
+    unsafe { return_to_user(&registers) }
 }
 
 #[panic_handler]
