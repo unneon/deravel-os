@@ -14,7 +14,7 @@ pub const USER_ELF: Range<usize> = 0x100_0000..0x200_0000;
 
 pub const USER_CAPABILITIES: Range<usize> = 0x200_0000..0x400_0000;
 
-pub const USER_HEAP: Range<usize> = 0x400_0000..0x8000_0000;
+pub const USER_HEAP: Range<usize> = 0x400_0000..DIRECT_MAPPING.start;
 
 pub const PHYSICAL_ADDRESSES: Range<usize> = 0..VIRTUAL_ADDRESSES.end / 2;
 
