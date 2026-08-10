@@ -117,7 +117,7 @@ extern "C" fn main(_hart_id: u64, dt_ptr: *const u8) -> ! {
     schedule_and_switch_to_userspace(hart);
 }
 
-fn handle_kernel_trap(_: &mut RiscvRegisters) -> ! {
+extern "C" fn handle_kernel_trap(_: &mut RiscvRegisters) -> ! {
     let scause = riscv::register::scause::read()
         .cause()
         .try_into::<Interrupt, Exception>();
@@ -129,7 +129,7 @@ fn handle_kernel_trap(_: &mut RiscvRegisters) -> ! {
     panic!("unexpected kernel trap, scause {scause:?} stval {stval:#x} pc {pc:#x}");
 }
 
-fn handle_user_trap(user: &mut UserCtx) -> ! {
+extern "C" fn handle_user_trap(user: &mut UserCtx) -> ! {
     enable_kernel_trap_handler();
     let scause = riscv::register::scause::read()
         .cause()

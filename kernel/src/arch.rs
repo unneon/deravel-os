@@ -52,22 +52,24 @@ pub struct RiscvRegisters {
     pub t6: usize,
 }
 
-// These check the type of symbol used in naked assembly blocks for trap entry handlers. I don't
-// think there's a better way to type-check this.
-const _: fn(&mut RiscvRegisters) -> ! = handle_kernel_trap;
-const _: fn(&mut UserCtx) -> ! = handle_user_trap;
+// I don't think there's a better way to type-check this.
+const _: extern "C" fn(u64, *const u8) -> ! = main;
+const _: extern "C" fn(&mut RiscvRegisters) -> ! = handle_kernel_trap;
+const _: extern "C" fn(&mut UserCtx) -> ! = handle_user_trap;
 
 #[unsafe(link_section = ".text.start")]
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
 unsafe extern "C" fn _start() -> ! {
     unsafe extern "C" {
-        static mut early_stack_top: u8;
+        static early_stack_top: u8;
+        static bss_start: u8;
+        static bss_end: u8;
     }
     naked_asm!(
-        // Get the pointer to .initial_page_table. The layout needs to be guaranteed by the linker
-        // script, and using Rust sym arguments always seems to result in a dynamic relocation, even
-        // though it definitely could be static.
+        // Get the pointer to the initial page table. The layout needs to be guaranteed by the
+        // linker script, and using Rust sym arguments always seems to result in a dynamic
+        // relocation, even though it definitely could be static.
 
         "auipc t0, 1",
 
@@ -80,9 +82,9 @@ unsafe extern "C" fn _start() -> ! {
         ".map_lower_half:",
 
         "sd t1, 0(t0)",
-        "add t0, t0, 8",
         "add t1, t1, t2",
 
+        "add t0, t0, 8",
         "and t3, t0, 2047",
         "bnez t3, .map_lower_half",
 
@@ -94,14 +96,15 @@ unsafe extern "C" fn _start() -> ! {
         ".map_higher_half:",
 
         "sd t1, 0(t0)",
-        "add t0, t0, 8",
         "add t1, t1, t2",
 
+        "add t0, t0, 8",
         "and t3, t0, 2047",
         "bnez t3, .map_higher_half",
 
-        // Enable SATP and switch instruction pointer to the higher half. The lower half mapping
-        // will no longer be necessary after this part.
+        // Enable SATP, switch instruction pointer to the higher half, and switch other long-held
+        // pointers to the higher half. The lower half mapping will no longer be used after this
+        // part.
 
         "li t1, 8 << 60", // Sv39 mode
         "srl t2, t0, 12", // Convert from a pointer to physical page number.
@@ -109,72 +112,62 @@ unsafe extern "C" fn _start() -> ! {
         "or t1, t1, t2",
         "csrw satp, t1",
 
-        "li t2, {direct_mapping_addend}",
+        "li t4, {direct_mapping_addend}",
+        "add a1, a1, t4",
+        "add t0, t0, t4",
         "auipc t1, 0",
-        "add t1, t1, t2",
+        "add t1, t1, t4",
         "jr t1, 10",
 
-        // TODO: Unmap the lower half.
+        // Go through the .rela.dyn section (it immediately follow the initial page table) and apply
+        // all the relocations. Apparently they are all R_RISCV_RELATIVE, which makes it easy. It's
+        // impossible to get the size of this table without a (relocation-requiring) symbol, so we
+        // use a value with r_info set to 0 as a sentinel.
 
-        ".relocation_loop:",
+        ".apply_relocations:",
 
-        // Load an Elf64_Rela.
         "ld t1, 0(t0)", // r_offset: u64,
         "ld t2, 8(t0)", // r_info: u64,
         "ld t3, 16(t0)", // r_addend: i64,
 
-        // TODO: Find a sentinel value that's guaranteed to work.
-        "beqz t2, .finish_relocation_loop",
+        "beqz t2, .apply_relocations_end",
 
-        // Only do the relocation if r_info == R_RISCV_RELATIVE (3).
-        // TODO: Is masking necessary?
-        "li t4, 3",
-        "bne t2, t4, .skip_relocation",
+        "add t1, t1, t4",
+        "add t3, t3, t4",
+        "sd t3, 0(t1)",
 
-        "li t4, 0",
-        // "li t4, {direct_mapping_addend} - {base_address}",
-        "add t5, t1, t4",
-        "add t6, t3, t4",
-        "sd t6, 0(t5)",
-
-        ".skip_relocation:",
         "add t0, t0, 24",
-        "j .relocation_loop",
+        "j .apply_relocations",
 
-        ".finish_relocation_loop:",
+        ".apply_relocations_end:",
+
+        // Clear the BSS section from assembly, so that all statics are initialized before we enter
+        // any Rust code at all.
+
+        "la t0, {bss_start}",
+        "la t1, {bss_end}",
+
+        ".clear_bss:",
+
+        "sd x0, 0(t0)",
+
+        "add t0, t0, 8",
+        "bne t0, t1, .clear_bss",
+
+        // The environment is done, load the early stack pointer and jump to main.
 
         "la sp, {early_stack_top}",
-        "mv s0, a0",
-        "mv s1, a1",
-        "call {clear_bss}",
-        "mv fp, x0",
-
-        "li a1, {direct_mapping_addend}",
-        "add s1, s1, a1",
-        "add sp, sp, a1",
-
-        "mv a0, s0",
-        "mv a1, s1",
         "j {main}",
 
         pte_first = const ManuallyDrop::new(PageTableEntry::leaf(0, PageFlags::read_write_execute())).0,
         pte_diff = const ManuallyDrop::new(PageTableEntry::leaf(LEVEL_2_PAGE_SIZE, PageFlags::read_write_execute())).0
             - ManuallyDrop::new(PageTableEntry::leaf(0, PageFlags::read_write_execute())).0,
         direct_mapping_addend = const sign_extend(DIRECT_MAPPING.start),
-        // base_address = const 0x8020_0000u64,
         early_stack_top = sym early_stack_top,
-        clear_bss = sym clear_bss,
+        bss_start = sym bss_start,
+        bss_end = sym bss_end,
         main = sym main,
     )
-}
-
-extern "C" fn clear_bss() {
-    unsafe extern "C" {
-        static mut bss_start: u8;
-        static mut bss_end: u8;
-    }
-    let bss = unsafe { core::slice::from_mut_ptr_range(&raw mut bss_start..&raw mut bss_end) };
-    bss.fill(0);
 }
 
 pub fn enable_kernel_trap_handler() {

@@ -7,7 +7,7 @@ use crate::device_tree::timebase_frequency;
 use crate::elf::{Elf, load_elf};
 use crate::heap::BuddyHeap;
 use crate::heap::granularity::{PageGranular, page_granular_vec};
-use crate::page::{PageFlags, PageTable, map_hh_direct_mapping, map_kernel_image, virt_to_phys};
+use crate::page::{PageFlags, PageTable, map_hh_direct_mapping, virt_to_phys};
 use crate::shutdown::shutdown;
 use crate::stack::UserCtx;
 use crate::sync::{Mutex, MutexGuard};
@@ -200,7 +200,6 @@ fn create_process<T: ProcessTag, U: AsRef<[u8]>>(
         virtual_memory_mappings: Vec::new(),
     };
     map_hh_direct_mapping(&mut proc.page_table);
-    map_kernel_image(&mut proc.page_table);
     load_elf(elf, &mut proc);
     map_capability_memory(&mut proc.page_table, proc.id);
     map_inputs_memory(&mut proc, inputs);

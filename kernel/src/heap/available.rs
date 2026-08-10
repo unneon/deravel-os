@@ -1,4 +1,4 @@
-use crate::page::phys_to_drmp;
+use crate::page::phys_to_virt;
 use alloc::vec::Vec;
 use core::iter::once;
 use core::ops::Range;
@@ -8,7 +8,7 @@ pub fn collect_available(dt: &Fdt) -> Vec<Range<*mut u8>> {
     dt.memory()
         .regions()
         .map(|reg| {
-            let start = phys_to_drmp(reg.starting_address as *mut u8);
+            let start = phys_to_virt(reg.starting_address as *mut u8);
             let end = start.wrapping_byte_add(reg.size.unwrap());
             start..end
         })
@@ -27,7 +27,7 @@ fn reserved_ranges_from_dt(dt: &Fdt) -> impl Iterator<Item = Range<*const u8>> {
         .children()
         .flat_map(|reserved| {
             reserved.reg().into_iter().flatten().map(|reg| {
-                let start = phys_to_drmp(reg.starting_address);
+                let start = phys_to_virt(reg.starting_address);
                 let end = start.wrapping_byte_add(reg.size.unwrap());
                 start..end
             })
@@ -39,7 +39,7 @@ fn reserved_kernel_range() -> Range<*const u8> {
         static image_start: u8;
         static image_end: u8;
     }
-    phys_to_drmp(&raw const image_start)..phys_to_drmp(&raw const image_end)
+    &raw const image_start..&raw const image_end
 }
 
 fn reserved_dt_memory(dt: &Fdt, dt_ptr: *const u8) -> Range<*const u8> {
