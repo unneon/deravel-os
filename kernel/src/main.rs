@@ -14,6 +14,7 @@
 #![allow(incomplete_features)]
 #![allow(clippy::deref_addrof)]
 #![allow(clippy::missing_safety_doc)]
+#![allow(clippy::never_loop)]
 #![allow(clippy::type_complexity)]
 #![no_std]
 #![no_main]
@@ -45,7 +46,10 @@ mod util;
 mod virtio;
 mod virtual_memory;
 
-use crate::arch::{enable_interrupts, enable_kernel_trap, is_page_fault, return_to_user};
+use crate::arch::{
+    initial_switch_to_userspace, initialize_early_trap, initialize_interrupts, is_page_fault,
+    return_to_userspace,
+};
 use crate::capability::reserve_kernel_capability;
 use crate::device_tree::initialize_timebase_frequency;
 use crate::drvli::dispatch_syscall;
@@ -55,10 +59,10 @@ use crate::interrupt::INTERRUPTS;
 use crate::log::initialize_log;
 use crate::pci::initialize_all_pci;
 use crate::plic::{initialize_plic, plic_claim, plic_complete};
-use crate::process::{kill, kill_manual, reserve_process, schedule_and_switch_to_userspace};
+use crate::process::{kill, kill_manual, reserve_process, schedule_userspace};
 use crate::sbi::{ResetReason, ResetType, log_sbi_metadata};
 use crate::shutdown::KernelShutdown;
-use crate::stack::{UserCtx, UserStoredCtx, initialize_kernel_stack};
+use crate::stack::UserCtx;
 use crate::syscall::SyscallAction;
 use ::log::*;
 use core::panic::PanicInfo;
@@ -70,22 +74,19 @@ use riscv::interrupt::supervisor::{Exception, Interrupt};
 
 extern "C" fn main(_hart_id: u64, dt_ptr: *const u8) -> ! {
     initialize_log();
-    enable_kernel_trap();
+    initialize_early_trap();
     initialize_early_heap();
     let dt = unsafe { Fdt::from_ptr(dt_ptr) }.unwrap();
     initialize_timebase_frequency(&dt);
     log_sbi_metadata();
     initialize_heap(&dt, dt_ptr);
-    initialize_kernel_stack();
     let (virtio_blk, virtio_net, virtio_gpu, virtio_keyboard, virtio_mouse) =
         initialize_all_pci(&dt);
     initialize_plic(&dt);
-    enable_interrupts();
+    initialize_interrupts();
 
     let fat = reserve_process(elf!(FatFs, "deravel-filesystem-fat"));
-
     let windowing = reserve_process(elf!(Windowing, "windowing"));
-
     windowing.spawn(WindowingArgs {
         display: reserve_kernel_capability(virtio_gpu),
         keyboard: reserve_kernel_capability(virtio_keyboard),
@@ -101,22 +102,19 @@ extern "C" fn main(_hart_id: u64, dt_ptr: *const u8) -> ! {
         drive: reserve_kernel_capability(virtio_blk),
     });
 
-    // TODO: initialize_hart_stack should take a callback and pass this with the correct lifetime.
-    let hart = unsafe { &mut *(riscv::register::sscratch::read() as *mut UserStoredCtx) };
-    unsafe { schedule_and_switch_to_userspace(hart) }
+    initial_switch_to_userspace();
 }
 
 extern "C" fn on_user_trap(user: &mut UserCtx) -> ! {
-    enable_kernel_trap();
     match on_user_trap_impl(user) {
-        Ok(()) => unsafe { return_to_user(&user.registers) },
+        Ok(()) => return_to_userspace(&user.registers),
         Err(SyscallAction::UserErr(err)) => {
             kill_manual!(user, "{err}");
-            unsafe { schedule_and_switch_to_userspace(&mut user.stored) }
+            schedule_userspace(&mut user.stored)
         }
         Err(SyscallAction::Yield) => {
             user.process().registers = user.registers;
-            unsafe { schedule_and_switch_to_userspace(&mut user.stored) }
+            schedule_userspace(&mut user.stored)
         }
     }
 }

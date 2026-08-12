@@ -1,15 +1,11 @@
 use crate::page::{PageFlags, PageTableEntry, satp, sign_extend};
-use crate::process::{Process, ProcessState};
-use crate::stack::UserCtx;
-use crate::sync::MutexGuard;
-use crate::user::UserSyscallError;
-use crate::{capability, main, on_kernel_trap, on_user_trap};
-use core::alloc::Layout;
+use crate::process::{Process, schedule_userspace};
+use crate::stack::{KernelStack, UserCtx, UserStoredCtx};
+use crate::{main, on_kernel_trap, on_user_trap};
+use alloc::boxed::Box;
 use core::arch::{asm, naked_asm};
 use core::mem::ManuallyDrop;
-use core::ops::DerefMut;
 use deravel_types::LEVEL_2_PAGE_SIZE;
-use deravel_types::PAGE_SIZE;
 use deravel_types::memory::DIRECT_MAPPING;
 use riscv::interrupt::Trap;
 use riscv::interrupt::supervisor::{Exception, Interrupt};
@@ -170,75 +166,39 @@ unsafe extern "C" fn _start() -> ! {
     )
 }
 
-pub fn enable_user_trap() {
-    let address = user_trap as *const () as usize;
-    unsafe { riscv::register::stvec::write(Stvec::new(address, TrapMode::Direct)) }
+pub fn initialize_early_trap() {
+    enable_kernel_trap();
 }
 
-pub fn enable_kernel_trap() {
-    let address = on_kernel_trap as *const () as usize;
-    unsafe { riscv::register::stvec::write(Stvec::new(address, TrapMode::Direct)) }
-}
-
-pub fn enable_interrupts() {
+pub fn initialize_interrupts() {
     let mut sie = riscv::register::sie::read();
     sie.set_sext(true);
     sie.set_stimer(true);
     unsafe { riscv::register::sie::write(sie) }
 }
 
-pub unsafe fn switch_to_user(mut next: MutexGuard<Process>) -> Result<!, UserSyscallError> {
-    unsafe { riscv::register::satp::write(satp(&next.page_table)) };
-
-    // SFENCE.VMA is required after SATP write. (RISC-V Privileged 12.2.1).
-    riscv::asm::sfence_vma_all();
-
-    match &mut next.state {
-        ProcessState::Runnable => {}
-        ProcessState::ReadyReply {
-            reply,
-            result_buffer,
-        } => {
-            result_buffer.write_to_user(reply)?;
-            next.registers.a0 = reply.len();
-            next.state = ProcessState::Runnable;
-        }
-        ProcessState::ReadyStreamMap {
-            ring,
-            declared_size,
-        } => {
-            let ring = *ring;
-            let declared_size = *declared_size;
-            let handler = capability::get_handler(ring.local_index());
-            let length = handler.shared_memory_size();
-            let layout = Layout::from_size_align(length, PAGE_SIZE).unwrap();
-            let virt = next.heap.alloc(layout).unwrap();
-            let next = next.deref_mut();
-            handler.shared_memory_map(
-                virt,
-                &mut next.page_table,
-                &mut next.virtual_memory_mappings,
-            );
-            riscv::asm::sfence_vma_all();
-            next.registers.a0 = virt;
-            next.registers.a1 = declared_size;
-            next.state = ProcessState::Runnable;
-        }
-        _ => panic!("can't switch to process with state {:?}", next.state),
-    }
-
-    unsafe { riscv::register::sepc::write(next.pc) };
+pub fn initial_switch_to_userspace() -> ! {
     let mut status = riscv::register::sstatus::read();
-    status.set_spie(true);
     status.set_sum(true);
     unsafe { riscv::register::sstatus::write(status) };
-    let registers = next.registers;
-    drop(next);
 
-    unsafe { return_to_user(&registers) }
+    let stack = KernelStack::new();
+    unsafe { riscv::register::sscratch::write(stack.as_sscratch()) }
+
+    let hart = &mut Box::leak(stack).ctx;
+    schedule_userspace(hart)
 }
 
-pub unsafe fn return_to_user(registers: &RiscvRegisters) -> ! {
+pub fn set_userspace_process(proc: &mut Process, user: &mut UserStoredCtx) {
+    unsafe { riscv::register::satp::write(satp(&proc.page_table)) };
+    riscv::asm::sfence_vma_all();
+
+    unsafe { riscv::register::sepc::write(proc.pc) }
+
+    user.set_process(proc);
+}
+
+pub fn return_to_userspace(registers: &RiscvRegisters) -> ! {
     enable_user_trap();
     unsafe {
         asm!(
@@ -326,11 +286,24 @@ unsafe extern "C" fn user_trap() -> ! {
         "add ra, sp, 8 * 32",
         "csrw sscratch, ra",
 
+        "call {enable_kernel_trap}",
+
         "mv a0, sp",
         "j {handle_user_trap}",
 
+        enable_kernel_trap = sym enable_kernel_trap,
         handle_user_trap = sym on_user_trap,
     )
+}
+
+extern "C" fn enable_kernel_trap() {
+    let address = on_kernel_trap as *const () as usize;
+    unsafe { riscv::register::stvec::write(Stvec::new(address, TrapMode::Direct)) }
+}
+
+fn enable_user_trap() {
+    let address = user_trap as *const () as usize;
+    unsafe { riscv::register::stvec::write(Stvec::new(address, TrapMode::Direct)) }
 }
 
 pub fn is_page_fault(r: riscv::result::Result<Trap<Interrupt, Exception>>) -> bool {

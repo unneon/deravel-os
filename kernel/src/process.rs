@@ -1,7 +1,8 @@
 pub mod spawner;
 
-use crate::arch::{RiscvRegisters, switch_to_user};
+use crate::arch::{RiscvRegisters, return_to_userspace, set_userspace_process};
 use crate::buddy::BuddyAllocator;
+use crate::capability;
 use crate::capability::{capability_certificate, capability_pages_physical_address};
 use crate::device_tree::timebase_frequency;
 use crate::elf::{Elf, load_elf};
@@ -11,15 +12,16 @@ use crate::page::{PageFlags, PageTable, map_hh_direct_mapping, virt_to_phys};
 use crate::shutdown::shutdown;
 use crate::stack::UserStoredCtx;
 use crate::sync::{Mutex, MutexGuard};
-use crate::user::UserPtr;
+use crate::user::{UserPtr, UserSyscallError};
 use crate::util::untyped_box::UntypedBox;
 use crate::virtual_memory::VirtualMemoryRawMapping;
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use core::alloc::Layout;
 use core::num::NonZeroUsize;
-use core::ops::Range;
+use core::ops::{DerefMut, Range};
 use core::sync::atomic::{AtomicU16, Ordering};
 use deravel_types::memory::{USER_CAPABILITIES, USER_HEAP, USER_INPUTS, USER_STACK};
 use deravel_types::*;
@@ -45,16 +47,6 @@ pub macro kill {
 pub macro kill_manual($user:ident, $($tt:tt)*) {
     {
         let mut proc = $user.process();
-        let pid = proc.id;
-        let name = proc.name;
-        error!("killed {name}{pid:?}, {}", format_args!($($tt)*));
-        proc.state = ProcessState::Finished;
-    }
-}
-
-pub macro kill_by_pid($pid:expr, $($tt:tt)*) {
-    {
-        let mut proc = crate::process::get_process($pid).lock_if_some().unwrap();
         let pid = proc.id;
         let name = proc.name;
         error!("killed {name}{pid:?}, {}", format_args!($($tt)*));
@@ -266,21 +258,20 @@ fn map_user_stack(proc: &mut Process) {
     proc.alloc_at(USER_STACK.start, pages, PageFlags::read_write().user());
 }
 
-pub unsafe fn schedule_and_switch_to_userspace(user: &mut UserStoredCtx) -> ! {
-    let Some(mut next) = find_runnable_process(Some(user)) else {
-        shutdown()
-    };
-    user.set_process(&mut next);
-    let next_pid = next.id;
-    let Err(err) = unsafe { switch_to_user(next) };
-    // TODO: Refactor recursion away.
-    kill_by_pid!(next_pid, "{err}");
-    unsafe { schedule_and_switch_to_userspace(user) }
+pub fn schedule_userspace(user: &mut UserStoredCtx) -> ! {
+    loop {
+        let Some(next) = find_runnable_process(user) else {
+            shutdown()
+        };
+        let Err(err) = resume_process(next, user);
+        kill_manual!(user, "{err}");
+        schedule_userspace(user)
+    }
 }
 
-fn find_runnable_process(user: Option<&UserStoredCtx>) -> Option<MutexGuard<'static, Process>> {
-    let scan_start = match user {
-        Some(hart) => hart.pid().as_u16() + 1,
+fn find_runnable_process(user: &UserStoredCtx) -> Option<MutexGuard<'static, Process>> {
+    let scan_start = match user.try_pid() {
+        Some(pid) => pid.as_u16() + 1,
         None => 0,
     };
 
@@ -327,4 +318,50 @@ fn inspect_can_progress(proc: &mut Process) {
             );
         }
     }
+}
+
+fn resume_process(
+    mut next: MutexGuard<Process>,
+    user: &mut UserStoredCtx,
+) -> Result<!, UserSyscallError> {
+    set_userspace_process(&mut next, user);
+
+    match &mut next.state {
+        ProcessState::Runnable => {}
+        ProcessState::ReadyReply {
+            reply,
+            result_buffer,
+        } => {
+            result_buffer.write_to_user(reply)?;
+            next.registers.a0 = reply.len();
+            next.state = ProcessState::Runnable;
+        }
+        ProcessState::ReadyStreamMap {
+            ring,
+            declared_size,
+        } => {
+            let ring = *ring;
+            let declared_size = *declared_size;
+            let handler = capability::get_handler(ring.local_index());
+            let length = handler.shared_memory_size();
+            let layout = Layout::from_size_align(length, PAGE_SIZE).unwrap();
+            let virt = next.heap.alloc(layout).unwrap();
+            let next = next.deref_mut();
+            handler.shared_memory_map(
+                virt,
+                &mut next.page_table,
+                &mut next.virtual_memory_mappings,
+            );
+            riscv::asm::sfence_vma_all();
+            next.registers.a0 = virt;
+            next.registers.a1 = declared_size;
+            next.state = ProcessState::Runnable;
+        }
+        _ => panic!("can't switch to process with state {:?}", next.state),
+    }
+
+    let registers = next.registers;
+    drop(next);
+
+    return_to_userspace(&registers)
 }
