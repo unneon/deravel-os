@@ -10,7 +10,6 @@ use crate::virtio::input::types::ConfigSelect;
 use crate::virtio::queue::Queue;
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK};
 use crate::virtio::{Capabilities, Isr};
-use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -54,8 +53,7 @@ impl VirtioInput {
         eventq.available.index = QUEUE_SIZE as u16;
         riscv::asm::fence();
 
-        // TODO: Remove allocation once I fugre out SBI physical address situation.
-        let name = config_str(&mut caps.device, ConfigSelect::IdName, 0).to_owned();
+        let name = config_str(&mut caps.device, ConfigSelect::IdName, 0);
         info!("found {name}");
 
         let ring = Box::leak(RingBuffer::new_single_page());
