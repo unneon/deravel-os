@@ -1,18 +1,18 @@
 use crate::page::phys_to_virt;
-use alloc::vec::Vec;
 use core::iter::once;
 use core::ops::Range;
 use fdt::Fdt;
 
-pub fn collect_available(dt: &Fdt) -> Vec<Range<*mut u8>> {
-    dt.memory()
-        .regions()
-        .map(|reg| {
+pub fn collect_available<'a>(dt: &'a Fdt<'a>) -> impl Iterator<Item = Range<*mut u8>> + 'a {
+    dt.find_node("/memory")
+        .unwrap()
+        .reg()
+        .unwrap()
+        .map(move |reg| {
             let start = phys_to_virt(reg.starting_address as *mut u8);
             let end = start.wrapping_byte_add(reg.size.unwrap());
             start..end
         })
-        .collect()
 }
 
 pub fn collect_reserved(dt: &Fdt, dt_ptr: *const u8) -> impl Iterator<Item = Range<*const u8>> {

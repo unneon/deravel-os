@@ -10,6 +10,7 @@ use crate::util::fmt::memory::fmt_memory;
 use core::alloc::{AllocError, Allocator, GlobalAlloc, Layout};
 use core::ptr::NonNull;
 use fdt::Fdt;
+use itertools::Itertools;
 use log::*;
 
 macro singleton_allocator($name:ident, $instance:path) {
@@ -77,9 +78,7 @@ pub fn initialize_early_heap() {
 }
 
 pub fn initialize_heap(dt: &Fdt, dt_ptr: *const u8) {
-    let available = collect_available(dt);
-    assert_eq!(available.len(), 1);
-    let available = available[0].clone();
+    let available = collect_available(dt).exactly_one().ok().unwrap();
     info!("found RAM {}", fmt_memory(&available));
 
     let mut buddy = unsafe { BuddyMemoryAllocator::new(available, EarlyBumpHeap) };
