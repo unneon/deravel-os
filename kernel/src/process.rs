@@ -18,7 +18,7 @@ use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::alloc::Layout;
+use core::alloc::{AllocError, Layout};
 use core::num::NonZeroUsize;
 use core::ops::{DerefMut, Range};
 use core::sync::atomic::{AtomicU16, Ordering};
@@ -107,10 +107,14 @@ static PROCESSES: [Mutex<Option<Process>>; PROCESS_COUNT] = [const { Mutex::new(
 static PROCESSES_RESERVED: AtomicU16 = AtomicU16::new(0);
 
 impl Process {
-    pub fn alloc(&mut self, backing: Arc<UntypedBox<PageGranular>>, flags: PageFlags) -> *mut u8 {
-        let virt = self.heap.alloc(backing.layout()).unwrap();
+    pub fn alloc(
+        &mut self,
+        backing: Arc<UntypedBox<PageGranular>>,
+        flags: PageFlags,
+    ) -> Result<*mut u8, AllocError> {
+        let virt = self.heap.alloc(backing.layout())?;
         self.alloc_at(virt, backing, flags);
-        virt as *mut u8
+        Ok(virt as *mut u8)
     }
 
     pub fn alloc_at(

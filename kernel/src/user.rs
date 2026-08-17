@@ -1,4 +1,6 @@
+use alloc::collections::TryReserveError;
 use alloc::vec::Vec;
+use core::alloc::AllocError;
 use core::ptr::NonNull;
 use deravel_types::InvalidCapabilityError;
 
@@ -20,6 +22,8 @@ pub struct UserSliceTooSmall;
 
 #[allow(clippy::enum_variant_names)]
 pub enum UserSyscallError {
+    Alloc(AllocError),
+    AllocTryReserve(TryReserveError),
     InvalidCapability(InvalidCapabilityError),
     InvalidPointer(UserPtrInvalid),
     InvalidSyscallNumber,
@@ -88,6 +92,18 @@ impl<T: ?Sized> Clone for UserPtr<T> {
     }
 }
 
+impl From<AllocError> for UserSyscallError {
+    fn from(err: AllocError) -> UserSyscallError {
+        UserSyscallError::Alloc(err)
+    }
+}
+
+impl From<TryReserveError> for UserSyscallError {
+    fn from(err: TryReserveError) -> UserSyscallError {
+        UserSyscallError::AllocTryReserve(err)
+    }
+}
+
 impl From<InvalidCapabilityError> for UserSyscallError {
     fn from(err: InvalidCapabilityError) -> UserSyscallError {
         UserSyscallError::InvalidCapability(err)
@@ -121,6 +137,8 @@ impl core::fmt::Display for UserSliceTooSmall {
 impl core::fmt::Display for UserSyscallError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
+            UserSyscallError::Alloc(err) => err.fmt(f),
+            UserSyscallError::AllocTryReserve(err) => err.fmt(f),
             UserSyscallError::InvalidCapability(err) => err.fmt(f),
             UserSyscallError::InvalidPointer(err) => err.fmt(f),
             UserSyscallError::InvalidSyscallNumber => f.write_str("invalid syscall number"),

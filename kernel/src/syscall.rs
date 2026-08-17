@@ -1,6 +1,6 @@
 use crate::capability::grant_kernel_capability;
 use crate::drvli::SyscallHandler;
-use crate::heap::granularity::page_granular_vec;
+use crate::heap::granularity::{PageGranular, page_granular_vec};
 use crate::log::log_userspace;
 use crate::page::{PageFlags, virt_to_phys};
 use crate::process::{Message, ProcessState, get_process, kill};
@@ -187,7 +187,7 @@ impl SyscallHandler for () {
                 let ring_buffer_layout =
                     Layout::from_size_align(ring_buffer_size, PAGE_SIZE).unwrap();
 
-                let virt = proc.heap.alloc(ring_buffer_layout).unwrap();
+                let virt = proc.heap.alloc(ring_buffer_layout)?;
                 proc.page_table.map(
                     virt,
                     virt_to_phys(ring_buffer as *const _ as *const u8) as usize,
@@ -202,10 +202,12 @@ impl SyscallHandler for () {
 
     fn alloc(user: &mut UserCtx, size: usize) -> Result<*mut u8> {
         let size = size.next_multiple_of(PAGE_SIZE);
-        let pages = Arc::new(UntypedBox::new(
-            page_granular_vec![0u8; size].into_boxed_slice(),
-        ));
-        let virt = user.process().alloc(pages, PageFlags::read_write().user());
+        let mut pages = Vec::try_with_capacity_in(size, PageGranular::new())?;
+        pages.resize(size, 0u8);
+        let pages = Arc::new(UntypedBox::new(pages.into_boxed_slice()));
+        let virt = user
+            .process()
+            .alloc(pages, PageFlags::read_write().user())?;
         riscv::asm::sfence_vma_all();
         Ok(virt)
     }
@@ -220,7 +222,7 @@ impl SyscallHandler for () {
         ));
         let virt = user
             .process()
-            .alloc(pages.clone(), PageFlags::read_write().user());
+            .alloc(pages.clone(), PageFlags::read_write().user())?;
         riscv::asm::sfence_vma_all();
         let cap = grant_kernel_capability(
             user.pid(),
@@ -244,7 +246,7 @@ impl SyscallHandler for () {
         let padded_length = length.next_multiple_of(PAGE_SIZE);
         let layout = Layout::from_size_align(padded_length, PAGE_SIZE).unwrap();
 
-        let virt = proc.heap.alloc(layout).unwrap();
+        let virt = proc.heap.alloc(layout)?;
         let proc = proc.deref_mut();
         handler.shared_memory_map(
             virt,
