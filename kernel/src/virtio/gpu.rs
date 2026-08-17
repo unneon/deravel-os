@@ -8,7 +8,7 @@ use crate::page::virt_to_phys;
 use crate::shared_memory;
 use crate::sync::Mutex;
 use crate::util::untyped_box::UntypedBox;
-use crate::util::volatile::volatile_struct;
+use crate::util::volatile::{Volatile, volatile_struct};
 use crate::virtio::gpu::types::*;
 use crate::virtio::queue::Queue;
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, features};
@@ -34,6 +34,7 @@ features! { VirtioGpu Features 0
 }
 
 pub struct VirtioGpu {
+    config: Volatile<'static, Config>,
     isr: Isr,
     controlq: Queue<0>,
     cursorq: Queue<1>,
@@ -55,6 +56,7 @@ impl VirtioGpu {
         common.device_status().write_bitor(STATUS_DRIVER_OK as u8);
 
         let mut gpu = VirtioGpu {
+            config: capabilities.device,
             isr: capabilities.isr,
             controlq,
             cursorq,
@@ -69,16 +71,7 @@ impl VirtioGpu {
             cursor_updated: true,
         };
 
-        let req = CtrlType::CmdGetDisplayInfo.header();
-        gpu.controlq.descriptor_readonly(0, &req, Some(1));
-        let resp: ResponseDisplayInfo = command(&mut gpu.controlq, 1).unwrap();
-        let pmode = &resp.pmodes[0];
-        assert_eq!(pmode.enabled, 1);
-        let r = pmode.r;
-        assert_eq!(r.x, 0);
-        assert_eq!(r.y, 0);
-        let width = r.width;
-        let height = r.height;
+        let (width, height) = gpu.get_resolution();
         gpu.width = width;
         gpu.height = height;
         gpu.framebuffer = Some(shared_memory::SharedMemory {
@@ -115,7 +108,12 @@ impl VirtioGpu {
 
         let req = SetScanout {
             hdr: CtrlType::CmdSetScanout.header(),
-            r,
+            r: Rect {
+                x: 0,
+                y: 0,
+                width,
+                height,
+            },
             scanout_id: 0,
             resource_id: 1,
         };
@@ -125,6 +123,18 @@ impl VirtioGpu {
         gpu.initialize_cursor_memory();
 
         gpu
+    }
+
+    fn get_resolution(&mut self) -> (u32, u32) {
+        let req = CtrlType::CmdGetDisplayInfo.header();
+        self.controlq.descriptor_readonly(0, &req, Some(1));
+        let resp: ResponseDisplayInfo = command(&mut self.controlq, 1).unwrap();
+        let pmode = &resp.pmodes[0];
+        assert_eq!(pmode.enabled, 1);
+        let r = pmode.r;
+        assert_eq!(r.x, 0);
+        assert_eq!(r.y, 0);
+        (r.width, r.height)
     }
 
     fn initialize_cursor_memory(&mut self) {
@@ -158,7 +168,16 @@ impl VirtioGpu {
 
 impl InterruptHandler for Mutex<VirtioGpu> {
     fn handle(&self) {
-        self.lock().isr.clear();
+        let mut self_ = self.lock();
+        let isr = self_.isr.clear();
+        if isr.has_device_configuration_interrupt() {
+            let events_read = self_.config.events_read().read();
+            if events_read & EVENT_DISPLAY != 0 {
+                self_.config.events_clear().write(EVENT_DISPLAY);
+                let (width, height) = self_.get_resolution();
+                info!("display configuration changed to {width}x{height}");
+            }
+        }
     }
 }
 

@@ -28,6 +28,8 @@ pub struct Isr {
     ptr: Volatile<'static, u8, Readonly>,
 }
 
+pub struct IsrValue(u8);
+
 pub struct NotifySlot {
     base: *mut u16,
     off_multiplier: u32,
@@ -78,8 +80,19 @@ const VIRTIO_PCI_CAP_ISR_CFG: u8 = 3;
 const VIRTIO_PCI_CAP_DEVICE_CFG: u8 = 4;
 
 impl Isr {
-    fn clear(&self) {
-        self.ptr.read();
+    fn clear(&self) -> IsrValue {
+        IsrValue(self.ptr.read())
+    }
+}
+
+impl IsrValue {
+    #[allow(dead_code)]
+    fn has_queue_interrupt(&self) -> bool {
+        self.0 & (1 << 0) != 0
+    }
+
+    fn has_device_configuration_interrupt(&self) -> bool {
+        self.0 & (1 << 1) != 0
     }
 }
 

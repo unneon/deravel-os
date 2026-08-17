@@ -185,6 +185,8 @@ pub struct UpdateCursor {
     pub padding: u32,
 }
 
+pub const EVENT_DISPLAY: u32 = 1 << 0;
+
 pub const FLAG_FENCE: u32 = 1 << 0;
 
 pub const MAX_SCANOUTS: usize = 16;
