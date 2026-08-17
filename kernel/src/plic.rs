@@ -2,6 +2,7 @@ use crate::page::phys_to_virt;
 use crate::util::volatile::{Volatile, volatile_struct};
 use core::sync::atomic::{AtomicPtr, Ordering};
 use fdt::Fdt;
+use fdt::node::FdtNode;
 
 volatile_struct! { Plic
     // 0x000000
@@ -47,13 +48,13 @@ pub fn plic_complete(irq: u32) {
     get_plic().contexts().index(1).claim_complete().write(irq);
 }
 
+pub fn plic_node<'a, 'b>(dt: &'b Fdt<'a>) -> Option<FdtNode<'a, 'b>> {
+    dt.find_node("/soc/interrupt-controller")
+        .or_else(|| dt.find_node("/soc/plic"))
+}
+
 fn find_plic(dt: &Fdt) -> Option<Volatile<'static, Plic>> {
-    let address = dt
-        .find_node("/soc/interrupt-controller")
-        .or_else(|| dt.find_node("/soc/plic"))?
-        .reg()?
-        .next()?
-        .starting_address;
+    let address = plic_node(dt)?.reg()?.next()?.starting_address;
     let address = phys_to_virt(address as *mut Plic);
     PLIC.store(address, Ordering::Relaxed);
     Some(unsafe { Volatile::new(address) })
@@ -66,8 +67,5 @@ fn get_plic() -> Volatile<'static, Plic> {
 }
 
 fn supported_external_interrupts(dt: &Fdt) -> Option<usize> {
-    dt.find_node("/soc/interrupt-controller")
-        .or_else(|| dt.find_node("/soc/plic"))?
-        .property("riscv,ndev")?
-        .as_usize()
+    plic_node(dt)?.property("riscv,ndev")?.as_usize()
 }

@@ -5,6 +5,7 @@ use crate::bump::BumpAllocator;
 use crate::interrupt::register_interrupt;
 use crate::page::phys_to_virt;
 use crate::pci::config::{Config, ConfigUntyped, GeneralDevice};
+use crate::plic::plic_node;
 use crate::sync::Mutex;
 use crate::virtio;
 use crate::virtio::blk::VirtioBlk;
@@ -46,10 +47,7 @@ pub fn initialize_all_pci(
 ) {
     let soc = dt.find_node("/soc").unwrap();
     let pci = dt.find_node("/soc/pci").unwrap();
-    let plic = dt
-        .find_node("/soc/interrupt-controller")
-        .or_else(|| dt.find_node("/soc/plic"))
-        .unwrap();
+    let plic = plic_node(dt).unwrap();
     let pci_ranges = find_pci_ranges(&soc, &pci);
     let mut io = BumpAllocator::new(0..pci_ranges.io.length);
     let mut mem32 = BumpAllocator::new(0..pci_ranges.mem32.length);
