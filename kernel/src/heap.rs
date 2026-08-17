@@ -5,6 +5,7 @@ pub mod granularity;
 pub mod stats;
 
 use crate::heap::available::{collect_available, collect_reserved};
+use crate::page::virt_to_phys;
 use crate::sync::Mutex;
 use crate::util::fmt::memory::fmt_memory;
 use buddy::BuddyMemoryAllocator;
@@ -72,7 +73,7 @@ pub fn initialize_heap(dt: &Fdt, dt_ptr: *const u8) {
     initialize_early_heap();
 
     let available = collect_available(dt).exactly_one().ok().unwrap();
-    info!("found RAM {}", fmt_memory(&available));
+    info!("found RAM {}", fmt_memory(&virt_to_phys(available.clone())));
 
     let mut buddy = unsafe { BuddyMemoryAllocator::new(available, EarlyBumpHeap) };
     for reserved in collect_reserved(dt, dt_ptr) {
