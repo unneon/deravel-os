@@ -33,7 +33,7 @@ macro singleton_allocator($name:ident, $instance:path) {
 singleton_allocator!(BuddyHeap, BUDDY);
 singleton_allocator!(EarlyBumpHeap, EARLY_BUMP);
 
-pub struct GlobalAllocator;
+struct GlobalAllocator;
 
 #[global_allocator]
 static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator;
