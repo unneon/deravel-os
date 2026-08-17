@@ -256,13 +256,8 @@ fn main(args: WindowingArgs) {
 }
 
 fn initialize_cursor(red: u8, green: u8, blue: u8, size: usize, display: Capability<Display>) {
-    let image = unsafe { &mut (*map_shared(display.cursor_image_buffer())).0 };
-    assert_eq!(image.len(), 4 * 64 * 64);
-    for y in 0..size.min(63) {
-        for x in 0..size.min(63) {
-            image.as_chunks_mut().0.chunks_mut(64).nth(y).unwrap()[x] = [red, green, blue, 255];
-        }
-    }
+    let mut image = Framebuffer::map(64, 64, display.cursor_image_buffer());
+    image.fill_rect(0, 0, size, size, red, green, blue, 255);
     display.cursor_image_modified()
 }
 
