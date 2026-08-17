@@ -7,7 +7,6 @@ use core::ptr::NonNull;
 
 pub struct BumpAllocator {
     range: Range<usize>,
-    initial_range: Range<usize>,
     // Does not include internal fragmentation.
     allocated: usize,
 }
@@ -17,7 +16,6 @@ pub struct BumpMemoryAllocator(BumpAllocator);
 impl BumpAllocator {
     pub const fn new(range: Range<usize>) -> BumpAllocator {
         BumpAllocator {
-            initial_range: range.start..range.end,
             range,
             allocated: 0,
         }
@@ -38,10 +36,6 @@ impl BumpAllocator {
 impl BumpMemoryAllocator {
     pub unsafe fn new(range: Range<*mut u8>) -> BumpMemoryAllocator {
         BumpMemoryAllocator(BumpAllocator::new(range.raw_addr()))
-    }
-
-    pub fn initial_range(&self) -> Range<*const u8> {
-        self.0.initial_range.start as *const u8..self.0.initial_range.end as *const u8
     }
 
     pub fn stats(&self) -> HeapStats {

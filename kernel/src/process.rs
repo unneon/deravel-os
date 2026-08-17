@@ -5,7 +5,6 @@ use crate::capability;
 use crate::capability::{capability_certificate, capability_pages_physical_address};
 use crate::device_tree::timebase_frequency;
 use crate::elf::{Elf, load_elf};
-use crate::heap::BuddyHeap;
 use crate::heap::buddy::BuddyAllocator;
 use crate::heap::granularity::{PageGranular, page_granular_vec};
 use crate::page::{PageFlags, PageTable, map_hh_direct_mapping, virt_to_phys};
@@ -83,7 +82,7 @@ pub struct Process {
     pub pc: usize,
     pub page_table: Box<PageTable>,
     pub heap: BuddyAllocator,
-    pub messages: VecDeque<Message, BuddyHeap>,
+    pub messages: VecDeque<Message>,
     pub currently_serving: Option<ProcessId>,
     allocated: Vec<(usize, Arc<UntypedBox<PageGranular>>)>,
     pub virtual_memory_mappings: Vec<(Range<usize>, &'static (dyn VirtualMemoryRawMapping + Sync))>,
@@ -205,7 +204,7 @@ fn create_process<T: ProcessTag, U: AsRef<[u8]>>(
         pc: 0,
         page_table: Box::new(PageTable::new()),
         heap: BuddyAllocator::new(USER_HEAP),
-        messages: VecDeque::new_in(BuddyHeap),
+        messages: VecDeque::new(),
         currently_serving: None,
         allocated: Vec::new(),
         virtual_memory_mappings: Vec::new(),

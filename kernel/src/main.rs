@@ -52,7 +52,7 @@ use crate::capability::reserve_kernel_capability;
 use crate::device_tree::initialize_timebase_frequency;
 use crate::drvli::dispatch_syscall;
 use crate::elf::elf;
-use crate::heap::{initialize_early_heap, initialize_heap};
+use crate::heap::initialize_heap;
 use crate::interrupt::INTERRUPTS;
 use crate::log::initialize_log;
 use crate::pci::initialize_all_pci;
@@ -73,7 +73,6 @@ use riscv::interrupt::supervisor::{Exception, Interrupt};
 extern "C" fn main(_hart_id: u64, dt_ptr: *const u8) -> ! {
     initialize_log();
     initialize_early_trap();
-    initialize_early_heap();
     let dt = unsafe { Fdt::from_ptr(dt_ptr) }.unwrap();
     initialize_timebase_frequency(&dt);
     log_sbi_metadata();

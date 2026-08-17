@@ -17,7 +17,7 @@ use log::*;
 
 macro singleton_allocator($name:ident, $instance:path) {
     #[derive(Clone, Copy)]
-    pub struct $name;
+    struct $name;
 
     unsafe impl Allocator for $name {
         fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
@@ -38,38 +38,27 @@ pub struct GlobalAllocator;
 #[global_allocator]
 static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator;
 
-pub static BUDDY: Mutex<Option<BuddyMemoryAllocator<EarlyBumpHeap>>> = Mutex::new(None);
+static BUDDY: Mutex<Option<BuddyMemoryAllocator<EarlyBumpHeap>>> = Mutex::new(None);
 static EARLY_BUMP: Mutex<Option<BumpMemoryAllocator>> = Mutex::new(None);
 
 unsafe impl GlobalAlloc for GlobalAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        // TODO: Get rid of this hack.
-        let ptr = if let Some(mut buddy) = BUDDY.try_lock()
-            && let Some(buddy) = buddy.as_mut()
-        {
-            buddy.allocate_mut(layout)
-        } else {
-            EarlyBumpHeap.allocate(layout)
-        };
-        ptr.map(|p| p.as_mut_ptr()).unwrap_or_default()
+        BUDDY
+            .try_lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .allocate_mut(layout)
+            .map(|p| p.as_mut_ptr())
+            .unwrap_or_default()
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        if EARLY_BUMP
-            .lock()
-            .as_mut()
-            .unwrap()
-            .initial_range()
-            .contains(&(ptr as *const u8))
-        {
-            unsafe { EarlyBumpHeap.deallocate(NonNull::new(ptr).unwrap(), layout) }
-        } else {
-            unsafe { BuddyHeap.deallocate(NonNull::new(ptr).unwrap(), layout) }
-        }
+        unsafe { BuddyHeap.deallocate(NonNull::new(ptr).unwrap(), layout) }
     }
 }
 
-pub fn initialize_early_heap() {
+fn initialize_early_heap() {
     unsafe extern "C" {
         static mut early_heap_start: u8;
         static mut early_heap_end: u8;
@@ -80,6 +69,8 @@ pub fn initialize_early_heap() {
 }
 
 pub fn initialize_heap(dt: &Fdt, dt_ptr: *const u8) {
+    initialize_early_heap();
+
     let available = collect_available(dt).exactly_one().ok().unwrap();
     info!("found RAM {}", fmt_memory(&available));
 
