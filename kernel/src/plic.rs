@@ -54,15 +54,14 @@ fn find_plic(dt: &Fdt) -> Option<Volatile<'static, Plic>> {
         .reg()?
         .next()?
         .starting_address;
-    PLIC.store(address as *mut Plic, Ordering::Relaxed);
     let address = phys_to_virt(address as *mut Plic);
+    PLIC.store(address, Ordering::Relaxed);
     Some(unsafe { Volatile::new(address) })
 }
 
 fn get_plic() -> Volatile<'static, Plic> {
     let address = PLIC.load(Ordering::Relaxed);
     assert!(!address.is_null());
-    let address = phys_to_virt(address);
     unsafe { Volatile::new(address) }
 }
 
