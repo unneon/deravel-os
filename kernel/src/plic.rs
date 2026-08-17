@@ -49,7 +49,8 @@ pub fn plic_complete(irq: u32) {
 
 fn find_plic(dt: &Fdt) -> Option<Volatile<'static, Plic>> {
     let address = dt
-        .find_node("/soc/interrupt-controller")?
+        .find_node("/soc/interrupt-controller")
+        .or_else(|| dt.find_node("/soc/plic"))?
         .reg()?
         .next()?
         .starting_address;
@@ -66,7 +67,8 @@ fn get_plic() -> Volatile<'static, Plic> {
 }
 
 fn supported_external_interrupts(dt: &Fdt) -> Option<usize> {
-    dt.find_node("/soc/interrupt-controller")?
+    dt.find_node("/soc/interrupt-controller")
+        .or_else(|| dt.find_node("/soc/plic"))?
         .property("riscv,ndev")?
         .as_usize()
 }
