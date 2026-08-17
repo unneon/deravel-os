@@ -22,8 +22,6 @@
 extern crate alloc;
 
 mod arch;
-mod buddy;
-mod bump;
 mod capability;
 mod device_tree;
 mod drvli;

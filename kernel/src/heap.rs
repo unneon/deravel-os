@@ -1,12 +1,14 @@
 mod available;
+pub mod buddy;
+pub mod bump;
 pub mod granularity;
 pub mod stats;
 
-use crate::buddy::BuddyMemoryAllocator;
-use crate::bump::BumpMemoryAllocator;
 use crate::heap::available::{collect_available, collect_reserved};
 use crate::sync::Mutex;
 use crate::util::fmt::memory::fmt_memory;
+use buddy::BuddyMemoryAllocator;
+use bump::BumpMemoryAllocator;
 use core::alloc::{AllocError, Allocator, GlobalAlloc, Layout};
 use core::ptr::NonNull;
 use fdt::Fdt;

@@ -1,12 +1,12 @@
 pub mod spawner;
 
 use crate::arch::{RiscvRegisters, return_to_userspace, set_userspace_process};
-use crate::buddy::BuddyAllocator;
 use crate::capability;
 use crate::capability::{capability_certificate, capability_pages_physical_address};
 use crate::device_tree::timebase_frequency;
 use crate::elf::{Elf, load_elf};
 use crate::heap::BuddyHeap;
+use crate::heap::buddy::BuddyAllocator;
 use crate::heap::granularity::{PageGranular, page_granular_vec};
 use crate::page::{PageFlags, PageTable, map_hh_direct_mapping, virt_to_phys};
 use crate::shutdown::shutdown;

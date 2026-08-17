@@ -1,7 +1,7 @@
 pub mod capability;
 pub mod config;
 
-use crate::bump::BumpAllocator;
+use crate::heap::bump::BumpAllocator;
 use crate::interrupt::register_interrupt;
 use crate::page::phys_to_virt;
 use crate::pci::config::{Config, ConfigUntyped, GeneralDevice};
