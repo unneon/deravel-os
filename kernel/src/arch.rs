@@ -78,9 +78,10 @@ unsafe extern "C" fn _start() -> ! {
         ".map_lower_half:",
 
         "sd t1, 0(t0)",
-        "add t1, t1, t2",
 
         "add t0, t0, 8",
+        "add t1, t1, t2",
+
         "and t3, t0, 2047",
         "bnez t3, .map_lower_half",
 
@@ -92,9 +93,10 @@ unsafe extern "C" fn _start() -> ! {
         ".map_higher_half:",
 
         "sd t1, 0(t0)",
-        "add t1, t1, t2",
 
         "add t0, t0, 8",
+        "add t1, t1, t2",
+
         "and t3, t0, 2047",
         "bnez t3, .map_higher_half",
 
