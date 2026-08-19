@@ -65,10 +65,10 @@ impl<T: SafeUserType> UserPtr<[T]> {
 
     pub fn copy_to_kernel(&self) -> Vec<T> {
         let mut kernel = Vec::with_capacity(self.0.len());
-        unsafe {
-            core::ptr::copy_nonoverlapping(self.0.as_mut_ptr(), kernel.as_mut_ptr(), self.0.len());
-            kernel.set_len(self.0.len());
-        }
+        with_sum(|| unsafe {
+            core::ptr::copy_nonoverlapping(self.0.as_mut_ptr(), kernel.as_mut_ptr(), self.0.len())
+        });
+        unsafe { kernel.set_len(self.0.len()) }
         kernel
     }
 
@@ -77,7 +77,9 @@ impl<T: SafeUserType> UserPtr<[T]> {
             return Err(UserSliceTooSmall);
         }
         // TODO: Check if we're not writing into some other process' capability page.
-        unsafe { core::ptr::copy_nonoverlapping(data.as_ptr(), self.0.as_mut_ptr(), data.len()) }
+        with_sum(|| unsafe {
+            core::ptr::copy_nonoverlapping(data.as_ptr(), self.0.as_mut_ptr(), data.len())
+        });
         Ok(())
     }
 }
@@ -157,4 +159,14 @@ fn check<T: SafeUserType>(ptr: *mut T) -> Result<(), UserPtrInvalid> {
         return Err(UserPtrInvalid);
     }
     Ok(())
+}
+
+pub fn with_sum<T>(f: impl FnOnce() -> T) -> T {
+    let mut status = riscv::register::sstatus::read();
+    status.set_sum(true);
+    unsafe { riscv::register::sstatus::write(status) };
+    let result = f();
+    status.set_sum(false);
+    unsafe { riscv::register::sstatus::write(status) };
+    result
 }

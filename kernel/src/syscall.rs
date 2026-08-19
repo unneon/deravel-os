@@ -6,7 +6,7 @@ use crate::page::{PageFlags, virt_to_phys};
 use crate::process::{Message, ProcessState, get_process, kill};
 use crate::stack::UserCtx;
 use crate::syscall::SyscallAction::Yield;
-use crate::user::{UserPtr, UserSyscallError};
+use crate::user::{UserPtr, UserSyscallError, with_sum};
 use crate::util::untyped_box::UntypedBox;
 use crate::{capability, shared_memory};
 use alloc::boxed::Box;
@@ -41,7 +41,7 @@ impl SyscallHandler for () {
         mut result_buffer: UserPtr<[u8]>,
     ) -> Result<usize> {
         let mut proc = user.process();
-        let cap = match cap.validate(proc.id) {
+        let cap = match with_sum(|| cap.validate(proc.id)) {
             Ok(cap) => cap,
             Err(err) => kill!(user, proc, "{err}"),
         };
@@ -131,7 +131,7 @@ impl SyscallHandler for () {
             else {
                 kill!(user, proc, "invalid stream map reply")
             };
-            let Ok(ring) = stream.validate(caller.id) else {
+            let Ok(ring) = with_sum(|| stream.validate(caller.id)) else {
                 kill!(user, proc, "ring {stream:?} not valid for sender");
             };
             if ring.certifier() != Actor::Kernel {
@@ -161,7 +161,7 @@ impl SyscallHandler for () {
         stream: usize,
     ) -> Result<(*mut (), usize)> {
         let mut proc = user.process();
-        let cap = match cap.validate(proc.id) {
+        let cap = match with_sum(|| cap.validate(proc.id)) {
             Ok(cap) => cap,
             Err(err) => kill!(user, proc, "{err}"),
         };
@@ -233,7 +233,7 @@ impl SyscallHandler for () {
 
     fn map_shared(user: &mut UserCtx, cap: Capability<SharedMemory>) -> Result<(*mut u8, usize)> {
         let mut proc = user.process();
-        let cap = match cap.validate(proc.id) {
+        let cap = match with_sum(|| cap.validate(proc.id)) {
             Ok(cap) => cap,
             Err(err) => kill!(user, proc, "{err}"),
         };

@@ -180,10 +180,6 @@ pub fn initialize_interrupts() {
 }
 
 pub fn initial_switch_to_userspace() -> ! {
-    let mut status = riscv::register::sstatus::read();
-    status.set_sum(true);
-    unsafe { riscv::register::sstatus::write(status) };
-
     let stack = KernelStack::new();
     unsafe { riscv::register::sscratch::write(stack.as_sscratch()) }
 
