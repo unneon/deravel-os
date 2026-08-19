@@ -180,11 +180,10 @@ pub fn initialize_interrupts() {
 }
 
 pub fn initial_switch_to_userspace() -> ! {
-    let stack = KernelStack::new();
-    unsafe { riscv::register::sscratch::write(stack.as_sscratch()) }
+    let user = &mut Box::leak(KernelStack::new()).ctx;
+    unsafe { riscv::register::sscratch::write(user as *mut _ as usize) }
 
-    let hart = &mut Box::leak(stack).ctx;
-    schedule_userspace(hart)
+    schedule_userspace(user)
 }
 
 pub fn set_userspace_process(proc: &mut Process, user: &mut UserStoredCtx) {

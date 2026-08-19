@@ -29,10 +29,6 @@ impl KernelStack {
     pub fn new() -> Box<KernelStack> {
         unsafe { Box::new_zeroed().assume_init() }
     }
-
-    pub fn as_sscratch(&self) -> usize {
-        (&raw const self.ctx) as usize
-    }
 }
 
 impl UserCtx {
