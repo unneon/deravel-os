@@ -1,10 +1,9 @@
+use crate::heap::MutAllocator;
 use crate::heap::stats::HeapStats;
-use crate::sync::Mutex;
 use alloc::alloc::Global;
 use alloc::boxed::Box;
 use core::alloc::{AllocError, Allocator, Layout};
 use core::ops::{DerefMut, Range};
-use core::ptr::NonNull;
 
 pub struct BuddyAllocator<A: Allocator = Global> {
     root: Node<A>,
@@ -12,8 +11,6 @@ pub struct BuddyAllocator<A: Allocator = Global> {
     range: Range<usize>,
     alloc: A,
 }
-
-pub struct BuddyMemoryAllocator<A: Allocator>(BuddyAllocator<A>);
 
 struct Node<A: Allocator> {
     max_available: usize,
@@ -39,22 +36,6 @@ impl<A: Allocator + Copy> BuddyAllocator<A> {
         }
     }
 
-    pub fn alloc(&mut self, layout: Layout) -> Result<usize, AllocError> {
-        // TODO: Handle alignment with respect to containing range.
-        let req_size = layout.size().max(layout.align());
-        let unoffset_ptr = self.root.alloc(req_size, self.root_node_size, self.alloc)?;
-        let ptr = self.range.start + unoffset_ptr;
-        assert!(ptr >= self.range.start);
-        assert!(ptr + req_size <= self.range.end);
-        Ok(ptr)
-    }
-
-    pub fn dealloc(&mut self, ptr: usize, layout: Layout) {
-        let req_size = layout.size().max(layout.align());
-        self.root
-            .dealloc(ptr - self.range.start, req_size, self.root_node_size);
-    }
-
     pub fn reserve_range(&mut self, range: Range<usize>) {
         debug_assert!(range.start >= self.range.start);
         debug_assert!(range.end <= self.range.end);
@@ -65,32 +46,6 @@ impl<A: Allocator + Copy> BuddyAllocator<A> {
 
     pub fn stats(&self) -> HeapStats {
         self.root.stats()
-    }
-}
-
-impl<A: Allocator + Copy> BuddyMemoryAllocator<A> {
-    pub unsafe fn new(range: Range<*mut u8>, alloc: A) -> BuddyMemoryAllocator<A> {
-        let range = range.start as usize..range.end as usize;
-        BuddyMemoryAllocator(BuddyAllocator::new_in(range, alloc))
-    }
-
-    pub fn reserve_range(&mut self, range: Range<*const u8>) {
-        let range = range.start as usize..range.end as usize;
-        self.0.reserve_range(range.clone());
-    }
-
-    pub fn allocate_mut(&mut self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        let address = self.0.alloc(layout)?;
-        let ptr = core::ptr::slice_from_raw_parts_mut(address as *mut u8, layout.size());
-        Ok(NonNull::new(ptr).unwrap())
-    }
-
-    pub unsafe fn deallocate_mut(&mut self, ptr: NonNull<u8>, layout: Layout) {
-        self.0.dealloc(ptr.as_ptr() as usize, layout);
-    }
-
-    pub fn stats(&self) -> HeapStats {
-        self.0.stats()
     }
 }
 
@@ -230,13 +185,21 @@ impl<A: Allocator + Copy> Node<A> {
     }
 }
 
-unsafe impl<A: Allocator + Copy> Allocator for Mutex<Option<BuddyMemoryAllocator<A>>> {
-    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        self.lock().as_mut().unwrap().allocate_mut(layout)
+impl<A: Allocator + Copy> MutAllocator for BuddyAllocator<A> {
+    fn alloc(&mut self, layout: Layout) -> Result<usize, AllocError> {
+        // TODO: Handle alignment with respect to containing range.
+        let req_size = layout.size().max(layout.align());
+        let unoffset_ptr = self.root.alloc(req_size, self.root_node_size, self.alloc)?;
+        let ptr = self.range.start + unoffset_ptr;
+        assert!(ptr >= self.range.start);
+        assert!(ptr + req_size <= self.range.end);
+        Ok(ptr)
     }
 
-    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
-        unsafe { self.lock().as_mut().unwrap().deallocate_mut(ptr, layout) }
+    fn dealloc(&mut self, ptr: usize, layout: Layout) {
+        let req_size = layout.size().max(layout.align());
+        self.root
+            .dealloc(ptr - self.range.start, req_size, self.root_node_size);
     }
 }
 

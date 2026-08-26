@@ -1,5 +1,6 @@
 use crate::capability::grant_kernel_capability;
 use crate::drvli::SyscallHandler;
+use crate::heap::MutAllocator;
 use crate::heap::granularity::{PageGranular, page_granular_vec};
 use crate::log::log_userspace;
 use crate::page::{PageFlags, virt_to_phys};

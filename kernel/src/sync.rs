@@ -27,14 +27,6 @@ impl<T> Mutex<T> {
             value: unsafe { &mut *self.value.get() },
         }
     }
-
-    pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
-        try_lock(&self.locked)?;
-        Some(MutexGuard {
-            locked: &self.locked,
-            value: unsafe { &mut *self.value.get() },
-        })
-    }
 }
 
 impl<T> Mutex<Option<T>> {
@@ -80,13 +72,6 @@ fn lock(locked: &AtomicBool) {
     while locked.swap(true, Ordering::Acquire) {
         panic!("deadlock detected as SMP not implemented yet");
     }
-}
-
-fn try_lock(locked: &AtomicBool) -> Option<()> {
-    if locked.swap(true, Ordering::Acquire) {
-        return None;
-    }
-    Some(())
 }
 
 fn unlock(locked: &AtomicBool) {

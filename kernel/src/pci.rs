@@ -1,6 +1,7 @@
 pub mod capability;
 pub mod config;
 
+use crate::heap::MutAllocator;
 use crate::heap::bump::BumpAllocator;
 use crate::interrupt::register_interrupt;
 use crate::page::phys_to_virt;

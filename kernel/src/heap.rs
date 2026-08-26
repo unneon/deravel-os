@@ -2,89 +2,69 @@ mod available;
 pub mod buddy;
 pub mod bump;
 pub mod granularity;
+mod singleton;
 pub mod stats;
+mod sync;
 
 use crate::heap::available::{collect_available, collect_reserved};
+use crate::heap::buddy::BuddyAllocator;
+use crate::heap::bump::BumpAllocator;
+use crate::heap::singleton::singleton_allocator;
+use crate::heap::sync::SyncAllocator;
 use crate::page::virt_to_phys;
-use crate::sync::Mutex;
 use crate::util::fmt::memory::fmt_memory;
-use buddy::BuddyMemoryAllocator;
-use bump::BumpMemoryAllocator;
-use core::alloc::{AllocError, Allocator, GlobalAlloc, Layout};
-use core::ptr::NonNull;
+use core::alloc::{AllocError, Layout};
 use fdt::Fdt;
 use itertools::Itertools;
 use log::*;
 
-macro singleton_allocator($name:ident, $instance:path) {
-    #[derive(Clone, Copy)]
-    struct $name;
-
-    unsafe impl Allocator for $name {
-        fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-            $instance.allocate(layout)
-        }
-
-        unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
-            unsafe { $instance.deallocate(ptr, layout) }
-        }
-    }
+pub trait MutAllocator {
+    fn alloc(&mut self, layout: Layout) -> Result<usize, AllocError>;
+    fn dealloc(&mut self, ptr: usize, layout: Layout);
 }
 
-singleton_allocator!(BuddyHeap, BUDDY);
-singleton_allocator!(EarlyBumpHeap, EARLY_BUMP);
-
-struct GlobalAllocator;
+singleton_allocator! {
+    struct BuddyNodeAllocator for BUDDY_NODE_ALLOCATOR;
+}
 
 #[global_allocator]
-static GLOBAL_ALLOCATOR: GlobalAllocator = GlobalAllocator;
+static BUDDY_ALLOCATOR: SyncAllocator<BuddyAllocator<BuddyNodeAllocator>> = SyncAllocator::new();
+static BUDDY_NODE_ALLOCATOR: SyncAllocator<BumpAllocator> = SyncAllocator::new();
 
-static BUDDY: Mutex<Option<BuddyMemoryAllocator<EarlyBumpHeap>>> = Mutex::new(None);
-static EARLY_BUMP: Mutex<Option<BumpMemoryAllocator>> = Mutex::new(None);
-
-unsafe impl GlobalAlloc for GlobalAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        BUDDY
-            .try_lock()
-            .unwrap()
-            .as_mut()
-            .unwrap()
-            .allocate_mut(layout)
-            .map(|p| p.as_mut_ptr())
-            .unwrap_or_default()
-    }
-
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        unsafe { BuddyHeap.deallocate(NonNull::new(ptr).unwrap(), layout) }
-    }
+pub fn initialize_heap(dt: &Fdt, dt_ptr: *const u8) {
+    initialize_buddy_node_allocator();
+    initialize_buddy_allocator(dt, dt_ptr);
 }
 
-fn initialize_early_heap() {
+fn initialize_buddy_node_allocator() {
     unsafe extern "C" {
         static mut early_heap_start: u8;
         static mut early_heap_end: u8;
     }
-    *EARLY_BUMP.lock() = Some(unsafe {
-        BumpMemoryAllocator::new(&raw mut early_heap_start..&raw mut early_heap_end)
-    });
+    unsafe {
+        BUDDY_NODE_ALLOCATOR.set(BumpAllocator::new(
+            &raw mut early_heap_start as usize..&raw mut early_heap_end as usize,
+        ))
+    }
 }
 
-pub fn initialize_heap(dt: &Fdt, dt_ptr: *const u8) {
-    initialize_early_heap();
-
+fn initialize_buddy_allocator(dt: &Fdt, dt_ptr: *const u8) {
     let available = collect_available(dt).exactly_one().ok().unwrap();
     info!("found RAM {}", fmt_memory(&virt_to_phys(available.clone())));
 
-    let mut buddy = unsafe { BuddyMemoryAllocator::new(available, EarlyBumpHeap) };
+    let mut buddy = BuddyAllocator::new_in(
+        available.start as usize..available.end as usize,
+        BuddyNodeAllocator,
+    );
     for reserved in collect_reserved(dt, dt_ptr) {
-        buddy.reserve_range(reserved);
+        buddy.reserve_range(reserved.start as usize..reserved.end as usize);
     }
-    *BUDDY.lock() = Some(buddy);
+    unsafe { BUDDY_ALLOCATOR.set(buddy) }
 }
 
 pub fn log_heap_usage() {
-    let buddy_usage = &BUDDY.lock().as_ref().unwrap().stats();
+    let buddy_usage = unsafe { &BUDDY_ALLOCATOR.lock_inner().as_ref().unwrap().stats() };
     info!("buddy had {buddy_usage}");
-    let early_heap_usage = &EARLY_BUMP.lock().as_ref().unwrap().stats();
+    let early_heap_usage = unsafe { &BUDDY_NODE_ALLOCATOR.lock_inner().as_ref().unwrap().stats() };
     info!("early bump had {early_heap_usage}");
 }
