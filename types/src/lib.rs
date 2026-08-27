@@ -1,5 +1,4 @@
 #![feature(decl_macro)]
-#![feature(never_type)]
 #![feature(ptr_metadata)]
 #![allow(clippy::missing_safety_doc)]
 #![no_std]

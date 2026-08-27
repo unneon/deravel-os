@@ -269,7 +269,6 @@ pub fn schedule_userspace(user: &mut UserStoredCtx) -> ! {
         };
         let Err(err) = resume_process(next, user);
         kill_manual!(user, "{err}");
-        schedule_userspace(user)
     }
 }
 
