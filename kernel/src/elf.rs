@@ -14,6 +14,7 @@ use elf::segment::ProgramHeader;
 
 pub macro elf($ty:ty, $env:literal) {{
     {
+        #[cfg(debug_assertions)]
         static ELF: &Elf<
             $ty,
             [u8; include_bytes!(concat!(
@@ -27,6 +28,23 @@ pub macro elf($ty:ty, $env:literal) {{
             *include_bytes!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/../target/riscv64gc-unknown-deravel/debug/",
+                $env
+            )),
+        );
+        #[cfg(not(debug_assertions))]
+        static ELF: &Elf<
+            $ty,
+            [u8; include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../target/riscv64gc-unknown-deravel/release/",
+                $env
+            ))
+            .len()],
+        > = &Elf(
+            PhantomData,
+            *include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../target/riscv64gc-unknown-deravel/release/",
                 $env
             )),
         );

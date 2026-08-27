@@ -5,10 +5,25 @@ build-std-features = ["compiler-builtins-mem"]
 json-target-spec = true
 
 [build]
-target = "riscv64gc-unknown-none-elf"
+target = ".\n\n\u001B[1;31m##########################################\n# USE ./cargo.sh SCRIPT INSTEAD OF cargo #\n##########################################\u001B[0m\n\n."
 
 [target.riscv64gc-unknown-none-elf]
-runner = "kernel/qemu-wrapper.sh"
+runner = [
+    "qemu-system-riscv64",
+    "-machine", "virt",
+    "-bios", "default",
+    "-serial", "mon:stdio",
+    "-drive", "id=drive0,file=disk.bin,format=raw,if=none",
+    "-device", "virtio-blk-pci,drive=drive0,disable-legacy=on",
+    "-netdev", "user,id=net0,net=192.168.100.0/24,host=192.168.100.1",
+    "-device", "virtio-net-pci,netdev=net0,disable-legacy=on",
+    "-device", "virtio-gpu",
+    "-display", "gtk,full-screen=on,show-cursor=on,gl=on",
+    "-device", "virtio-keyboard",
+    "-device", "virtio-tablet",
+    "--no-reboot",
+    "-kernel",
+]
 rustflags = [
     "-C", "relocation-model=pie",
     "-C", "link-args=-pie",
