@@ -14,43 +14,22 @@ use elf::segment::ProgramHeader;
 
 pub macro elf($ty:ty, $env:literal) {{
     {
-        #[cfg(debug_assertions)]
-        static ELF: &Elf<
-            $ty,
-            [u8; include_bytes!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../target/riscv64gc-unknown-deravel/debug/",
-                $env
-            ))
-            .len()],
-        > = &Elf(
-            PhantomData,
-            *include_bytes!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../target/riscv64gc-unknown-deravel/debug/",
-                $env
-            )),
-        );
-        #[cfg(not(debug_assertions))]
-        static ELF: &Elf<
-            $ty,
-            [u8; include_bytes!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../target/riscv64gc-unknown-deravel/release/",
-                $env
-            ))
-            .len()],
-        > = &Elf(
-            PhantomData,
-            *include_bytes!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../target/riscv64gc-unknown-deravel/release/",
-                $env
-            )),
-        );
+        static ELF: &Elf<$ty, [u8; elf_bytes!($env).len()]> = &Elf(PhantomData, *elf_bytes!($env));
         ELF
     }
 }}
+
+macro elf_bytes($env:literal) {
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../target/riscv64gc-unknown-deravel/",
+        cfg_select! {
+            debug_assertions => "debug/",
+            _ => "release/",
+        },
+        $env,
+    ))
+}
 
 #[repr(align(4096))]
 pub struct Elf<T, U: ?Sized>(pub PhantomData<T>, pub U);
