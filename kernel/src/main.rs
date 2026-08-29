@@ -50,7 +50,7 @@ use crate::device_tree::initialize_timebase_frequency;
 use crate::drvli::dispatch_syscall;
 use crate::elf::elf;
 use crate::heap::initialize_heap;
-use crate::interrupt::INTERRUPTS;
+use crate::interrupt::dispatch_interrupt;
 use crate::log::initialize_log;
 use crate::pci::initialize_all_pci;
 use crate::plic::{initialize_plic, plic_claim, plic_complete};
@@ -136,14 +136,7 @@ fn on_user_trap_impl(user: &mut UserCtx) -> Result<(), SyscallAction> {
         Ok(())
     } else if scause == Ok(Trap::Interrupt(Interrupt::SupervisorExternal)) {
         let irq = plic_claim();
-        for ie in &INTERRUPTS {
-            let ie = ie.lock();
-            if let Some(ie) = *ie
-                && ie.plic_number == irq
-            {
-                ie.handler.handle();
-            }
-        }
+        dispatch_interrupt(irq);
         plic_complete(irq);
         Ok(())
     } else if is_page_fault(scause) {
