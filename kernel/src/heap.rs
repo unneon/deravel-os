@@ -1,4 +1,5 @@
 mod available;
+pub mod bitmap;
 pub mod buddy;
 pub mod bump;
 pub mod granularity;

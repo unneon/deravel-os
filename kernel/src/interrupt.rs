@@ -1,5 +1,7 @@
+use crate::heap::MutAllocator;
+use crate::heap::bitmap::BitmapAllocator;
 use crate::sync::Mutex;
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::alloc::Layout;
 
 pub trait InterruptHandler {
     fn handle(&self);
@@ -13,7 +15,10 @@ pub struct InterruptEntry {
 
 const MAX_INTERRUPT_HANDLERS: usize = 16;
 
-static ALLOCATED_COUNT: AtomicUsize = AtomicUsize::new(0);
+const SLOT_LAYOUT: Layout = Layout::from_size_align(1, 1).ok().unwrap();
+
+static ALLOCATOR: Mutex<BitmapAllocator<[usize; 1]>> =
+    Mutex::new(BitmapAllocator::new(0..MAX_INTERRUPT_HANDLERS, [0]));
 
 pub static INTERRUPTS: [Mutex<Option<InterruptEntry>>; MAX_INTERRUPT_HANDLERS] =
     [const { Mutex::new(None) }; _];
@@ -22,8 +27,7 @@ pub fn register_interrupt(
     plic_number: u32,
     handler: &'static (dyn InterruptHandler + Send + Sync),
 ) {
-    let index = ALLOCATED_COUNT.fetch_add(1, Ordering::Relaxed);
-    assert!(index < MAX_INTERRUPT_HANDLERS);
+    let index = ALLOCATOR.lock().alloc(SLOT_LAYOUT).unwrap();
     *INTERRUPTS[index].lock() = Some(InterruptEntry {
         plic_number,
         handler,

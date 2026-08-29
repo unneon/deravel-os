@@ -3,6 +3,7 @@
 #![feature(arbitrary_self_types)]
 #![feature(atomic_ptr_null)]
 #![feature(const_convert)]
+#![feature(const_result_trait_fn)]
 #![feature(const_trait_impl)]
 #![feature(decl_macro)]
 #![feature(iter_intersperse)]

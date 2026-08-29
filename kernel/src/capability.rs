@@ -1,11 +1,14 @@
+use crate::heap::MutAllocator;
+use crate::heap::bitmap::BitmapAllocator;
 use crate::page::{PageTable, virt_to_phys};
 use crate::process::PROCESS_COUNT;
 use crate::sync::Mutex;
 use crate::virtual_memory::VirtualMemoryRawMapping;
 use alloc::vec::Vec;
+use core::alloc::Layout;
 use core::marker::PhantomData;
 use core::ops::Range;
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::Ordering;
 use deravel_types::*;
 
 pub trait Handler<T> {
@@ -41,10 +44,13 @@ pub trait RawHandler {
 #[repr(transparent)]
 struct TypedHandler<T, H: ?Sized>(PhantomData<T>, H);
 
+const SLOT_LAYOUT: Layout = Layout::from_size_align(1, 1).ok().unwrap();
+
 static CAPABILITY_PAGES: [CapabilityPage; PROCESS_COUNT + 1] =
     [const { CapabilityPage([const { CapabilityCertificate::new() }; _]) }; _];
 
-static ALLOCATED_COUNT: AtomicUsize = AtomicUsize::new(0);
+static ALLOCATOR: Mutex<BitmapAllocator<[usize; CAPABILITIES_PER_PAGE / usize::BITS as usize]>> =
+    Mutex::new(BitmapAllocator::new(0..CAPABILITIES_PER_PAGE, [0; _]));
 
 static HANDLERS: [Mutex<Option<&'static (dyn RawHandler + Sync)>>;
     PAGE_SIZE / size_of::<CapabilityCertificateValue>()] = [const { Mutex::new(None) }; _];
@@ -88,7 +94,7 @@ pub fn grant_kernel_capability<T: 'static + Sync>(
 pub fn reserve_kernel_capability<T: 'static + Sync, H: Handler<T> + Sync>(
     handler: &'static H,
 ) -> Capability<T> {
-    let local_index = ALLOCATED_COUNT.fetch_add(1, Ordering::Relaxed);
+    let local_index = ALLOCATOR.lock().alloc(SLOT_LAYOUT).unwrap();
     *HANDLERS[local_index].lock() =
         Some(unsafe { core::mem::transmute::<&'static H, &'static TypedHandler<T, H>>(handler) });
     unsafe { Capability::new(RawCapability::new(Actor::Kernel, local_index)) }
