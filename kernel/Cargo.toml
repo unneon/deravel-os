@@ -2,7 +2,6 @@
 name = "deravel-kernel"
 version = "0.0.0"
 edition = "2024"
-default-run = "deravel-kernel"
 
 [dependencies]
 # TODO: Rust artifact dependencies ignore forced-target.

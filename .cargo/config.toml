@@ -5,7 +5,7 @@ build-std-features = ["compiler-builtins-mem"]
 json-target-spec = true
 
 [build]
-target = ".\n\n\u001B[1;31m##########################################\n# USE ./cargo.sh SCRIPT INSTEAD OF cargo #\n##########################################\u001B[0m\n\n."
+target = "riscv64gc-unknown-none-elf"
 
 [target.riscv64gc-unknown-none-elf]
 runner = [
