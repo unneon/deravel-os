@@ -49,16 +49,23 @@ fn getline(buf: &mut [u8]) -> Option<&str> {
     let mut i = 0;
     loop {
         let ch = getchar();
-        putchar(ch);
+        if ch != b'\x08' {
+            putchar(ch);
+        }
         if ch == b'\r' {
             print!("\n");
             break Some(core::str::from_utf8(&buf[..i]).unwrap());
+        } else if ch == b'\x08' {
+            if i > 0 {
+                print!("\x08");
+                i -= 1;
+            }
         } else if i == buf.len() {
             return None;
         } else {
             buf[i] = ch;
+            i += 1;
         }
-        i += 1;
     }
 }
 

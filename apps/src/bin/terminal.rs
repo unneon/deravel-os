@@ -25,6 +25,22 @@ impl Renderer {
         } else if c == b'\n' {
             self.cursor_x = FONT.leftpad as i32;
             self.cursor_y += FONT.height as i32;
+        } else if c == b'\x08' {
+            if self.cursor_x - (FONT.width as i32) < FONT.leftpad as i32 {
+                if self.cursor_y - (FONT.height as i32) >= 0 {
+                    self.cursor_y -= FONT.height as i32;
+                    self.cursor_x = FONT.leftpad as i32;
+                    while self.cursor_x + 2 * FONT.width as i32 <= self.window_width {
+                        self.cursor_x += FONT.width as i32;
+                    }
+                } else {
+                    return;
+                }
+            } else {
+                self.cursor_x -= FONT.width as i32;
+            }
+
+            self.render_glyph(find_glyph(b'.').unwrap());
         } else if let Some(glyph) = find_glyph(c) {
             self.render_glyph(glyph);
             self.cursor_x += FONT.width as i32;
@@ -114,6 +130,7 @@ impl ConsoleServer for Renderer {
                     KEY_ENTER => b'\r',
                     KEY_DOT => b'.',
                     KEY_SPACE => b' ',
+                    KEY_BACKSPACE => b'\x08',
                     _ => {
                         warn!("unrecognized {event:?}");
                         continue;
