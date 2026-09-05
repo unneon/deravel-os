@@ -142,6 +142,7 @@ pub fn parse_type(src: &str) -> Type<'_> {
     match src {
         "bytes" => Bytes,
         "capability" => UntypedCapability,
+        "const_ptr" => UntypedConstPtr,
         "i8" => I8,
         "i16" => I16,
         "i32" => I32,

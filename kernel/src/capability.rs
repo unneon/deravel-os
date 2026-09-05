@@ -1,7 +1,7 @@
 use crate::heap::MutAllocator;
 use crate::heap::bitmap::BitmapAllocator;
 use crate::page::{PageTable, virt_to_phys};
-use crate::process::PROCESS_COUNT;
+use crate::process::{PROCESS_COUNT, Process};
 use crate::sync::Mutex;
 use crate::virtual_memory::VirtualMemoryRawMapping;
 use alloc::sync::Arc;
@@ -15,7 +15,7 @@ use deravel_types::*;
 pub trait Handler<T> {
     fn call_method(&self, method: usize, args: &[u8], sender: ProcessId) -> Vec<u8>;
 
-    fn map_stream(&self, stream: usize) -> &'static UntypedRingBuffer;
+    fn map_stream(&self, stream: usize, proc: &mut Process) -> (*const (), usize);
 
     fn shared_memory_map(
         &self,
@@ -30,7 +30,7 @@ pub trait Handler<T> {
 pub trait RawHandler {
     fn call_method(&self, method: usize, args: &[u8], sender: ProcessId) -> Vec<u8>;
 
-    fn map_stream(&self, stream: usize) -> &'static UntypedRingBuffer;
+    fn map_stream(&self, stream: usize, proc: &mut Process) -> (*const (), usize);
 
     fn shared_memory_map(
         &self,
@@ -61,8 +61,8 @@ impl<T, H: Handler<T> + ?Sized> RawHandler for TypedHandler<T, H> {
         self.1.call_method(method, args, sender)
     }
 
-    fn map_stream(&self, stream: usize) -> &'static UntypedRingBuffer {
-        self.1.map_stream(stream)
+    fn map_stream(&self, stream: usize, proc: &mut Process) -> (*const (), usize) {
+        self.1.map_stream(stream, proc)
     }
 
     fn shared_memory_map(

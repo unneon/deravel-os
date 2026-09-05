@@ -2,18 +2,20 @@ use crate::align::CACHE_LINE_SIZE;
 use crate::{CacheLineAligned, PAGE_SIZE, PageAligned};
 use alloc::alloc::{alloc_zeroed, handle_alloc_error};
 use alloc::boxed::Box;
+use alloc::sync::Arc;
 use core::alloc::Layout;
 use core::cell::UnsafeCell;
+use core::marker::PhantomData;
+use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-pub struct RingBuffer<T> {
-    pub read: CacheLineAligned<AtomicUsize>,
-    pub written: CacheLineAligned<AtomicUsize>,
-    pub data: CacheLineAligned<[UnsafeCell<T>]>,
+#[repr(C, align(4096))]
+pub struct RingBuffer<T, D: ?Sized = [UnsafeCell<MaybeUninit<T>>]> {
+    _phantom: PhantomData<[T]>,
+    read: CacheLineAligned<AtomicUsize>,
+    written: CacheLineAligned<AtomicUsize>,
+    data: CacheLineAligned<D>,
 }
-
-#[repr(transparent)]
-pub struct UntypedRingBuffer(pub RingBuffer<u8>);
 
 // TODO: This is pretty broken with multiple readers.
 impl<T: Copy + Default> RingBuffer<T> {
@@ -34,13 +36,24 @@ impl<T: Copy + Default> RingBuffer<T> {
         let fat = core::ptr::from_raw_parts_mut::<RingBuffer<T>>(thin, element_count);
         let ring_buffer = unsafe { &mut *fat };
         for element in &mut ring_buffer.data.0 {
-            *element.get_mut() = T::default();
+            *element.get_mut() = MaybeUninit::new(T::default());
         }
         ring_buffer
     }
 
     pub fn new_single_page() -> Box<RingBuffer<T>> {
         RingBuffer::new((PAGE_SIZE - 2 * CACHE_LINE_SIZE) / size_of::<T>())
+    }
+
+    pub fn new_arc<const CAPACITY: usize>() -> Arc<RingBuffer<T>> {
+        Arc::new(RingBuffer {
+            _phantom: PhantomData,
+            read: CacheLineAligned(AtomicUsize::new(0)),
+            written: CacheLineAligned(AtomicUsize::new(0)),
+            data: CacheLineAligned::<[UnsafeCell<MaybeUninit<T>>; CAPACITY]>(
+                [const { UnsafeCell::new(MaybeUninit::<T>::uninit()) }; _],
+            ),
+        })
     }
 
     /// # Safety
@@ -54,6 +67,10 @@ impl<T: Copy + Default> RingBuffer<T> {
         let element_count = (PAGE_SIZE - 2 * CACHE_LINE_SIZE) / size_of::<T>();
         unsafe { &*RingBuffer::new_in(element_count, page_pointer as *mut u8) }
     }
+
+    pub fn capacity(&self) -> usize {
+        self.data.0.len()
+    }
 }
 
 impl<T: Copy> RingBuffer<T> {
@@ -62,7 +79,7 @@ impl<T: Copy> RingBuffer<T> {
         let read = self.read.0.load(Ordering::Acquire);
         assert!(written < read + self.data.0.len());
         let element_ptr = self.data.0[written % self.data.0.len()].get();
-        unsafe { element_ptr.write(value) }
+        unsafe { element_ptr.write(MaybeUninit::new(value)) }
         self.written.0.store(written + 1, Ordering::Release);
     }
 
@@ -73,28 +90,9 @@ impl<T: Copy> RingBuffer<T> {
             return None;
         }
         let element_ptr = self.data.0[read % self.data.0.len()].get();
-        let element = unsafe { element_ptr.read() };
+        let element = unsafe { element_ptr.read().assume_init() };
         self.read.0.store(read + 1, Ordering::Release);
         Some(element)
-    }
-}
-
-impl<T> RingBuffer<T> {
-    pub fn untype(&self) -> &UntypedRingBuffer {
-        let (thin_pointer, element_count) = (self as *const RingBuffer<T>).to_raw_parts();
-        let byte_count = element_count * size_of::<T>();
-        unsafe { &*core::ptr::from_raw_parts(thin_pointer, byte_count) }
-    }
-}
-
-impl UntypedRingBuffer {
-    /// # Safety
-    ///
-    /// The UntypedRingBuffer reference must have been created by previously calling RingBuffer<T>::untype.
-    pub unsafe fn cast<T>(&self) -> &RingBuffer<T> {
-        let (thin_pointer, byte_count) = (self as *const UntypedRingBuffer).to_raw_parts();
-        let element_count = byte_count / size_of::<T>();
-        unsafe { &*core::ptr::from_raw_parts(thin_pointer, element_count) }
     }
 }
 

@@ -73,15 +73,14 @@ fn generate_client_impl(interface: &Interface, out: &mut String) {
         .unwrap();
         writeln!(
              out,
-            "        let (ring_buffer, byte_count) = unsafe {{ syscall::ipc_stream(self.as_raw(), {stream_id}) }};"
+            "        let (ring_buffer, capacity) = unsafe {{ syscall::ipc_stream(self.as_raw(), {stream_id}) }};"
         )
             .unwrap();
         writeln!(
              out,
-            "        let ring_buffer = unsafe {{ &*core::ptr::from_raw_parts::<UntypedRingBuffer>(ring_buffer, byte_count) }};"
+            "        unsafe {{ &*core::ptr::from_raw_parts::<RingBuffer<{type_}>>(ring_buffer, capacity) }}"
         )
             .unwrap();
-        writeln!(out, "        unsafe {{ ring_buffer.cast::<{type_}>() }}").unwrap();
         writeln!(out, "    }}").unwrap();
     }
     writeln!(out, "}}").unwrap();

@@ -119,7 +119,7 @@ impl WindowServer<usize> for Server {
         let (memory, cap) = alloc_shared(PAGE_SIZE);
         let ring = unsafe { RingBuffer::new_in_single_page(memory) };
         self.windows[window_id].event_ring = Some(ring);
-        (ctx.forward_to_sender(cap), ring.untype().0.data.0.len())
+        (ctx.forward_to_sender(cap), ring.capacity())
     }
 }
 

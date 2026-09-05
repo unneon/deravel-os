@@ -3,7 +3,7 @@ use crate::drvli::SyscallHandler;
 use crate::heap::MutAllocator;
 use crate::heap::granularity::{PageGranular, page_granular_vec};
 use crate::log::log_userspace;
-use crate::page::{PageFlags, virt_to_phys};
+use crate::page::PageFlags;
 use crate::process::{Message, ProcessState, get_process, kill};
 use crate::stack::UserCtx;
 use crate::syscall::SyscallAction::Yield;
@@ -158,7 +158,7 @@ impl SyscallHandler for () {
         user: &mut UserCtx,
         cap: RawCapability,
         stream: usize,
-    ) -> Result<(*mut (), usize)> {
+    ) -> Result<(*const (), usize)> {
         let mut proc = user.process();
         let cap = match with_sum(|| cap.validate(proc.id)) {
             Ok(cap) => cap,
@@ -181,20 +181,9 @@ impl SyscallHandler for () {
             }
             Actor::Kernel => {
                 let handler = get_handler(cap.local_index());
-                let ring_buffer = handler.map_stream(stream);
-                let ring_buffer_size = size_of_val(ring_buffer);
-                let ring_buffer_layout =
-                    Layout::from_size_align(ring_buffer_size, PAGE_SIZE).unwrap();
-
-                let virt = proc.heap.alloc(ring_buffer_layout)?;
-                proc.page_table.map(
-                    virt,
-                    virt_to_phys(ring_buffer as *const _ as *const u8) as usize,
-                    PAGE_SIZE,
-                    PageFlags::read_write().user(),
-                );
+                let (virt, capacity) = handler.map_stream(stream, &mut proc);
                 riscv::asm::sfence_vma_all();
-                Ok((virt as *mut (), ring_buffer.0.data.0.len()))
+                Ok((virt, capacity))
             }
         }
     }

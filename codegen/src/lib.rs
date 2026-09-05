@@ -78,6 +78,7 @@ pub enum Type<'a> {
     U64,
     Unknown(&'a str),
     UntypedCapability,
+    UntypedConstPtr,
     UntypedPointer,
     Usize,
 }
@@ -126,6 +127,7 @@ impl Type<'_> {
             (U32, _) => "u32".into(),
             (U64, _) => "u64".into(),
             (UntypedCapability, _) => "RawCapability".into(),
+            (UntypedConstPtr, _) => "*const ()".into(),
             (UntypedPointer, _) => "*mut ()".into(),
             (Usize, _) => "usize".into(),
             _ => unimplemented!("rust({self:?}, {ctx:?})"),
@@ -211,7 +213,7 @@ impl<'a> ContainsTypes<'a> for Type<'a> {
         match self {
             Bytes | I8 | I16 | I32 | I64 | Isize | Never | ProcessId | ProcessSpawner(_)
             | SharedMemory | Struct(_) | Text | TypedCapability(_) | U8 | U16 | U32 | U64
-            | UntypedCapability | UntypedPointer | Usize => {}
+            | UntypedCapability | UntypedConstPtr | UntypedPointer | Usize => {}
             Array(t) | ConstArray(t) | ConstPtr(t) | Option(t) | Ptr(t) => {
                 t.fix_types(interfaces, structs)
             }

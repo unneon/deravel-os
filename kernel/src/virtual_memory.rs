@@ -1,10 +1,11 @@
 use crate::capability::Handler;
 use crate::page::{Page, PageFlags, PageTable, virt_to_phys};
+use crate::process::Process;
 use crate::sync::Mutex;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::ops::Range;
-use deravel_types::{PAGE_SIZE, ProcessId, SharedMemory, UntypedRingBuffer};
+use deravel_types::{PAGE_SIZE, ProcessId, SharedMemory};
 
 pub trait VirtualMemoryLoader {
     fn load_page(&self, page_index: usize) -> Box<Page>;
@@ -36,7 +37,7 @@ impl<T: VirtualMemoryLoader + Sync + 'static> Handler<SharedMemory> for VirtualM
         unreachable!()
     }
 
-    fn map_stream(&self, _: usize) -> &'static UntypedRingBuffer {
+    fn map_stream(&self, _: usize, _: &mut Process) -> (*const (), usize) {
         unreachable!()
     }
 

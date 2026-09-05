@@ -1,13 +1,14 @@
 use crate::capability::Handler;
 use crate::heap::granularity::PageGranular;
 use crate::page::{PageFlags, PageTable, virt_to_phys};
+use crate::process::Process;
 use crate::virtual_memory::VirtualMemoryRawMapping;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::alloc::{Allocator, Layout};
 use core::ops::Range;
 use core::ptr::NonNull;
-use deravel_types::{ProcessId, UntypedRingBuffer};
+use deravel_types::ProcessId;
 
 pub struct UntypedBox<A: Allocator> {
     ptr: NonNull<()>,
@@ -55,7 +56,7 @@ impl Handler<deravel_types::SharedMemory> for UntypedBox<PageGranular> {
         unreachable!()
     }
 
-    fn map_stream(&self, _: usize) -> &'static UntypedRingBuffer {
+    fn map_stream(&self, _: usize, _: &mut Process) -> (*const (), usize) {
         unreachable!()
     }
 

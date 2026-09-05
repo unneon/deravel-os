@@ -69,7 +69,7 @@ syscall ipc_receive(args array u8) option capability, usize, usize, option pid
 
 syscall ipc_reply(result const_array u8)
 
-syscall ipc_stream(cap capability, stream_ usize) ptr, usize
+syscall ipc_stream(cap capability, stream_ usize) const_ptr, usize
 
 syscall alloc(size usize) ptr u8
 

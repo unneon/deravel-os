@@ -1,15 +1,13 @@
 use crate::capability::{Handler, capability_certificate};
 use crate::elf::Elf;
 use crate::page::PageTable;
-use crate::process::reserve_process;
+use crate::process::{Process, reserve_process};
 use crate::virtual_memory::VirtualMemoryRawMapping;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::ops::Range;
 use core::sync::atomic::Ordering;
-use deravel_types::{
-    Actor, CapabilityCertificateValue, ProcessArgs, ProcessId, ProcessTag, UntypedRingBuffer,
-};
+use deravel_types::{Actor, CapabilityCertificateValue, ProcessArgs, ProcessId, ProcessTag};
 
 impl<T: ProcessTag, U: AsRef<[u8]>> Handler<T::Spawner> for &'static Elf<T, U> {
     fn call_method(&self, _: usize, args: &[u8], sender: ProcessId) -> Vec<u8> {
@@ -34,7 +32,7 @@ impl<T: ProcessTag, U: AsRef<[u8]>> Handler<T::Spawner> for &'static Elf<T, U> {
         buf
     }
 
-    fn map_stream(&self, _: usize) -> &'static UntypedRingBuffer {
+    fn map_stream(&self, _: usize, _: &mut Process) -> (*const (), usize) {
         unreachable!()
     }
 

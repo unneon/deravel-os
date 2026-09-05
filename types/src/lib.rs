@@ -19,7 +19,7 @@ pub use align::*;
 pub use capability::*;
 pub use drvli::*;
 pub use process_id::ProcessId;
-pub use ring_buffer::{RingBuffer, UntypedRingBuffer};
+pub use ring_buffer::RingBuffer;
 
 #[derive(Debug)]
 #[repr(C, align(4096))]

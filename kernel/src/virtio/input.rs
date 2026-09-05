@@ -10,7 +10,7 @@ use crate::virtio::input::types::ConfigSelect;
 use crate::virtio::queue::Queue;
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK};
 use crate::virtio::{Capabilities, Isr};
-use alloc::boxed::Box;
+use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 use deravel_types::{InputAbsinfo, InputEvent, ProcessId, RingBuffer};
@@ -24,7 +24,7 @@ struct State {
 
 pub struct VirtioInput {
     isr: Isr,
-    ring: &'static RingBuffer<InputEvent>,
+    ring: Arc<RingBuffer<InputEvent>>,
     state: Mutex<State>,
 }
 
@@ -56,7 +56,7 @@ impl VirtioInput {
         let name = config_str(&mut caps.device, ConfigSelect::IdName, 0);
         info!("found {name}");
 
-        let ring = Box::leak(RingBuffer::new_single_page());
+        let ring = RingBuffer::new_arc::<496>();
 
         common.device_status().write_bitor(STATUS_DRIVER_OK as u8);
         VirtioInput {
@@ -113,7 +113,7 @@ impl InputDeviceServer for VirtioInput {
         }
     }
 
-    fn events(&self) -> &'static RingBuffer<InputEvent> {
-        self.ring
+    fn events(&self) -> Arc<RingBuffer<InputEvent>> {
+        Arc::clone(&self.ring)
     }
 }

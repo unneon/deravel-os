@@ -53,7 +53,7 @@ fn generate_server_trait(interface: &Interface, out: &mut String) {
         let type_ = stream.type_.rust(Member);
         writeln!(
             out,
-            "    fn {stream_name}(&self) -> &'static RingBuffer<{type_}>;"
+            "    fn {stream_name}(&self) -> Arc<RingBuffer<{type_}>>;"
         )
         .unwrap();
     }
@@ -110,17 +110,36 @@ fn generate_handler_impl(interface: &Interface, out: &mut String) {
     writeln!(out, "    }}").unwrap();
     writeln!(
         out,
-        "    fn map_stream(&self, stream: usize) -> &'static UntypedRingBuffer {{"
+        "    fn map_stream(&self, stream: usize, _proc: &mut Process) -> (*const (), usize) {{"
     )
     .unwrap();
     writeln!(out, "        match stream {{").unwrap();
     for (stream_index, stream) in interface.streams.iter().enumerate() {
         let stream_name = &stream.name;
+        writeln!(out, "            {stream_index} => {{").unwrap();
+        writeln!(out, "                let ring = self.{stream_name}();").unwrap();
         writeln!(
             out,
-            "            {stream_index} => self.{stream_name}().untype(),"
+            "                let ring_layout = Layout::for_value::<RingBuffer<_>>(&*ring);"
         )
         .unwrap();
+        writeln!(
+            out,
+            "                let virt = _proc.heap.alloc(ring_layout).unwrap();"
+        )
+        .unwrap();
+        writeln!(out, "                _proc.page_table.map(").unwrap();
+        writeln!(out, "                    virt,").unwrap();
+        writeln!(out, "                    virt_to_phys(&*ring as *const RingBuffer<_> as *const u8) as usize,").unwrap();
+        writeln!(
+            out,
+            "                    ring_layout.size().next_multiple_of(PAGE_SIZE),"
+        )
+        .unwrap();
+        writeln!(out, "                    PageFlags::read_write().user(),").unwrap();
+        writeln!(out, "                );").unwrap();
+        writeln!(out, "                (virt as *const (), ring.capacity())").unwrap();
+        writeln!(out, "            }}").unwrap();
     }
     writeln!(out, "            _ => unreachable!(),").unwrap();
     writeln!(out, "        }}").unwrap();
