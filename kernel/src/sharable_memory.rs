@@ -9,11 +9,11 @@ use core::ops::{Deref, Range};
 use deravel_types::{ProcessId, UntypedRingBuffer};
 
 #[derive(Clone)]
-pub struct SharedMemory {
+pub struct ShareableMemory {
     pub backing: Arc<UntypedBox<PageGranular>>,
 }
 
-impl Handler<deravel_types::SharedMemory> for SharedMemory {
+impl Handler<deravel_types::SharedMemory> for ShareableMemory {
     fn call_method(&self, _: usize, _: &[u8], _: ProcessId) -> Vec<u8> {
         unreachable!()
     }

@@ -5,7 +5,7 @@ use crate::drvli::DisplayServer;
 use crate::heap::granularity::page_granular_vec;
 use crate::interrupt::InterruptHandler;
 use crate::page::virt_to_phys;
-use crate::shared_memory;
+use crate::sharable_memory::ShareableMemory;
 use crate::sync::Mutex;
 use crate::util::untyped_box::UntypedBox;
 use crate::util::volatile::{Volatile, volatile_struct};
@@ -39,8 +39,8 @@ pub struct VirtioGpu {
     cursorq: Queue<1>,
     width: u32,
     height: u32,
-    framebuffer: Option<shared_memory::SharedMemory>,
-    cursor_image: shared_memory::SharedMemory,
+    framebuffer: Option<ShareableMemory>,
+    cursor_image: ShareableMemory,
     cursor_updated: bool,
 }
 
@@ -62,7 +62,7 @@ impl VirtioGpu {
             width: 0,
             height: 0,
             framebuffer: None,
-            cursor_image: shared_memory::SharedMemory {
+            cursor_image: ShareableMemory {
                 backing: Arc::new(UntypedBox::new(
                     page_granular_vec![0u8; 64 * 64 * 4].into_boxed_slice(),
                 )),
@@ -73,7 +73,7 @@ impl VirtioGpu {
         let (width, height) = gpu.get_resolution();
         gpu.width = width;
         gpu.height = height;
-        gpu.framebuffer = Some(shared_memory::SharedMemory {
+        gpu.framebuffer = Some(ShareableMemory {
             backing: Arc::new(UntypedBox::new(
                 page_granular_vec![0u8; width as usize * height as usize * 4].into_boxed_slice(),
             )),

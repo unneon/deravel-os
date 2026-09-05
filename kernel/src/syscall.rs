@@ -1,15 +1,15 @@
-use crate::capability::grant_kernel_capability;
+use crate::capability::{get_handler, grant_kernel_capability};
 use crate::drvli::SyscallHandler;
 use crate::heap::MutAllocator;
 use crate::heap::granularity::{PageGranular, page_granular_vec};
 use crate::log::log_userspace;
 use crate::page::{PageFlags, virt_to_phys};
 use crate::process::{Message, ProcessState, get_process, kill};
+use crate::sharable_memory::ShareableMemory;
 use crate::stack::UserCtx;
 use crate::syscall::SyscallAction::Yield;
 use crate::user::{UserPtr, UserSyscallError, with_sum};
 use crate::util::untyped_box::UntypedBox;
-use crate::{capability, shared_memory};
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -70,7 +70,7 @@ impl SyscallHandler for () {
             }
             Actor::Kernel => {
                 drop(proc);
-                let handler = capability::get_handler(cap.local_index());
+                let handler = get_handler(cap.local_index());
                 let result = handler.call_method(method, &args_buffer.copy_to_kernel(), user.pid());
                 if let Err(err) = result_buffer.write_to_user(&result) {
                     kill!(user, "{err}")
@@ -137,7 +137,7 @@ impl SyscallHandler for () {
             if ring.certifier() != Actor::Kernel {
                 kill!(user, proc, "shared memory must be granted by the kernel");
             }
-            let handler = capability::get_handler(ring.local_index());
+            let handler = get_handler(ring.local_index());
             let length = handler.shared_memory_size();
             if !length.is_multiple_of(PAGE_SIZE) {
                 kill!(user, proc, "stream size must be a multiple of page size")
@@ -181,7 +181,7 @@ impl SyscallHandler for () {
                 Err(Yield)
             }
             Actor::Kernel => {
-                let handler = capability::get_handler(cap.local_index());
+                let handler = get_handler(cap.local_index());
                 let ring_buffer = handler.map_stream(stream);
                 let ring_buffer_size = size_of_val(ring_buffer);
                 let ring_buffer_layout =
@@ -224,10 +224,7 @@ impl SyscallHandler for () {
             .process()
             .alloc(pages.clone(), PageFlags::read_write().user())?;
         riscv::asm::sfence_vma_all();
-        let cap = grant_kernel_capability(
-            user.pid(),
-            Arc::new(shared_memory::SharedMemory { backing: pages }),
-        );
+        let cap = grant_kernel_capability(user.pid(), Arc::new(ShareableMemory { backing: pages }));
         Ok((virt, cap))
     }
 
@@ -241,7 +238,7 @@ impl SyscallHandler for () {
             kill!(user, proc, "non-kernel shared memory capability")
         }
 
-        let handler = capability::get_handler(cap.local_index());
+        let handler = get_handler(cap.local_index());
         let length = handler.shared_memory_size();
         let padded_length = length.next_multiple_of(PAGE_SIZE);
         let layout = Layout::from_size_align(padded_length, PAGE_SIZE).unwrap();

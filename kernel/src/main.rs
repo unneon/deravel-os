@@ -31,7 +31,7 @@ mod pci;
 mod plic;
 mod process;
 mod sbi;
-mod shared_memory;
+mod sharable_memory;
 mod shutdown;
 mod stack;
 mod sync;
