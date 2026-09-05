@@ -11,8 +11,8 @@ use deravel_types::{
     Actor, CapabilityCertificateValue, ProcessArgs, ProcessId, ProcessTag, UntypedRingBuffer,
 };
 
-impl<T: ProcessTag, U: AsRef<[u8]>> Handler<T::Spawner> for Elf<T, U> {
-    fn call_method(&'static self, _: usize, args: &[u8], sender: ProcessId) -> Vec<u8> {
+impl<T: ProcessTag, U: AsRef<[u8]>> Handler<T::Spawner> for &'static Elf<T, U> {
+    fn call_method(&self, _: usize, args: &[u8], sender: ProcessId) -> Vec<u8> {
         let reserve = reserve_process(self);
         let export = reserve.export;
         capability_certificate(*export).store(

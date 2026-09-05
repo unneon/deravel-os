@@ -60,6 +60,7 @@ use crate::shutdown::KernelShutdown;
 use crate::stack::UserCtx;
 use crate::syscall::SyscallAction;
 use ::log::*;
+use alloc::sync::Arc;
 use core::panic::PanicInfo;
 use deravel_types::memory::USER_STACK_GUARD;
 use deravel_types::*;
@@ -86,11 +87,11 @@ extern "C" fn main(_hart_id: u64, dt_ptr: *const u8) -> ! {
         keyboard: reserve_kernel_capability(virtio_keyboard),
         mouse: reserve_kernel_capability(virtio_mouse),
         fs: fat.export,
-        image_viewer: reserve_kernel_capability(elf!(ImageViewer, "image_viewer")),
+        image_viewer: reserve_kernel_capability(Arc::new(elf!(ImageViewer, "image_viewer"))),
         net: reserve_kernel_capability(virtio_net),
-        shutdown: reserve_kernel_capability(&KernelShutdown),
-        terminal: reserve_kernel_capability(elf!(Terminal, "terminal")),
-        shell: reserve_kernel_capability(elf!(Shell, "shell")),
+        shutdown: reserve_kernel_capability(Arc::new(KernelShutdown)),
+        terminal: reserve_kernel_capability(Arc::new(elf!(Terminal, "terminal"))),
+        shell: reserve_kernel_capability(Arc::new(elf!(Shell, "shell"))),
     });
     fat.spawn(FatFsArgs {
         drive: reserve_kernel_capability(virtio_blk),

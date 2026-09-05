@@ -14,7 +14,8 @@ use elf::segment::ProgramHeader;
 
 pub macro elf($ty:ty, $env:literal) {{
     {
-        static ELF: &Elf<$ty, [u8; elf_bytes!($env).len()]> = &Elf(PhantomData, *elf_bytes!($env));
+        static ELF: &'static Elf<$ty, [u8; elf_bytes!($env).len()]> =
+            &Elf(PhantomData, *elf_bytes!($env));
         ELF
     }
 }}

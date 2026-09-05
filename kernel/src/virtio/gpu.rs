@@ -13,7 +13,6 @@ use crate::virtio::gpu::types::*;
 use crate::virtio::queue::Queue;
 use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_OK, features};
 use crate::virtio::{Capabilities, Isr};
-use alloc::boxed::Box;
 use alloc::sync::Arc;
 use deravel_types::{Capability, ProcessId, SharedMemory};
 use log::*;
@@ -194,7 +193,7 @@ impl DisplayServer for Mutex<VirtioGpu> {
         let self_ = self.lock();
         grant_kernel_capability(
             sender,
-            Box::leak(Box::new(self_.framebuffer.as_ref().unwrap().clone())),
+            Arc::new(self_.framebuffer.as_ref().unwrap().clone()),
         )
     }
 
@@ -229,7 +228,7 @@ impl DisplayServer for Mutex<VirtioGpu> {
 
     fn cursor_image_buffer(&self, sender: ProcessId) -> Capability<SharedMemory> {
         let self_ = self.lock();
-        grant_kernel_capability(sender, Box::leak(Box::new(self_.cursor_image.clone())))
+        grant_kernel_capability(sender, Arc::new(self_.cursor_image.clone()))
     }
 
     fn cursor_image_modified(&self, _: ProcessId) {

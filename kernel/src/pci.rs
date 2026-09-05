@@ -13,6 +13,7 @@ use crate::virtio::blk::VirtioBlk;
 use crate::virtio::gpu::VirtioGpu;
 use crate::virtio::input::VirtioInput;
 use crate::virtio::net::VirtioNet;
+use alloc::sync::Arc;
 use core::alloc::Layout;
 use fdt::Fdt;
 use fdt::node::FdtNode;
@@ -40,11 +41,11 @@ struct PciRanges {
 pub fn initialize_all_pci(
     dt: &Fdt,
 ) -> (
-    &'static VirtioBlk,
-    &'static VirtioNet,
-    &'static Mutex<VirtioGpu>,
-    &'static VirtioInput,
-    &'static VirtioInput,
+    Arc<VirtioBlk>,
+    Arc<VirtioNet>,
+    Arc<Mutex<VirtioGpu>>,
+    Arc<VirtioInput>,
+    Arc<VirtioInput>,
 ) {
     let soc = dt.find_node("/soc").unwrap();
     let pci = dt.find_node("/soc/pci").unwrap();
@@ -71,33 +72,33 @@ pub fn initialize_all_pci(
             let config = config.as_general_device().unwrap();
             let bars = allocate_all_bars(config, &pci_ranges, &mut io, &mut mem32, &mut mem64);
             config.command.write_bitor(0b111);
-            let virtio_net = virtio::initialize_net(config, &bars);
+            let virtio_net = Arc::new(virtio::initialize_net(config, &bars));
             let plic = pci_interrupt_to_plic(&pci, &plic, config_index, config);
-            register_interrupt(plic, virtio_net);
+            register_interrupt(plic, virtio_net.clone());
             virtio_net_slot = Some(virtio_net);
         } else if config.vendor_id == 0x1AF4 && config.device_id == 0x1042 {
             let config = config.as_general_device().unwrap();
             let bars = allocate_all_bars(config, &pci_ranges, &mut io, &mut mem32, &mut mem64);
             config.command.write_bitor(0b111);
-            let virtio_blk = virtio::initialize_blk(config, &bars);
+            let virtio_blk = Arc::new(virtio::initialize_blk(config, &bars));
             let plic = pci_interrupt_to_plic(&pci, &plic, config_index, config);
-            register_interrupt(plic, virtio_blk);
+            register_interrupt(plic, virtio_blk.clone());
             virtio_blk_slot = Some(virtio_blk);
         } else if config.vendor_id == 0x1AF4 && config.device_id == 0x1050 {
             let config = config.as_general_device().unwrap();
             let bars = allocate_all_bars(config, &pci_ranges, &mut io, &mut mem32, &mut mem64);
             config.command.write_bitor(0b111);
-            let virtio_gpu = virtio::initialize_gpu(config, &bars);
+            let virtio_gpu = Arc::new(virtio::initialize_gpu(config, &bars));
             let plic = pci_interrupt_to_plic(&pci, &plic, config_index, config);
-            register_interrupt(plic, virtio_gpu);
+            register_interrupt(plic, virtio_gpu.clone());
             virtio_gpu_slot = Some(virtio_gpu);
         } else if config.vendor_id == 0x1AF4 && config.device_id == 0x1052 {
             let config = config.as_general_device().unwrap();
             let bars = allocate_all_bars(config, &pci_ranges, &mut io, &mut mem32, &mut mem64);
             config.command.write_bitor(0b111);
-            let virtio_input = virtio::initialize_input(config, &bars);
+            let virtio_input = Arc::new(virtio::initialize_input(config, &bars));
             let plic = pci_interrupt_to_plic(&pci, &plic, config_index, config);
-            register_interrupt(plic, virtio_input);
+            register_interrupt(plic, virtio_input.clone());
             if virtio_input.is_keyboard() {
                 virtio_keyboard_slot = Some(virtio_input);
             } else if virtio_input.is_mouse() {

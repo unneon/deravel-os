@@ -8,7 +8,6 @@ use crate::virtio::blk::VirtioBlk;
 use crate::virtio::gpu::VirtioGpu;
 use crate::virtio::input::VirtioInput;
 use crate::virtio::net::VirtioNet;
-use alloc::boxed::Box;
 
 pub mod blk;
 pub mod gpu;
@@ -107,40 +106,28 @@ unsafe impl Sync for Isr {}
 
 unsafe impl VendorPciCapability for VirtioPciCapability {}
 
-pub fn initialize_blk(
-    config: &Config<GeneralDevice>,
-    bars: &[AllocatedRange; 6],
-) -> &'static VirtioBlk {
+pub fn initialize_blk(config: &Config<GeneralDevice>, bars: &[AllocatedRange; 6]) -> VirtioBlk {
     let caps = extract_capabilities(config, bars);
-    let device = VirtioBlk::new(caps);
-    Box::leak(Box::new(device))
+    VirtioBlk::new(caps)
 }
 
 pub fn initialize_gpu(
     config: &Config<GeneralDevice>,
     bars: &[AllocatedRange; 6],
-) -> &'static Mutex<VirtioGpu> {
+) -> Mutex<VirtioGpu> {
     let caps = extract_capabilities(config, bars);
     let virtio_gpu = VirtioGpu::new(caps);
-    Box::leak(Box::new(Mutex::new(virtio_gpu)))
+    Mutex::new(virtio_gpu)
 }
 
-pub fn initialize_input(
-    config: &Config<GeneralDevice>,
-    bars: &[AllocatedRange; 6],
-) -> &'static VirtioInput {
+pub fn initialize_input(config: &Config<GeneralDevice>, bars: &[AllocatedRange; 6]) -> VirtioInput {
     let caps = extract_capabilities(config, bars);
-    let virtio_input = VirtioInput::new(caps);
-    Box::leak(Box::new(virtio_input))
+    VirtioInput::new(caps)
 }
 
-pub fn initialize_net(
-    config: &Config<GeneralDevice>,
-    bars: &[AllocatedRange; 6],
-) -> &'static VirtioNet {
+pub fn initialize_net(config: &Config<GeneralDevice>, bars: &[AllocatedRange; 6]) -> VirtioNet {
     let caps = extract_capabilities(config, bars);
-    let virtio_net = VirtioNet::new(caps);
-    Box::leak(Box::new(virtio_net))
+    VirtioNet::new(caps)
 }
 
 fn extract_capabilities<T, Access>(

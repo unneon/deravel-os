@@ -10,6 +10,7 @@ use crate::virtio::registers::{STATUS_ACKNOWLEDGE, STATUS_DRIVER, STATUS_DRIVER_
 use crate::virtio::{Capabilities, Isr};
 use crate::virtual_memory::{VirtualMemoryLoader, VirtualMemoryMapping};
 use alloc::boxed::Box;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 use deravel_types::{Capability, PAGE_SIZE, ProcessId, SharedMemory};
 use log::*;
@@ -132,10 +133,7 @@ impl DriveServer for VirtioBlk {
         let sector_count = usize::try_from(sector_count).unwrap();
         let size = sector_count.checked_mul(SECTOR_SIZE).unwrap();
         assert!(size.is_multiple_of(PAGE_SIZE));
-        grant_kernel_capability(
-            sender,
-            Box::leak(Box::new(VirtualMemoryMapping::new(region, size))),
-        )
+        grant_kernel_capability(sender, Arc::new(VirtualMemoryMapping::new(region, size)))
     }
 
     fn write(&self, _: ProcessId, sector: u64, data: &[u8]) {

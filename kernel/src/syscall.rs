@@ -10,7 +10,6 @@ use crate::syscall::SyscallAction::Yield;
 use crate::user::{UserPtr, UserSyscallError, with_sum};
 use crate::util::untyped_box::UntypedBox;
 use crate::{capability, shared_memory};
-use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -227,7 +226,7 @@ impl SyscallHandler for () {
         riscv::asm::sfence_vma_all();
         let cap = grant_kernel_capability(
             user.pid(),
-            Box::leak(Box::new(shared_memory::SharedMemory { backing: pages })),
+            Arc::new(shared_memory::SharedMemory { backing: pages }),
         );
         Ok((virt, cap))
     }
