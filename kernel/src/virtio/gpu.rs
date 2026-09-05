@@ -32,8 +32,12 @@ features! { VirtioGpu Features 0
 }
 
 pub struct VirtioGpu {
-    config: Volatile<'static, Config>,
     isr: Isr,
+    state: Mutex<State>,
+}
+
+struct State {
+    config: Volatile<'static, Config>,
     controlq: Queue<0>,
     cursorq: Queue<1>,
     width: u32,
@@ -54,23 +58,26 @@ impl VirtioGpu {
         common.device_status().write_bitor(STATUS_DRIVER_OK as u8);
 
         let mut gpu = VirtioGpu {
-            config: capabilities.device,
             isr: capabilities.isr,
-            controlq,
-            cursorq,
-            width: 0,
-            height: 0,
-            framebuffer: None,
-            cursor_image: Arc::new(UntypedBox::new(
-                page_granular_vec![0u8; 64 * 64 * 4].into_boxed_slice(),
-            )),
-            cursor_updated: true,
+            state: Mutex::new(State {
+                config: capabilities.device,
+                controlq,
+                cursorq,
+                width: 0,
+                height: 0,
+                framebuffer: None,
+                cursor_image: Arc::new(UntypedBox::new(
+                    page_granular_vec![0u8; 64 * 64 * 4].into_boxed_slice(),
+                )),
+                cursor_updated: true,
+            }),
         };
 
         let (width, height) = gpu.get_resolution();
-        gpu.width = width;
-        gpu.height = height;
-        gpu.framebuffer = Some(Arc::new(UntypedBox::new(
+        let mut state = gpu.state.lock();
+        state.width = width;
+        state.height = height;
+        state.framebuffer = Some(Arc::new(UntypedBox::new(
             page_granular_vec![0u8; width as usize * height as usize * 4].into_boxed_slice(),
         )));
         info!("detected a {width}x{height} display");
@@ -82,8 +89,8 @@ impl VirtioGpu {
             width,
             height,
         };
-        gpu.controlq.descriptor_readonly(0, &req, Some(1));
-        command::<ResponseNodata, _>(&mut gpu.controlq, 1).unwrap();
+        state.controlq.descriptor_readonly(0, &req, Some(1));
+        command::<ResponseNodata, _>(&mut state.controlq, 1).unwrap();
 
         let req = ResourceAttachBacking {
             hdr: CtrlType::CmdResourceAttachBacking.header(),
@@ -92,13 +99,13 @@ impl VirtioGpu {
         };
         // TODO: Include this in reference count?
         let mem_entry = MemEntry {
-            addr: virt_to_phys(gpu.framebuffer.as_ref().unwrap().as_untyped_ptr()) as u64,
-            length: gpu.framebuffer.as_ref().unwrap().byte_size() as u32,
+            addr: virt_to_phys(state.framebuffer.as_ref().unwrap().as_untyped_ptr()) as u64,
+            length: state.framebuffer.as_ref().unwrap().byte_size() as u32,
             padding: 0,
         };
-        gpu.controlq.descriptor_readonly(0, &req, Some(1));
-        gpu.controlq.descriptor_readonly(1, &mem_entry, Some(2));
-        command::<ResponseNodata, _>(&mut gpu.controlq, 2).unwrap();
+        state.controlq.descriptor_readonly(0, &req, Some(1));
+        state.controlq.descriptor_readonly(1, &mem_entry, Some(2));
+        command::<ResponseNodata, _>(&mut state.controlq, 2).unwrap();
 
         let req = SetScanout {
             hdr: CtrlType::CmdSetScanout.header(),
@@ -111,18 +118,20 @@ impl VirtioGpu {
             scanout_id: 0,
             resource_id: 1,
         };
-        gpu.controlq.descriptor_readonly(0, &req, Some(1));
-        command::<ResponseNodata, _>(&mut gpu.controlq, 1).unwrap();
+        state.controlq.descriptor_readonly(0, &req, Some(1));
+        command::<ResponseNodata, _>(&mut state.controlq, 1).unwrap();
+        drop(state);
 
         gpu.initialize_cursor_memory();
 
         gpu
     }
 
-    fn get_resolution(&mut self) -> (u32, u32) {
+    fn get_resolution(&self) -> (u32, u32) {
+        let mut state = self.state.lock();
         let req = CtrlType::CmdGetDisplayInfo.header();
-        self.controlq.descriptor_readonly(0, &req, Some(1));
-        let resp: ResponseDisplayInfo = command(&mut self.controlq, 1).unwrap();
+        state.controlq.descriptor_readonly(0, &req, Some(1));
+        let resp: ResponseDisplayInfo = command(&mut state.controlq, 1).unwrap();
         let pmode = &resp.pmodes[0];
         assert_eq!(pmode.enabled, 1);
         let r = pmode.r;
@@ -132,6 +141,7 @@ impl VirtioGpu {
     }
 
     fn initialize_cursor_memory(&mut self) {
+        let mut state = self.state.lock();
         let req = ResourceCreate2D {
             hdr: CtrlType::CmdResourceCreate2D.header(),
             resource_id: 2,
@@ -140,8 +150,8 @@ impl VirtioGpu {
             width: 64,
             height: 64,
         };
-        self.controlq.descriptor_readonly(0, &req, Some(1));
-        command::<ResponseNodata, _>(&mut self.controlq, 1).unwrap();
+        state.controlq.descriptor_readonly(0, &req, Some(1));
+        command::<ResponseNodata, _>(&mut state.controlq, 1).unwrap();
 
         let req = ResourceAttachBacking {
             hdr: CtrlType::CmdResourceAttachBacking.header(),
@@ -150,52 +160,53 @@ impl VirtioGpu {
         };
         // TODO: Include this in reference count?
         let mem_entry = MemEntry {
-            addr: virt_to_phys(self.cursor_image.as_untyped_ptr()) as u64,
+            addr: virt_to_phys(state.cursor_image.as_untyped_ptr()) as u64,
             length: 64 * 64 * 4,
             padding: 0,
         };
-        self.controlq.descriptor_readonly(0, &req, Some(1));
-        self.controlq.descriptor_readonly(1, &mem_entry, Some(2));
-        command::<ResponseNodata, _>(&mut self.controlq, 2).unwrap();
+        state.controlq.descriptor_readonly(0, &req, Some(1));
+        state.controlq.descriptor_readonly(1, &mem_entry, Some(2));
+        command::<ResponseNodata, _>(&mut state.controlq, 2).unwrap();
     }
 }
 
-impl InterruptHandler for Mutex<VirtioGpu> {
+impl InterruptHandler for VirtioGpu {
     fn handle(&self) {
-        let mut self_ = self.lock();
-        let isr = self_.isr.clear();
+        let mut state = self.state.lock();
+        let isr = self.isr.clear();
         if isr.has_device_configuration_interrupt() {
-            let events_read = self_.config.events_read().read();
+            let events_read = state.config.events_read().read();
             if events_read & EVENT_DISPLAY != 0 {
-                self_.config.events_clear().write(EVENT_DISPLAY);
-                let (width, height) = self_.get_resolution();
+                state.config.events_clear().write(EVENT_DISPLAY);
+                drop(state);
+                let (width, height) = self.get_resolution();
                 info!("display configuration changed to {width}x{height}");
             }
         }
     }
 }
 
-impl DisplayServer for Mutex<VirtioGpu> {
+impl DisplayServer for VirtioGpu {
     fn width(&self, _: ProcessId) -> u32 {
-        self.lock().width
+        self.state.lock().width
     }
 
     fn height(&self, _: ProcessId) -> u32 {
-        self.lock().height
+        self.state.lock().height
     }
 
     fn framebuffer(&self, sender: ProcessId) -> Capability<SharedMemory> {
-        let self_ = self.lock();
-        grant_kernel_capability(sender, self_.framebuffer.as_ref().unwrap().clone())
+        let state = self.state.lock();
+        grant_kernel_capability(sender, state.framebuffer.as_ref().unwrap().clone())
     }
 
     fn draw(&self, _: ProcessId) {
-        let mut self_ = self.lock();
+        let mut state = self.state.lock();
         let r = Rect {
             x: 0,
             y: 0,
-            width: self_.width,
-            height: self_.height,
+            width: state.width,
+            height: state.height,
         };
 
         let req = TransferToHost2D {
@@ -205,8 +216,8 @@ impl DisplayServer for Mutex<VirtioGpu> {
             resource_id: 1,
             padding: 0,
         };
-        self_.controlq.descriptor_readonly(0, &req, Some(1));
-        command::<ResponseNodata, _>(&mut self_.controlq, 1).unwrap();
+        state.controlq.descriptor_readonly(0, &req, Some(1));
+        command::<ResponseNodata, _>(&mut state.controlq, 1).unwrap();
 
         let req = ResourceFlush {
             hdr: CtrlType::CmdResourceFlush.header(),
@@ -214,17 +225,17 @@ impl DisplayServer for Mutex<VirtioGpu> {
             resource_id: 1,
             padding: 0,
         };
-        self_.controlq.descriptor_readonly(0, &req, Some(1));
-        command::<ResponseNodata, _>(&mut self_.controlq, 1).unwrap();
+        state.controlq.descriptor_readonly(0, &req, Some(1));
+        command::<ResponseNodata, _>(&mut state.controlq, 1).unwrap();
     }
 
     fn cursor_image_buffer(&self, sender: ProcessId) -> Capability<SharedMemory> {
-        let self_ = self.lock();
-        grant_kernel_capability(sender, self_.cursor_image.clone())
+        let state = self.state.lock();
+        grant_kernel_capability(sender, state.cursor_image.clone())
     }
 
     fn cursor_image_modified(&self, _: ProcessId) {
-        let mut self_ = self.lock();
+        let mut state = self.state.lock();
         let req = TransferToHost2D {
             hdr: CtrlHdr {
                 flags: FLAG_FENCE,
@@ -240,17 +251,17 @@ impl DisplayServer for Mutex<VirtioGpu> {
             resource_id: 2,
             padding: 0,
         };
-        self_.controlq.descriptor_readonly(0, &req, Some(1));
-        command::<ResponseNodata, _>(&mut self_.controlq, 1).unwrap();
+        state.controlq.descriptor_readonly(0, &req, Some(1));
+        command::<ResponseNodata, _>(&mut state.controlq, 1).unwrap();
 
-        self_.cursor_updated = true;
+        state.cursor_updated = true;
     }
 
     fn update_cursor(&self, _: ProcessId, x: u32, y: u32) {
-        let mut self_ = self.lock();
+        let mut state = self.state.lock();
         let req = UpdateCursor {
-            hdr: if self_.cursor_updated {
-                self_.cursor_updated = false;
+            hdr: if state.cursor_updated {
+                state.cursor_updated = false;
                 CtrlType::CmdUpdateCursor
             } else {
                 CtrlType::CmdMoveCursor
@@ -267,8 +278,8 @@ impl DisplayServer for Mutex<VirtioGpu> {
             hot_y: 0,
             padding: 0,
         };
-        self_.cursorq.descriptor_readonly(0, &req, None);
-        self_.cursorq.send_and_recv(0);
+        state.cursorq.descriptor_readonly(0, &req, None);
+        state.cursorq.send_and_recv(0);
     }
 }
 

@@ -7,7 +7,6 @@ use crate::interrupt::register_interrupt;
 use crate::page::phys_to_virt;
 use crate::pci::config::{Config, ConfigUntyped, GeneralDevice};
 use crate::plic::plic_node;
-use crate::sync::Mutex;
 use crate::virtio;
 use crate::virtio::blk::VirtioBlk;
 use crate::virtio::gpu::VirtioGpu;
@@ -43,7 +42,7 @@ pub fn initialize_all_pci(
 ) -> (
     Arc<VirtioBlk>,
     Arc<VirtioNet>,
-    Arc<Mutex<VirtioGpu>>,
+    Arc<VirtioGpu>,
     Arc<VirtioInput>,
     Arc<VirtioInput>,
 ) {
