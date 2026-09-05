@@ -42,7 +42,7 @@ struct State {
     cursorq: Queue<1>,
     width: u32,
     height: u32,
-    framebuffer: Option<Arc<UntypedBox<PageGranular>>>,
+    framebuffer: Arc<UntypedBox<PageGranular>>,
     cursor_image: Arc<UntypedBox<PageGranular>>,
     cursor_updated: bool,
 }
@@ -53,120 +53,35 @@ impl VirtioGpu {
         common.device_status().write(0);
         common.device_status().write_bitor(STATUS_ACKNOWLEDGE as u8);
         common.device_status().write_bitor(STATUS_DRIVER as u8);
-        let controlq = Queue::new(&mut common, &capabilities.notify, 4);
+        let mut controlq = Queue::new(&mut common, &capabilities.notify, 4);
         let cursorq = Queue::new(&mut common, &capabilities.notify, 4);
         common.device_status().write_bitor(STATUS_DRIVER_OK as u8);
 
-        let mut gpu = VirtioGpu {
+        let (width, height) = get_resolution(&mut controlq);
+        info!("detected a {width}x{height} display");
+
+        let framebuffer = Arc::new(UntypedBox::new(
+            page_granular_vec![0u8; width as usize * height as usize * 4].into_boxed_slice(),
+        ));
+        let cursor_image = Arc::new(UntypedBox::new(
+            page_granular_vec![0u8; 64 * 64 * 4].into_boxed_slice(),
+        ));
+        initialize_framebuffer_memory(width, height, &framebuffer, &mut controlq);
+        initialize_cursor_memory(&cursor_image, &mut controlq);
+
+        VirtioGpu {
             isr: capabilities.isr,
             state: Mutex::new(State {
                 config: capabilities.device,
                 controlq,
                 cursorq,
-                width: 0,
-                height: 0,
-                framebuffer: None,
-                cursor_image: Arc::new(UntypedBox::new(
-                    page_granular_vec![0u8; 64 * 64 * 4].into_boxed_slice(),
-                )),
-                cursor_updated: true,
-            }),
-        };
-
-        let (width, height) = gpu.get_resolution();
-        let mut state = gpu.state.lock();
-        state.width = width;
-        state.height = height;
-        state.framebuffer = Some(Arc::new(UntypedBox::new(
-            page_granular_vec![0u8; width as usize * height as usize * 4].into_boxed_slice(),
-        )));
-        info!("detected a {width}x{height} display");
-
-        let req = ResourceCreate2D {
-            hdr: CtrlType::CmdResourceCreate2D.header(),
-            resource_id: 1,
-            format: Format::B8G8R8A8Unorm as u32,
-            width,
-            height,
-        };
-        state.controlq.descriptor_readonly(0, &req, Some(1));
-        command::<ResponseNodata, _>(&mut state.controlq, 1).unwrap();
-
-        let req = ResourceAttachBacking {
-            hdr: CtrlType::CmdResourceAttachBacking.header(),
-            resouce_id: 1,
-            nr_entries: 1,
-        };
-        // TODO: Include this in reference count?
-        let mem_entry = MemEntry {
-            addr: virt_to_phys(state.framebuffer.as_ref().unwrap().as_untyped_ptr()) as u64,
-            length: state.framebuffer.as_ref().unwrap().byte_size() as u32,
-            padding: 0,
-        };
-        state.controlq.descriptor_readonly(0, &req, Some(1));
-        state.controlq.descriptor_readonly(1, &mem_entry, Some(2));
-        command::<ResponseNodata, _>(&mut state.controlq, 2).unwrap();
-
-        let req = SetScanout {
-            hdr: CtrlType::CmdSetScanout.header(),
-            r: Rect {
-                x: 0,
-                y: 0,
                 width,
                 height,
-            },
-            scanout_id: 0,
-            resource_id: 1,
-        };
-        state.controlq.descriptor_readonly(0, &req, Some(1));
-        command::<ResponseNodata, _>(&mut state.controlq, 1).unwrap();
-        drop(state);
-
-        gpu.initialize_cursor_memory();
-
-        gpu
-    }
-
-    fn get_resolution(&self) -> (u32, u32) {
-        let mut state = self.state.lock();
-        let req = CtrlType::CmdGetDisplayInfo.header();
-        state.controlq.descriptor_readonly(0, &req, Some(1));
-        let resp: ResponseDisplayInfo = command(&mut state.controlq, 1).unwrap();
-        let pmode = &resp.pmodes[0];
-        assert_eq!(pmode.enabled, 1);
-        let r = pmode.r;
-        assert_eq!(r.x, 0);
-        assert_eq!(r.y, 0);
-        (r.width, r.height)
-    }
-
-    fn initialize_cursor_memory(&mut self) {
-        let mut state = self.state.lock();
-        let req = ResourceCreate2D {
-            hdr: CtrlType::CmdResourceCreate2D.header(),
-            resource_id: 2,
-            // TODO: This seems to be ignored in favor of R8G8B8A8Unorm.
-            format: Format::B8G8R8A8Unorm as u32,
-            width: 64,
-            height: 64,
-        };
-        state.controlq.descriptor_readonly(0, &req, Some(1));
-        command::<ResponseNodata, _>(&mut state.controlq, 1).unwrap();
-
-        let req = ResourceAttachBacking {
-            hdr: CtrlType::CmdResourceAttachBacking.header(),
-            resouce_id: 2,
-            nr_entries: 1,
-        };
-        // TODO: Include this in reference count?
-        let mem_entry = MemEntry {
-            addr: virt_to_phys(state.cursor_image.as_untyped_ptr()) as u64,
-            length: 64 * 64 * 4,
-            padding: 0,
-        };
-        state.controlq.descriptor_readonly(0, &req, Some(1));
-        state.controlq.descriptor_readonly(1, &mem_entry, Some(2));
-        command::<ResponseNodata, _>(&mut state.controlq, 2).unwrap();
+                framebuffer,
+                cursor_image,
+                cursor_updated: true,
+            }),
+        }
     }
 }
 
@@ -178,8 +93,7 @@ impl InterruptHandler for VirtioGpu {
             let events_read = state.config.events_read().read();
             if events_read & EVENT_DISPLAY != 0 {
                 state.config.events_clear().write(EVENT_DISPLAY);
-                drop(state);
-                let (width, height) = self.get_resolution();
+                let (width, height) = get_resolution(&mut state.controlq);
                 info!("display configuration changed to {width}x{height}");
             }
         }
@@ -197,7 +111,7 @@ impl DisplayServer for VirtioGpu {
 
     fn framebuffer(&self, sender: ProcessId) -> Capability<SharedMemory> {
         let state = self.state.lock();
-        grant_kernel_capability(sender, state.framebuffer.as_ref().unwrap().clone())
+        grant_kernel_capability(sender, Arc::clone(&state.framebuffer))
     }
 
     fn draw(&self, _: ProcessId) {
@@ -281,6 +195,92 @@ impl DisplayServer for VirtioGpu {
         state.cursorq.descriptor_readonly(0, &req, None);
         state.cursorq.send_and_recv(0);
     }
+}
+
+fn get_resolution(controlq: &mut Queue<0>) -> (u32, u32) {
+    let req = CtrlType::CmdGetDisplayInfo.header();
+    controlq.descriptor_readonly(0, &req, Some(1));
+    let resp: ResponseDisplayInfo = command(controlq, 1).unwrap();
+    let pmode = &resp.pmodes[0];
+    assert_eq!(pmode.enabled, 1);
+    let r = pmode.r;
+    assert_eq!(r.x, 0);
+    assert_eq!(r.y, 0);
+    (r.width, r.height)
+}
+
+fn initialize_framebuffer_memory(
+    width: u32,
+    height: u32,
+    framebuffer: &UntypedBox<PageGranular>,
+    controlq: &mut Queue<0>,
+) {
+    let req = ResourceCreate2D {
+        hdr: CtrlType::CmdResourceCreate2D.header(),
+        resource_id: 1,
+        format: Format::B8G8R8A8Unorm as u32,
+        width,
+        height,
+    };
+    controlq.descriptor_readonly(0, &req, Some(1));
+    command::<ResponseNodata, _>(controlq, 1).unwrap();
+
+    let req = ResourceAttachBacking {
+        hdr: CtrlType::CmdResourceAttachBacking.header(),
+        resouce_id: 1,
+        nr_entries: 1,
+    };
+    // TODO: Include this in reference count?
+    let mem_entry = MemEntry {
+        addr: virt_to_phys(framebuffer.as_untyped_ptr()) as u64,
+        length: framebuffer.byte_size() as u32,
+        padding: 0,
+    };
+    controlq.descriptor_readonly(0, &req, Some(1));
+    controlq.descriptor_readonly(1, &mem_entry, Some(2));
+    command::<ResponseNodata, _>(controlq, 2).unwrap();
+
+    let req = SetScanout {
+        hdr: CtrlType::CmdSetScanout.header(),
+        r: Rect {
+            x: 0,
+            y: 0,
+            width,
+            height,
+        },
+        scanout_id: 0,
+        resource_id: 1,
+    };
+    controlq.descriptor_readonly(0, &req, Some(1));
+    command::<ResponseNodata, _>(controlq, 1).unwrap();
+}
+
+fn initialize_cursor_memory(image: &UntypedBox<PageGranular>, controlq: &mut Queue<0>) {
+    let req = ResourceCreate2D {
+        hdr: CtrlType::CmdResourceCreate2D.header(),
+        resource_id: 2,
+        // TODO: This seems to be ignored in favor of R8G8B8A8Unorm.
+        format: Format::B8G8R8A8Unorm as u32,
+        width: 64,
+        height: 64,
+    };
+    controlq.descriptor_readonly(0, &req, Some(1));
+    command::<ResponseNodata, _>(controlq, 1).unwrap();
+
+    let req = ResourceAttachBacking {
+        hdr: CtrlType::CmdResourceAttachBacking.header(),
+        resouce_id: 2,
+        nr_entries: 1,
+    };
+    // TODO: Include this in reference count?
+    let mem_entry = MemEntry {
+        addr: virt_to_phys(image.as_untyped_ptr()) as u64,
+        length: 64 * 64 * 4,
+        padding: 0,
+    };
+    controlq.descriptor_readonly(0, &req, Some(1));
+    controlq.descriptor_readonly(1, &mem_entry, Some(2));
+    command::<ResponseNodata, _>(controlq, 2).unwrap();
 }
 
 fn command<T: Response, const INDEX: u16>(
