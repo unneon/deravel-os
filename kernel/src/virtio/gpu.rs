@@ -2,10 +2,9 @@ mod types;
 
 use crate::capability::grant_kernel_capability;
 use crate::drvli::DisplayServer;
-use crate::heap::granularity::page_granular_vec;
+use crate::heap::granularity::{PageGranular, page_granular_vec};
 use crate::interrupt::InterruptHandler;
 use crate::page::virt_to_phys;
-use crate::sharable_memory::ShareableMemory;
 use crate::sync::Mutex;
 use crate::util::untyped_box::UntypedBox;
 use crate::util::volatile::{Volatile, volatile_struct};
@@ -39,8 +38,8 @@ pub struct VirtioGpu {
     cursorq: Queue<1>,
     width: u32,
     height: u32,
-    framebuffer: Option<ShareableMemory>,
-    cursor_image: ShareableMemory,
+    framebuffer: Option<Arc<UntypedBox<PageGranular>>>,
+    cursor_image: Arc<UntypedBox<PageGranular>>,
     cursor_updated: bool,
 }
 
@@ -62,22 +61,18 @@ impl VirtioGpu {
             width: 0,
             height: 0,
             framebuffer: None,
-            cursor_image: ShareableMemory {
-                backing: Arc::new(UntypedBox::new(
-                    page_granular_vec![0u8; 64 * 64 * 4].into_boxed_slice(),
-                )),
-            },
+            cursor_image: Arc::new(UntypedBox::new(
+                page_granular_vec![0u8; 64 * 64 * 4].into_boxed_slice(),
+            )),
             cursor_updated: true,
         };
 
         let (width, height) = gpu.get_resolution();
         gpu.width = width;
         gpu.height = height;
-        gpu.framebuffer = Some(ShareableMemory {
-            backing: Arc::new(UntypedBox::new(
-                page_granular_vec![0u8; width as usize * height as usize * 4].into_boxed_slice(),
-            )),
-        });
+        gpu.framebuffer = Some(Arc::new(UntypedBox::new(
+            page_granular_vec![0u8; width as usize * height as usize * 4].into_boxed_slice(),
+        )));
         info!("detected a {width}x{height} display");
 
         let req = ResourceCreate2D {
@@ -97,8 +92,8 @@ impl VirtioGpu {
         };
         // TODO: Include this in reference count?
         let mem_entry = MemEntry {
-            addr: virt_to_phys(gpu.framebuffer.as_ref().unwrap().backing.as_untyped_ptr()) as u64,
-            length: gpu.framebuffer.as_ref().unwrap().backing.byte_size() as u32,
+            addr: virt_to_phys(gpu.framebuffer.as_ref().unwrap().as_untyped_ptr()) as u64,
+            length: gpu.framebuffer.as_ref().unwrap().byte_size() as u32,
             padding: 0,
         };
         gpu.controlq.descriptor_readonly(0, &req, Some(1));
@@ -155,7 +150,7 @@ impl VirtioGpu {
         };
         // TODO: Include this in reference count?
         let mem_entry = MemEntry {
-            addr: virt_to_phys(self.cursor_image.backing.as_untyped_ptr()) as u64,
+            addr: virt_to_phys(self.cursor_image.as_untyped_ptr()) as u64,
             length: 64 * 64 * 4,
             padding: 0,
         };
@@ -191,10 +186,7 @@ impl DisplayServer for Mutex<VirtioGpu> {
 
     fn framebuffer(&self, sender: ProcessId) -> Capability<SharedMemory> {
         let self_ = self.lock();
-        grant_kernel_capability(
-            sender,
-            Arc::new(self_.framebuffer.as_ref().unwrap().clone()),
-        )
+        grant_kernel_capability(sender, self_.framebuffer.as_ref().unwrap().clone())
     }
 
     fn draw(&self, _: ProcessId) {
@@ -228,7 +220,7 @@ impl DisplayServer for Mutex<VirtioGpu> {
 
     fn cursor_image_buffer(&self, sender: ProcessId) -> Capability<SharedMemory> {
         let self_ = self.lock();
-        grant_kernel_capability(sender, Arc::new(self_.cursor_image.clone()))
+        grant_kernel_capability(sender, self_.cursor_image.clone())
     }
 
     fn cursor_image_modified(&self, _: ProcessId) {

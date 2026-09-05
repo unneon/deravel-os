@@ -5,7 +5,6 @@ use crate::heap::granularity::{PageGranular, page_granular_vec};
 use crate::log::log_userspace;
 use crate::page::{PageFlags, virt_to_phys};
 use crate::process::{Message, ProcessState, get_process, kill};
-use crate::sharable_memory::ShareableMemory;
 use crate::stack::UserCtx;
 use crate::syscall::SyscallAction::Yield;
 use crate::user::{UserPtr, UserSyscallError, with_sum};
@@ -224,7 +223,7 @@ impl SyscallHandler for () {
             .process()
             .alloc(pages.clone(), PageFlags::read_write().user())?;
         riscv::asm::sfence_vma_all();
-        let cap = grant_kernel_capability(user.pid(), Arc::new(ShareableMemory { backing: pages }));
+        let cap = grant_kernel_capability(user.pid(), pages);
         Ok((virt, cap))
     }
 
