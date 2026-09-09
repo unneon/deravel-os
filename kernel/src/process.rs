@@ -6,6 +6,7 @@ use crate::capability::{capability_certificate, capability_pages_physical_addres
 use crate::device_tree::timebase_frequency;
 use crate::elf::{Elf, load_elf};
 use crate::heap::MutAllocator;
+use crate::heap::bitmap::BitmapAllocator;
 use crate::heap::buddy::BuddyAllocator;
 use crate::heap::granularity::{PageGranular, page_granular_vec};
 use crate::page::{PageFlags, PageTable, map_hh_direct_mapping, virt_to_phys};
@@ -22,7 +23,7 @@ use alloc::vec::Vec;
 use core::alloc::{AllocError, Layout};
 use core::num::NonZeroUsize;
 use core::ops::{DerefMut, Range};
-use core::sync::atomic::{AtomicU16, Ordering};
+use core::sync::atomic::Ordering;
 use deravel_types::memory::{USER_CAPABILITIES, USER_HEAP, USER_INPUTS, USER_STACK};
 use deravel_types::*;
 use log::*;
@@ -104,8 +105,14 @@ pub struct Message {
 
 pub const PROCESS_COUNT: usize = 8;
 
+const SLOT_LAYOUT: Layout = Layout::from_size_align(1, 1).ok().unwrap();
+
 static PROCESSES: [Mutex<Option<Process>>; PROCESS_COUNT] = [const { Mutex::new(None) }; _];
-static PROCESSES_RESERVED: AtomicU16 = AtomicU16::new(0);
+static ID_ALLOCATOR: Mutex<BitmapAllocator<[usize; PROCESS_COUNT.div_ceil(usize::BITS as usize)]>> = {
+    let mut alloc = BitmapAllocator::new(0..PROCESS_COUNT, [0]);
+    alloc.reserve(0);
+    Mutex::new(alloc)
+};
 
 impl Process {
     pub fn alloc(
@@ -186,7 +193,7 @@ pub fn get_process(pid: ProcessId) -> &'static Mutex<Option<Process>> {
 pub fn reserve_process<T: ProcessTag, U: AsRef<[u8]>>(
     elf: &'static Elf<T, U>,
 ) -> ProcessReservation<T, U> {
-    let pid = ProcessId::new(PROCESSES_RESERVED.fetch_add(1, Ordering::Relaxed) + 1);
+    let pid = ProcessId::new(ID_ALLOCATOR.lock().alloc(SLOT_LAYOUT).unwrap() as u16);
     ProcessReservation {
         id: pid,
         elf,
@@ -273,6 +280,12 @@ pub fn schedule_userspace(user: &mut UserStoredCtx) -> ! {
 }
 
 fn find_runnable_process(user: &UserStoredCtx) -> Option<MutexGuard<'static, Process>> {
+    for proc in &PROCESSES {
+        if let Some(proc) = proc.lock_if_some() {
+            try_cleanup(proc);
+        }
+    }
+
     let scan_start = match user.try_pid() {
         Some(pid) => pid.as_u16() + 1,
         None => 0,
@@ -290,11 +303,7 @@ fn find_runnable_process(user: &UserStoredCtx) -> Option<MutexGuard<'static, Pro
             ) {
                 return Some(proc);
             }
-            if proc.state == ProcessState::Finished {
-                drop(proc);
-                // TODO: Race condition here.
-                *PROCESSES[scan_index as usize].lock() = None;
-            }
+            try_cleanup(proc);
         }
     }
 
@@ -320,6 +329,16 @@ fn inspect_can_progress(proc: &mut Process) {
                 proc.name, proc.id, from
             );
         }
+    }
+}
+
+fn try_cleanup(proc: MutexGuard<Process>) {
+    let pid = proc.id;
+    if proc.state == ProcessState::Finished {
+        let mut pid_alloc = ID_ALLOCATOR.lock();
+        drop(proc);
+        *PROCESSES[pid.as_u16() as usize].lock() = None;
+        pid_alloc.dealloc(pid.as_u16() as usize, SLOT_LAYOUT);
     }
 }
 

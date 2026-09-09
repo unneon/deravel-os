@@ -7,9 +7,14 @@ pub struct BitmapAllocator<T> {
     bitmap: T,
 }
 
-impl<T> BitmapAllocator<T> {
+impl<T: const AsMut<[usize]>> BitmapAllocator<T> {
     pub const fn new(range: Range<usize>, bitmap: T) -> Self {
         BitmapAllocator { range, bitmap }
+    }
+
+    pub const fn reserve(&mut self, ptr: usize) {
+        self.bitmap.as_mut()[(ptr - self.range.start) / usize::BITS as usize] |=
+            1 << (ptr % usize::BITS as usize);
     }
 }
 
